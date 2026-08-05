@@ -1,0 +1,12 @@
+# Nixpacks hints for Railway when railway.toml is not used.
+[phases.setup]
+nixPkgs = ["nodejs_20", "openssl"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npm run build -w @apex/api"]
+
+[start]
+cmd = "npm run start:node -w @apex/api"

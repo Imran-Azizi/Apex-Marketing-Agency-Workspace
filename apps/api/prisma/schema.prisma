@@ -1,0 +1,1285 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────
+
+enum RoleCode {
+  MANAGER
+  ADMIN
+  SALES
+  EDITOR
+  NARRATOR
+  FINANCE
+  CUSTOMER
+  AI_SERVICE
+}
+
+enum SessionAudience {
+  INTERNAL
+  PORTAL
+}
+
+enum CrmPipelineStage {
+  NEW_LEAD
+  CONTACTED
+  INTERESTED
+  PRICE_SENT
+  ORDER_CONFIRMED
+  COMPLETED
+  CANCELED
+}
+
+enum PortalStatus {
+  NOT_ELIGIBLE
+  ELIGIBLE
+  INVITED
+  REGISTERED
+  SUSPENDED
+}
+
+enum ProjectStatus {
+  NEW_MANAGER_REVIEW
+  CONTENT_GENERATION
+  INTERNAL_CONTENT_REVIEW
+  WAITING_CLIENT_CONTENT_APPROVAL
+  CONTENT_REVISION
+  NARRATION_RECORDING
+  PRODUCTION_EDITING
+  MANAGER_FINAL_REVIEW
+  FINAL_REVISION
+  WAITING_CLIENT_FINAL_APPROVAL
+  WAITING_PAYMENT
+  READY_TO_DOWNLOAD
+  COMPLETED
+  ON_HOLD
+  CANCELED
+}
+
+enum CustomerFacingStatus {
+  INFO_RECEIVED
+  PREPARING_CONTENT
+  WAITING_YOUR_APPROVAL
+  IN_PRODUCTION
+  FINAL_REVIEW
+  WAITING_PAYMENT
+  READY_DELIVERY
+  COMPLETED
+}
+
+enum AssignmentRole {
+  MANAGER
+  EDITOR
+  NARRATOR
+  PROPOSED_NARRATOR
+}
+
+enum ContentKind {
+  BUNDLE
+  SCENARIO
+  NARRATION
+  STORYBOARD
+  FINAL_VIDEO
+}
+
+enum ApprovalType {
+  MANAGER_CONTENT
+  CLIENT_CONTENT
+  MANAGER_FINAL
+  CLIENT_FINAL
+  VOICE_ACCEPT
+  QC
+}
+
+enum ApprovalDecision {
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+  RETURNED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  HAWALA
+  CARD
+  OTHER
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum PayableStatus {
+  ESTIMATED
+  CONFIRMED
+  PAID
+}
+
+enum ExpenseCategory {
+  DIRECT_PROJECT
+  COMPANY_GENERAL
+}
+
+enum AiAgentType {
+  SCENARIO
+  NARRATION
+  STORYBOARD
+}
+
+enum AiRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum AiAgentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ContentVersionStatus {
+  DRAFT
+  EDITED
+  UNDER_REVIEW
+  PENDING_CUSTOMER_APPROVAL
+  REVISION_REQUESTED
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum NarrationTaskStatus {
+  PENDING_NARRATION
+  RECORDING_IN_PROGRESS
+  NARRATION_SUBMITTED
+  APPROVED
+  REVISION_REQUESTED
+}
+
+enum EditingTaskStatus {
+  ASSIGNED
+  IN_PROGRESS
+  REVIEW_REQUIRED
+  REVISION_REQUESTED
+  COMPLETED
+}
+
+enum EditingAssetType {
+  IMAGE
+  VIDEO
+  AUDIO
+  EXTERNAL
+  AI_GENERATED
+  OTHER
+}
+
+enum AiWorkflowStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  PARTIAL
+}
+
+enum FileKind {
+  LOGO
+  PRODUCT_IMAGE
+  VIDEO
+  BRANDBOOK
+  CATALOG
+  REFERENCE
+  PRONUNCIATION
+  WORKING
+  WATERMARKED_FINAL
+  CLEAN_FINAL
+  THUMBNAIL
+  AUDIO
+  PROMPT_LOG
+  OTHER
+  RECEIPT
+  ATTACHMENT
+}
+
+enum PaymentSettlementStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  OVERRIDE
+}
+
+enum DeliveryWorkflowStatus {
+  NOT_READY
+  AWAITING_PAYMENT
+  AWAITING_MANAGER_APPROVAL
+  READY_FOR_DOWNLOAD
+  DELIVERED
+  COMPLETED
+}
+
+enum CleanFileAccessStatus {
+  HIDDEN
+  LOCKED_PAYMENT
+  LOCKED_APPROVAL
+  AVAILABLE
+}
+
+enum TeamKind {
+  EDITOR
+  NARRATOR
+  MANAGER
+  SALES
+  FINANCE
+}
+
+enum AvailabilityStatus {
+  ACTIVE
+  UNAVAILABLE
+  INACTIVE
+}
+
+// ─── Auth / RBAC ─────────────────────────────────────────
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  passwordHash  String
+  fullName      String
+  phone         String?
+  profileImage  String?
+  isActive      Boolean      @default(true)
+  lastLoginAt   DateTime?
+  roleId        String
+  role          Role         @relation(fields: [roleId], references: [id])
+  teamProfile   TeamProfile?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+
+  sessions           Session[]
+  auditLogs          AuditLog[]
+  notifications      Notification[]
+  assignedCustomers  CrmCustomer[]       @relation("SalesOwner")
+  managedProjects    Project[]           @relation("ProjectManager")
+  verifiedPayments   Payment[]           @relation("PaymentVerifier")
+  recordedPayments   Payment[]           @relation("PaymentRecorder")
+  rejectedPayments   Payment[]           @relation("PaymentRejector")
+  aiRuns             AiRun[]
+  projectAssignments ProjectAssignment[]
+  narrationTasksAssigned   NarrationTask[] @relation("NarrationTaskNarrator")
+  narrationTasksCreated    NarrationTask[] @relation("NarrationTaskAssigner")
+  narrationTakesUploaded   NarrationTake[] @relation("NarrationTakeUploader")
+  editingTasksAssigned     EditingTask[]   @relation("EditingTaskEditor")
+  editingTasksCreated      EditingTask[]   @relation("EditingTaskAssigner")
+  editingResources         EditingResource[]
+
+  @@index([deletedAt])
+  @@index([roleId])
+  @@index([isActive, deletedAt])
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  code        RoleCode         @unique
+  name        String
+  description String?
+  permissions RolePermission[]
+  users       User[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  description String?
+  roles       RolePermission[]
+  createdAt   DateTime         @default(now())
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Session {
+  id               String          @id @default(cuid())
+  audience         SessionAudience
+  userId           String?
+  user             User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  portalAccountId  String?
+  portalAccount    PortalAccount?  @relation(fields: [portalAccountId], references: [id], onDelete: Cascade)
+  refreshTokenHash String
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([refreshTokenHash])
+  @@index([userId])
+  @@index([portalAccountId])
+  @@map("sessions")
+}
+
+// ─── CRM ─────────────────────────────────────────────────
+
+model CrmCustomer {
+  id                  String           @id @default(cuid())
+  personName          String
+  companyName         String?
+  jobTitle            String?
+  phone               String?
+  whatsappRaw         String
+  normalizedWhatsapp  String           @unique
+  city                String?
+  address             String?
+  email               String?
+  source              String?
+  salesOwnerId        String?
+  salesOwner          User?            @relation("SalesOwner", fields: [salesOwnerId], references: [id])
+  pipelineStage       CrmPipelineStage @default(NEW_LEAD)
+  portalStatus        PortalStatus     @default(NOT_ELIGIBLE)
+  lastContactAt       DateTime?
+  nextFollowUpAt      DateTime?
+  notes               String?
+  lostReason          String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  deletedAt           DateTime?
+
+  opportunities Opportunity[]
+  portalAccount PortalAccount?
+  clientAssets  ClientAsset[]
+  projects      Project[]
+  invoices      Invoice[]
+  payments      Payment[]
+
+  @@index([pipelineStage])
+  @@index([portalStatus])
+  @@index([deletedAt])
+  @@index([salesOwnerId])
+  @@index([nextFollowUpAt])
+  @@map("crm_customers")
+}
+
+model Opportunity {
+  id            String           @id @default(cuid())
+  crmCustomerId String
+  crmCustomer   CrmCustomer      @relation(fields: [crmCustomerId], references: [id])
+  title         String
+  pipelineStage CrmPipelineStage @default(NEW_LEAD)
+  proposedPrice Decimal?         @db.Decimal(14, 2)
+  agreedPrice   Decimal?         @db.Decimal(14, 2)
+  advancePayment Decimal?        @db.Decimal(14, 2)
+  agreedTerms   String?
+  /** Once true, agreedPrice + agreedTerms cannot change without admin unlock. */
+  contractLocked   Boolean   @default(false)
+  contractLockedAt DateTime?
+  contractLockedById String?
+  currency      String           @default("AFN")
+  serviceId     String?
+  service       Service?         @relation(fields: [serviceId], references: [id])
+  lostReason    String?
+  projectId     String?          @unique
+  project       Project?         @relation(fields: [projectId], references: [id])
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  deletedAt     DateTime?
+
+  invoices      Invoice[]
+  portalInvites PortalInvite[]
+
+  @@index([pipelineStage])
+  @@index([crmCustomerId])
+  @@index([deletedAt])
+  @@map("opportunities")
+}
+
+// ─── Portal ──────────────────────────────────────────────
+
+model PortalAccount {
+  id                 String      @id @default(cuid())
+  crmCustomerId      String      @unique
+  crmCustomer        CrmCustomer @relation(fields: [crmCustomerId], references: [id])
+  normalizedWhatsapp String      @unique
+  passwordHash       String?
+  isActive           Boolean     @default(true)
+  registeredAt       DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  deletedAt          DateTime?
+
+  sessions Session[]
+  invites  PortalInvite[]
+  projects Project[]
+  otpCodes OtpCode[]
+
+  @@map("portal_accounts")
+}
+
+model PortalInvite {
+  id              String         @id @default(cuid())
+  crmCustomerId   String
+  opportunityId   String
+  opportunity     Opportunity    @relation(fields: [opportunityId], references: [id])
+  portalAccountId String?
+  portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
+  whatsappNumber  String
+  token           String         @unique
+  maxAttempts     Int            @default(5)
+  attempts        Int            @default(0)
+  expiresAt       DateTime
+  usedAt          DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  otpCodes OtpCode[]
+
+  @@index([token])
+  @@index([crmCustomerId])
+  @@map("portal_invites")
+}
+
+model OtpCode {
+  id              String         @id @default(cuid())
+  codeHash        String
+  portalInviteId  String?
+  portalInvite    PortalInvite?  @relation(fields: [portalInviteId], references: [id])
+  portalAccountId String?
+  portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
+  purpose         String         @default("REGISTER")
+  attempts        Int            @default(0)
+  maxAttempts     Int            @default(5)
+  expiresAt       DateTime
+  usedAt          DateTime?
+  createdAt       DateTime       @default(now())
+
+  @@index([portalInviteId])
+  @@map("otp_codes")
+}
+
+model ClientAsset {
+  id            String      @id @default(cuid())
+  crmCustomerId String
+  crmCustomer   CrmCustomer @relation(fields: [crmCustomerId], references: [id])
+  kind          FileKind
+  name          String
+  storageKey    String
+  mimeType      String?
+  sizeBytes     Int?
+  meta          Json?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+
+  references AssetReference[]
+
+  @@index([crmCustomerId])
+  @@map("client_assets")
+}
+
+// ─── Catalog ─────────────────────────────────────────────
+
+model Service {
+  id              String    @id @default(cuid())
+  name            String
+  slug            String    @unique
+  description     String?
+  startingPrice   Decimal?  @db.Decimal(14, 2)
+  durationOptions Json?
+  outputs         Json?
+  revisionCount   Int       @default(2)
+  isPublished     Boolean   @default(true)
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  styles              Style[]
+  opportunities       Opportunity[]
+  projects            Project[]
+
+  @@map("services")
+}
+
+model Style {
+  id           String    @id @default(cuid())
+  serviceId    String?
+  service      Service?  @relation(fields: [serviceId], references: [id])
+  name         String
+  slug         String    @unique
+  description  String?
+  thumbnailKey String?
+  previewKey   String?
+  isPublished  Boolean   @default(true)
+  sortOrder    Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  @@map("styles")
+}
+
+model Format {
+  id        String   @id @default(cuid())
+  name      String
+  ratio     String   @unique
+  createdAt DateTime @default(now())
+
+  projects       Project[]
+
+  @@map("formats")
+}
+
+// ─── Team ────────────────────────────────────────────────
+
+model TeamProfile {
+  id          String             @id @default(cuid())
+  userId      String             @unique
+  user        User               @relation(fields: [userId], references: [id])
+  kind        TeamKind
+  displayName String
+  realName    String?
+  languages   Json?
+  gender      String?
+  tone        String?
+  specialties Json?
+  status      AvailabilityStatus @default(ACTIVE)
+  paymentInfo Json?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  deletedAt   DateTime?
+
+  rates            Rate[]
+  audioSamples     AudioSample[]
+  assignments      ProjectAssignment[]
+  employeePayables EmployeePayable[]
+  narrationTasks   NarrationTask[]
+  editingTasks     EditingTask[]
+
+  @@map("team_profiles")
+}
+
+model Rate {
+  id            String      @id @default(cuid())
+  teamProfileId String
+  teamProfile   TeamProfile @relation(fields: [teamProfileId], references: [id])
+  label         String
+  durationSec   Int?
+  amount        Decimal     @db.Decimal(14, 2)
+  currency      String      @default("AFN")
+  serviceId     String?
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([teamProfileId])
+  @@map("rates")
+}
+
+model AudioSample {
+  id            String      @id @default(cuid())
+  teamProfileId String
+  teamProfile   TeamProfile @relation(fields: [teamProfileId], references: [id])
+  title         String
+  language      String?
+  gender        String?
+  tone          String?
+  storageKey    String
+  isPublished   Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  deletedAt     DateTime?
+
+  @@index([teamProfileId])
+  @@map("audio_samples")
+}
+
+// ─── Projects ────────────────────────────────────────────
+
+model Project {
+  id                   String               @id @default(cuid())
+  code                 String               @unique
+  title                String
+  status               ProjectStatus        @default(NEW_MANAGER_REVIEW)
+  customerFacingStatus CustomerFacingStatus @default(INFO_RECEIVED)
+  crmCustomerId        String
+  crmCustomer          CrmCustomer          @relation(fields: [crmCustomerId], references: [id])
+  portalAccountId      String?
+  portalAccount        PortalAccount?       @relation(fields: [portalAccountId], references: [id])
+  managerId            String
+  manager              User                 @relation("ProjectManager", fields: [managerId], references: [id])
+  serviceId            String?
+  service              Service?             @relation(fields: [serviceId], references: [id])
+  formatId             String?
+  format               Format?              @relation(fields: [formatId], references: [id])
+  durationSec          Int?
+  language             String?
+  tone                 String?
+  platforms            Json?
+  brief                Json?
+  deadlineAt           DateTime?
+  contentRevisionUsed  Int                  @default(0)
+  contentRevisionMax   Int                  @default(2)
+  videoRevisionUsed    Int                  @default(0)
+  videoRevisionMax     Int                  @default(2)
+  extraContentRevision Boolean              @default(false)
+  extraVideoRevision   Boolean              @default(false)
+  holdReason           String?
+  /// Denormalized settlement: UNPAID | PARTIAL | PAID | OVERRIDE
+  paymentStatus        PaymentSettlementStatus @default(UNPAID)
+  /// Delivery workflow gate for clean-file access
+  deliveryStatus       DeliveryWorkflowStatus  @default(NOT_READY)
+  /// Customer-visible clean file access state
+  cleanFileAccess      CleanFileAccessStatus   @default(HIDDEN)
+  completedAt          DateTime?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  deletedAt            DateTime?
+
+  opportunity        Opportunity?
+  context            ProjectContext?
+  finance            ProjectFinance?
+  assignments        ProjectAssignment[]
+  files              ProjectFile[]
+  assetRefs          AssetReference[]
+  contentVersions    ContentVersion[]
+  approvals          Approval[]
+  feedback           ClientFeedback[]
+  aiRuns             AiRun[]
+  aiWorkflows        AiWorkflowExecution[]
+  aiActivityLogs     AiActivityLog[]
+  invoices           Invoice[]
+  expenses           Expense[]
+  payables           EmployeePayable[]
+  downloadPermission DownloadPermission?
+  downloadHistory    DownloadHistory[]
+  timeline           ProjectTimelineEvent[]
+  narrationTasks     NarrationTask[]
+  editingTasks       EditingTask[]
+  editingResources   EditingResource[]
+
+  @@index([status])
+  @@index([crmCustomerId])
+  @@index([managerId])
+  @@index([deliveryStatus])
+  @@index([paymentStatus])
+  @@index([deletedAt])
+  @@index([deletedAt, status])
+  @@index([customerFacingStatus])
+  @@index([portalAccountId])
+  @@map("projects")
+}
+
+model ProjectTimelineEvent {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String?
+  meta      Json?
+  actorId   String?
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@map("project_timeline_events")
+}
+
+model ProjectAssignment {
+  id            String         @id @default(cuid())
+  projectId     String
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  role          AssignmentRole
+  userId        String?
+  user          User?          @relation(fields: [userId], references: [id])
+  teamProfileId String?
+  teamProfile   TeamProfile?   @relation(fields: [teamProfileId], references: [id])
+  assignedById  String?
+  deadlineAt    DateTime?
+  notes         String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([projectId])
+  @@index([teamProfileId])
+  @@index([userId])
+  @@map("project_assignments")
+}
+
+model ProjectFile {
+  id         String    @id @default(cuid())
+  projectId  String
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind       FileKind
+  name       String
+  storageKey String
+  mimeType   String?
+  sizeBytes  Int?
+  version    Int       @default(1)
+  meta       Json?
+  uploadedBy String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  deletedAt  DateTime?
+
+  narrationTasksAsCurrent NarrationTask[] @relation("NarrationTaskCurrentAudio")
+  narrationTakes          NarrationTake[]
+  editingWatermarkedFor   EditingTask[]    @relation("EditingWatermarkedFile")
+  editingCleanFor         EditingTask[]    @relation("EditingCleanFile")
+
+  @@index([projectId, kind])
+  @@map("project_files")
+}
+
+/// Stage 11 — narration recording workflow after content approval
+model NarrationTask {
+  id                      String             @id @default(cuid())
+  projectId               String
+  project                 Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contentVersionId        String?
+  contentVersion          ContentVersion?    @relation(fields: [contentVersionId], references: [id])
+  narratorUserId          String?
+  narratorUser            User?              @relation("NarrationTaskNarrator", fields: [narratorUserId], references: [id])
+  narratorTeamProfileId   String?
+  narratorTeamProfile     TeamProfile?       @relation(fields: [narratorTeamProfileId], references: [id])
+  assignedById            String?
+  assignedBy              User?              @relation("NarrationTaskAssigner", fields: [assignedById], references: [id])
+  status                  NarrationTaskStatus @default(PENDING_NARRATION)
+  deadline                DateTime?
+  assignedAmount          Decimal?           @db.Decimal(14, 2)
+  narrationScriptSnapshot Json?
+  audioFileId             String?
+  audioFile               ProjectFile?       @relation("NarrationTaskCurrentAudio", fields: [audioFileId], references: [id])
+  revisionNotes           String?
+  submittedAt             DateTime?
+  approvedAt              DateTime?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  takes NarrationTake[]
+
+  @@index([projectId, status])
+  @@index([narratorUserId, status])
+  @@index([deadline])
+  @@map("narration_tasks")
+}
+
+model NarrationTake {
+  id            String       @id @default(cuid())
+  taskId        String
+  task          NarrationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  projectFileId String
+  projectFile   ProjectFile  @relation(fields: [projectFileId], references: [id])
+  version       Int
+  notes         String?
+  uploadedById  String?
+  uploadedBy    User?        @relation("NarrationTakeUploader", fields: [uploadedById], references: [id])
+  createdAt     DateTime     @default(now())
+
+  @@index([taskId, version])
+  @@map("narration_takes")
+}
+
+/// Video production / editing workflow after narration approval
+model EditingTask {
+  id                    String            @id @default(cuid())
+  projectId             String
+  project               Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  editorUserId          String?
+  editorUser            User?             @relation("EditingTaskEditor", fields: [editorUserId], references: [id])
+  editorTeamProfileId   String?
+  editorTeamProfile     TeamProfile?      @relation(fields: [editorTeamProfileId], references: [id])
+  assignedById          String?
+  assignedBy            User?             @relation("EditingTaskAssigner", fields: [assignedById], references: [id])
+  status                EditingTaskStatus @default(ASSIGNED)
+  deadline              DateTime?
+  assignedAmount        Decimal?          @db.Decimal(14, 2)
+  instructions          String?
+  revisionNotes         String?
+  version               Int               @default(1)
+  watermarkedFileId     String?
+  watermarkedFile       ProjectFile?      @relation("EditingWatermarkedFile", fields: [watermarkedFileId], references: [id])
+  cleanFileId           String?
+  cleanFile             ProjectFile?      @relation("EditingCleanFile", fields: [cleanFileId], references: [id])
+  submittedAt           DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  resources EditingResource[]
+
+  @@index([projectId, status])
+  @@index([editorUserId, status])
+  @@index([deadline])
+  @@map("editing_tasks")
+}
+
+model EditingResource {
+  id            String           @id @default(cuid())
+  projectId     String
+  project       Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  editingTaskId String
+  editingTask   EditingTask      @relation(fields: [editingTaskId], references: [id], onDelete: Cascade)
+  editorId      String?
+  editor        User?            @relation(fields: [editorId], references: [id])
+  assetType     EditingAssetType @default(OTHER)
+  assetName     String
+  assetUrl      String?
+  aiTool        String?
+  promptUsed    String?          @db.Text
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([projectId])
+  @@index([editingTaskId])
+  @@map("editing_resources")
+}
+
+model AssetReference {
+  id            String      @id @default(cuid())
+  projectId     String
+  project       Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clientAssetId String
+  clientAsset   ClientAsset @relation(fields: [clientAssetId], references: [id])
+  createdAt     DateTime    @default(now())
+
+  @@unique([projectId, clientAssetId])
+  @@map("asset_references")
+}
+
+model ProjectContext {
+  id          String   @id @default(cuid())
+  projectId   String   @unique
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contextJson Json
+  contextMd   String   @db.Text
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@map("project_context")
+}
+
+model ContentVersion {
+  id                String               @id @default(cuid())
+  projectId         String
+  project           Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind              ContentKind          @default(BUNDLE)
+  versionNumber     Int
+  scenario          Json?
+  narration         Json?
+  storyboard        Json?
+  /// Provider metadata (model, tokens, stepResults, fallback notices)
+  extras            Json?
+  status            ContentVersionStatus @default(DRAFT)
+  isLocked          Boolean              @default(false)
+  publishedToClient Boolean              @default(false)
+  publishedAt       DateTime?
+  approvedById      String?
+  rejectedById      String?
+  rejectionReason   String?
+  changeNotes       String?
+  createdById       String?
+  aiRunId           String?
+  workflowId        String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  approvals Approval[]
+  feedback  ClientFeedback[]
+  narrationTasks NarrationTask[]
+
+  @@unique([projectId, kind, versionNumber])
+  @@index([projectId])
+  @@index([projectId, status])
+  @@index([publishedToClient])
+  @@map("content_versions")
+}
+
+model Approval {
+  id               String           @id @default(cuid())
+  projectId        String
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contentVersionId String?
+  contentVersion   ContentVersion?  @relation(fields: [contentVersionId], references: [id])
+  type             ApprovalType
+  decision         ApprovalDecision
+  comment          String?
+  actorType        String
+  actorId          String?
+  createdAt        DateTime         @default(now())
+
+  @@index([projectId])
+  @@map("approvals")
+}
+
+model ClientFeedback {
+  id               String          @id @default(cuid())
+  projectId        String
+  project          Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contentVersionId String?
+  contentVersion   ContentVersion? @relation(fields: [contentVersionId], references: [id])
+  scope            String
+  body             String
+  createdAt        DateTime        @default(now())
+
+  @@index([projectId])
+  @@map("client_feedback")
+}
+
+model AiAgent {
+  id              String        @id @default(cuid())
+  code            AiAgentType   @unique
+  name            String
+  nameFa          String?
+  description     String?
+  descriptionFa   String?
+  status          AiAgentStatus @default(ACTIVE)
+  promptTemplate  String?       @db.Text
+  promptVersion   String        @default("v1")
+  config          Json?
+  sortOrder       Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@map("ai_agents")
+}
+
+model AiWorkflowExecution {
+  id               String           @id @default(cuid())
+  projectId        String
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  status           AiWorkflowStatus @default(PENDING)
+  /// Ordered step states: [{ key, label, agentType?, status, startedAt?, finishedAt?, error? }]
+  steps            Json
+  contentVersionId String?
+  error            String?
+  triggeredById    String?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  runs AiRun[]
+
+  @@index([projectId, createdAt])
+  @@index([status])
+  @@map("ai_workflow_executions")
+}
+
+model AiRun {
+  id            String                 @id @default(cuid())
+  projectId     String?
+  project       Project?               @relation(fields: [projectId], references: [id])
+  workflowId    String?
+  workflow      AiWorkflowExecution?   @relation(fields: [workflowId], references: [id])
+  agentType     AiAgentType
+  promptVersion String
+  model         String
+  input         Json
+  output        Json?
+  /// { promptTokens, completionTokens, totalTokens }
+  tokenUsage    Json?
+  durationMs    Int?
+  status        AiRunStatus            @default(PENDING)
+  error         String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  userId        String?
+  user          User?                  @relation(fields: [userId], references: [id])
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([projectId, createdAt])
+  @@index([workflowId])
+  @@map("ai_runs")
+}
+
+model AiActivityLog {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String?
+  action    String
+  entityType String?
+  entityId  String?
+  message   String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@map("ai_activity_logs")
+}
+
+model AiSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("ai_settings")
+}
+
+// ─── Finance ─────────────────────────────────────────────
+
+model ProjectFinance {
+  id                String   @id @default(cuid())
+  projectId         String   @unique
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  basePrice         Decimal  @default(0) @db.Decimal(14, 2)
+  agreedPrice       Decimal  @default(0) @db.Decimal(14, 2)
+  discount          Decimal  @default(0) @db.Decimal(14, 2)
+  discountReason    String?
+  finalProjectPrice Decimal  @default(0) @db.Decimal(14, 2)
+  narratorCost      Decimal  @default(0) @db.Decimal(14, 2)
+  editorCost        Decimal  @default(0) @db.Decimal(14, 2)
+  otherDirectCosts  Decimal  @default(0) @db.Decimal(14, 2)
+  received          Decimal  @default(0) @db.Decimal(14, 2)
+  currency          String   @default("AFN")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("project_finance")
+}
+
+model Invoice {
+  id            String        @id @default(cuid())
+  invoiceNumber String        @unique
+  crmCustomerId String
+  crmCustomer   CrmCustomer   @relation(fields: [crmCustomerId], references: [id])
+  opportunityId String?
+  opportunity   Opportunity?  @relation(fields: [opportunityId], references: [id])
+  projectId     String?
+  project       Project?      @relation(fields: [projectId], references: [id])
+  status        InvoiceStatus @default(DRAFT)
+  issuedAt      DateTime?
+  dueAt         DateTime?
+  subtotal      Decimal       @default(0) @db.Decimal(14, 2)
+  discount      Decimal       @default(0) @db.Decimal(14, 2)
+  total         Decimal       @default(0) @db.Decimal(14, 2)
+  currency      String        @default("AFN")
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@index([crmCustomerId])
+  @@index([status])
+  @@index([opportunityId])
+  @@index([projectId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @db.Decimal(14, 2)
+  amount      Decimal @db.Decimal(14, 2)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id            String             @id @default(cuid())
+  crmCustomerId String
+  crmCustomer   CrmCustomer        @relation(fields: [crmCustomerId], references: [id])
+  invoiceId     String?
+  invoice       Invoice?           @relation(fields: [invoiceId], references: [id])
+  amount        Decimal            @db.Decimal(14, 2)
+  paidAt        DateTime           @default(now())
+  method        PaymentMethod      @default(BANK_TRANSFER)
+  reference     String?
+  attachmentKey String?
+  /// Approval workflow: PENDING → VERIFIED (approved) | REJECTED
+  /// Only VERIFIED payments affect financial calculations.
+  verification  VerificationStatus @default(PENDING)
+  verifiedAt    DateTime?
+  verifiedById  String?
+  verifiedBy    User?              @relation("PaymentVerifier", fields: [verifiedById], references: [id])
+  rejectedAt    DateTime?
+  rejectedById  String?
+  rejectedBy    User?              @relation("PaymentRejector", fields: [rejectedById], references: [id])
+  rejectionReason String?
+  recordedById  String?
+  recordedBy    User?              @relation("PaymentRecorder", fields: [recordedById], references: [id])
+  notes         String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([invoiceId])
+  @@index([verification])
+  @@index([crmCustomerId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model Expense {
+  id            String          @id @default(cuid())
+  projectId     String?
+  project       Project?        @relation(fields: [projectId], references: [id])
+  category      ExpenseCategory
+  amount        Decimal         @db.Decimal(14, 2)
+  expenseDate   DateTime        @default(now())
+  paymentMethod PaymentMethod?
+  description   String?
+  receiptKey    String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([projectId])
+  @@map("expenses")
+}
+
+model EmployeePayable {
+  id            String         @id @default(cuid())
+  projectId     String
+  project       Project        @relation(fields: [projectId], references: [id])
+  teamProfileId String
+  teamProfile   TeamProfile    @relation(fields: [teamProfileId], references: [id])
+  roleLabel     String
+  amount        Decimal        @db.Decimal(14, 2)
+  status        PayableStatus  @default(ESTIMATED)
+  paidAt        DateTime?
+  paymentMethod PaymentMethod?
+  notes         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([projectId])
+  @@index([teamProfileId, status])
+  @@map("employee_payables")
+}
+
+// ─── Delivery ────────────────────────────────────────────
+
+model DownloadPermission {
+  id              String    @id @default(cuid())
+  projectId       String    @unique
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  allowed         Boolean   @default(false)
+  allowedAt       DateTime?
+  allowedById     String?
+  revokedAt       DateTime?
+  revokeReason    String?
+  overrideBalance Boolean   @default(false)
+  overrideReason  String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  history DownloadHistory[]
+
+  @@map("download_permissions")
+}
+
+model DownloadHistory {
+  id                   String             @id @default(cuid())
+  downloadPermissionId String
+  downloadPermission   DownloadPermission @relation(fields: [downloadPermissionId], references: [id], onDelete: Cascade)
+  projectId            String?
+  project              Project?           @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  portalAccountId      String?
+  crmCustomerId        String?
+  fileId               String?
+  fileType             String?
+  signedUrlExpiresAt   DateTime?
+  tokenHash            String?
+  revokedAt            DateTime?
+  downloadedAt         DateTime?
+  ipAddress            String?
+  userAgent            String?
+  meta                 Json?
+  createdAt            DateTime           @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([portalAccountId])
+  @@map("download_history")
+}
+
+// ─── System ──────────────────────────────────────────────
+
+model Notification {
+  id              String    @id @default(cuid())
+  userId          String?
+  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audience        String    @default("INTERNAL")
+  portalAccountId String?
+  title           String
+  body            String?
+  link            String?
+  isRead          Boolean   @default(false)
+  meta            Json?
+  createdAt       DateTime  @default(now())
+  readAt          DateTime?
+
+  @@index([userId, isRead])
+  @@index([portalAccountId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("settings")
+}

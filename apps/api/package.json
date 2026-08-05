@@ -1,0 +1,47 @@
+{
+  "name": "@apex/api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "prisma migrate deploy && node src/index.js",
+    "start:node": "node src/index.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:baseline": "prisma migrate resolve --applied 20260715000000_init && prisma migrate deploy",
+    "db:seed": "node prisma/seed.js",
+    "db:ping": "node prisma/scripts/db-ping.js",
+    "db:push": "prisma db push",
+    "db:normalize-digits": "node prisma/scripts/normalize-eastern-digits.js",
+    "test:unit": "node --test tests/unit/**/*.test.js",
+    "test:acceptance": "node --test tests/acceptance/**/*.test.js",
+    "build": "prisma generate"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1101.0",
+    "@aws-sdk/lib-storage": "^3.1103.0",
+    "@aws-sdk/s3-request-presigner": "^3.1101.0",
+    "@prisma/client": "^6.5.0",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.10.0",
+    "compression": "^1.8.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^1.4.5-lts.1",
+    "prisma": "^6.5.0",
+    "zod": "^3.24.2"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  }
+}

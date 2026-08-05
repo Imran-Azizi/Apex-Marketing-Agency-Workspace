@@ -1,0 +1,11 @@
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install && npm run build -w @apex/api"
+
+[deploy]
+preDeployCommand = "npm run db:migrate:deploy -w @apex/api"
+startCommand = "npm run start:node -w @apex/api"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

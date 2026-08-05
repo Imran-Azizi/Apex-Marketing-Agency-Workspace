@@ -1,0 +1,192 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Surfaces */
+    --background: 210 20% 98%;
+    --foreground: 215 25% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 12%;
+    --surface: 210 18% 96%;
+    --surface-foreground: 215 20% 22%;
+
+    /* Actions */
+    --primary: 174 72% 32%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 18% 94%;
+    --secondary-foreground: 215 20% 22%;
+    --muted: 210 16% 93%;
+    --muted-foreground: 215 12% 42%;
+    --accent: 174 40% 92%;
+    --accent-foreground: 174 72% 22%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 60% 36%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 42%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Borders & focus */
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 174 72% 32%;
+    --radius: 0.5rem;
+
+    /* Brand */
+    --brand: 174 72% 32%;
+    --brand-foreground: 0 0% 100%;
+    --brand-muted: 174 35% 90%;
+
+    /* Sidebar (dark chrome in both modes) */
+    --sidebar-background: 215 28% 14%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-border: 215 22% 20%;
+    --sidebar-accent: 174 55% 38%;
+
+    /* Charts */
+    --chart-1: 174 72% 32%;
+    --chart-2: 199 89% 42%;
+    --chart-3: 38 92% 48%;
+    --chart-4: 152 60% 38%;
+    --chart-5: 0 72% 51%;
+    --chart-6: 262 52% 52%;
+    --chart-7: 215 16% 47%;
+    --chart-8: 330 70% 48%;
+    --chart-grid: 214 20% 88%;
+    --chart-axis: 215 12% 42%;
+  }
+
+  .dark {
+    /* Surfaces */
+    --background: 215 28% 8%;
+    --foreground: 210 20% 96%;
+    --card: 215 26% 11%;
+    --card-foreground: 210 20% 96%;
+    --popover: 215 26% 12%;
+    --popover-foreground: 210 20% 96%;
+    --surface: 215 24% 13%;
+    --surface-foreground: 210 18% 90%;
+
+    /* Actions */
+    --primary: 174 60% 42%;
+    --primary-foreground: 215 28% 8%;
+    --secondary: 215 22% 16%;
+    --secondary-foreground: 210 20% 90%;
+    --muted: 215 22% 16%;
+    --muted-foreground: 215 12% 62%;
+    --accent: 174 35% 18%;
+    --accent-foreground: 174 55% 75%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 55% 42%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 90% 48%;
+    --warning-foreground: 215 28% 8%;
+
+    /* Borders & focus */
+    --border: 215 22% 20%;
+    --input: 215 22% 20%;
+    --ring: 174 60% 42%;
+
+    /* Brand */
+    --brand: 174 60% 42%;
+    --brand-foreground: 215 28% 8%;
+    --brand-muted: 174 30% 16%;
+
+    /* Sidebar */
+    --sidebar-background: 215 30% 6%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-border: 215 22% 14%;
+    --sidebar-accent: 174 55% 38%;
+
+    /* Charts — brighter for dark surfaces */
+    --chart-1: 174 60% 48%;
+    --chart-2: 199 85% 55%;
+    --chart-3: 38 92% 55%;
+    --chart-4: 152 55% 48%;
+    --chart-5: 0 70% 58%;
+    --chart-6: 262 55% 62%;
+    --chart-7: 215 14% 58%;
+    --chart-8: 330 65% 58%;
+    --chart-grid: 215 22% 22%;
+    --chart-axis: 215 12% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  /* Smooth theme switches without FOUC (class applied before paint by next-themes). */
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition:
+      background-color 0.25s ease,
+      border-color 0.25s ease,
+      color 0.2s ease,
+      fill 0.2s ease,
+      stroke 0.2s ease,
+      box-shadow 0.25s ease !important;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Soft elevation that works in both themes */
+  .elevation-card {
+    @apply border border-border/80 bg-card text-card-foreground shadow-sm;
+  }
+
+  .elevation-card-hover {
+    @apply elevation-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:hover:shadow-black/40;
+  }
+
+  @keyframes public-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-public-fade {
+    animation: public-fade-up 0.7s ease-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-public-fade,
+    .animate-public-fade-delay {
+      animation: none;
+    }
+
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}

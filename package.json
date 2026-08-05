@@ -1,0 +1,28 @@
+{
+  "name": "apex-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "APEX Workspace — Enterprise CRM, Portal, Projects, AI, Finance",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "dev": "npm run dev:api & npm run dev:web",
+    "db:generate": "npm run db:generate -w apps/api",
+    "db:migrate": "npm run db:migrate -w apps/api",
+    "db:migrate:deploy": "npm run db:migrate:deploy -w apps/api",
+    "db:seed": "npm run db:seed -w apps/api",
+    "test:acceptance": "npm run test:acceptance -w apps/api",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "build:api": "npm run build -w apps/api",
+    "build:web": "npm run build -w apps/web",
+    "start:api": "npm run start -w apps/api",
+    "start:web": "npm run start -w apps/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

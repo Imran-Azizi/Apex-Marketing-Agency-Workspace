@@ -1,0 +1,153 @@
+# =============================================================================
+# APEX Workspace — .gitignore
+# Monorepo: apps/api (Express + Prisma) · apps/web (Next.js)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Dependencies
+# -----------------------------------------------------------------------------
+node_modules/
+.pnp
+.pnp.js
+.pnp.cjs
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnpm-store/
+
+# -----------------------------------------------------------------------------
+# Environment & secrets (keep *.example committed)
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.p12
+*.key
+*.crt
+secrets/
+credentials.json
+service-account*.json
+
+# -----------------------------------------------------------------------------
+# Build / output
+# -----------------------------------------------------------------------------
+dist/
+build/
+out/
+.tmp/
+.tmp-*/
+*.tsbuildinfo
+
+# Next.js
+.next/
+.Next/
+apps/web/.next/
+apps/web/out/
+apps/web/next-env.d.ts
+
+# API build artifacts
+apps/api/dist/
+
+# -----------------------------------------------------------------------------
+# Ephemeral upload dirs (legacy — cloud storage only; kept ignored if recreated)
+# -----------------------------------------------------------------------------
+uploads/
+apps/api/uploads/
+
+# -----------------------------------------------------------------------------
+# Logs & debug
+# -----------------------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# -----------------------------------------------------------------------------
+# Tests & coverage
+# -----------------------------------------------------------------------------
+coverage/
+.nyc_output/
+*.lcov
+playwright-report/
+test-results/
+.jest/
+
+# -----------------------------------------------------------------------------
+# Prisma / database
+# -----------------------------------------------------------------------------
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+apps/api/prisma/dev.db*
+*.sqlite
+*.sqlite3
+
+# Local DB dumps / exports (do NOT ignore prisma/migrations/**/*.sql)
+*.dump
+*.backup
+dump.sql
+backup.sql
+*.sql.bak
+
+# -----------------------------------------------------------------------------
+# Caches & tooling
+# -----------------------------------------------------------------------------
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+.turbo/
+.vercel/
+.netlify/
+.swc/
+*.pid
+*.seed
+*.pid.lock
+
+# -----------------------------------------------------------------------------
+# OS
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# -----------------------------------------------------------------------------
+# IDE / editors
+# -----------------------------------------------------------------------------
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# VS Code — ignore local state; allow shared workspace tips if added later
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# -----------------------------------------------------------------------------
+# Misc
+# -----------------------------------------------------------------------------
+.history/
+.fleet/
+*.tgz
+.temp/
+tmp/
+temp/
