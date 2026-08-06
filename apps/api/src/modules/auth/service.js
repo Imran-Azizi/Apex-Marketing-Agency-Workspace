@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
+import { env } from '../../config/env.js';
 import { AppError } from '../../utils/response.js';
 import { hashPassword, verifyPassword } from '../../utils/passwords.js';
 import { hashToken, randomToken, signAccessToken, signRefreshToken, verifyRefreshToken, generateOtp } from '../../utils/tokens.js';
@@ -265,8 +266,8 @@ export const authService = {
     });
 
     return {
-      message: 'کد بازیابی تولید شد. فروش باید آن را از واتساپ ارسال کند.',
-      otpDev: process.env.NODE_ENV === 'production' ? undefined : otp,
+      message: 'کد بازیابی تولید شد. آن را وارد کنید یا از طریق واتساپ دریافت کنید.',
+      otpDev: env.portalExposeOtp ? otp : undefined,
       expiresInMinutes: 15,
     };
   },

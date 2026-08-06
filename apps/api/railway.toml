@@ -1,13 +1,12 @@
 [build]
 builder = "NIXPACKS"
-# Install production-ready deps (prisma CLI is a runtime dependency for migrate/generate).
-buildCommand = "npm ci || npm install && npx prisma generate"
+# Always generate Prisma client after install.
+buildCommand = "npm ci || npm install; npx prisma generate"
 
 [deploy]
-# Apply schema before traffic; start only the HTTP server so /health is fast.
-preDeployCommand = "npx prisma migrate deploy"
-startCommand = "npm run start:node"
+# Migrate + start in one process (more reliable than preDeploy stop/start).
+startCommand = "npx prisma migrate deploy && node src/index.js"
 healthcheckPath = "/health"
-healthcheckTimeout = 120
+healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 5
+restartPolicyMaxRetries = 10

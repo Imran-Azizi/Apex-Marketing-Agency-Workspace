@@ -291,6 +291,13 @@ export const env = {
   defaultManagerPassword:
     process.env.DEFAULT_MANAGER_PASSWORD || "ApexManager!2026",
   whatsappNumber: process.env.WHATSAPP_NUMBER || "93700000000",
+  /**
+   * Return plaintext OTP in API responses for manual WhatsApp delivery.
+   * Defaults to true because no automated WhatsApp/SMS OTP provider is wired yet.
+   * Set PORTAL_EXPOSE_OTP=false only after automated delivery is configured.
+   * (Previously gated on NODE_ENV===production, which broke registration on Railway.)
+   */
+  portalExposeOtp: bool("PORTAL_EXPOSE_OTP", true),
   signedUrlSecret: required(
     "SIGNED_URL_SECRET",
     "dev-signed-url-secret-32-characters",

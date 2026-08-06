@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -52,6 +52,8 @@ const registerSchema = z
 
 type RegisterForm = z.infer<typeof registerSchema>;
 
+type OtpRequestOpts = { silent?: boolean };
+
 export default function PortalRegisterPage({
   params,
 }: {
@@ -59,8 +61,9 @@ export default function PortalRegisterPage({
 }) {
   const { token } = use(params);
   const router = useRouter();
-  const [otpSent, setOtpSent] = useState(false);
   const [devOtp, setDevOtp] = useState<string | undefined>();
+  const [otpReady, setOtpReady] = useState(false);
+  const otpBootstrapped = useRef(false);
 
   const { data: invite, isLoading, error } = useQuery({
     queryKey: ["portal-invite", token],
@@ -68,17 +71,27 @@ export default function PortalRegisterPage({
   });
 
   const requestOtp = useMutation({
-    mutationFn: () =>
+    mutationFn: (_opts?: OtpRequestOpts) =>
       apiPost<OtpResponse>(`/portal/invite/${token}/request-otp`, {}),
-    onSuccess: (data) => {
-      setOtpSent(true);
+    onSuccess: (data, vars) => {
       setDevOtp(data.otpDev);
-      toast.success(data.message);
+      setOtpReady(true);
+      if (!vars?.silent) {
+        toast.success(data.message);
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "ارسال کد ناموفق بود");
     },
   });
+
+  // Validate invite then issue OTP automatically — no intermediate landing step
+  useEffect(() => {
+    if (!invite || otpBootstrapped.current) return;
+    otpBootstrapped.current = true;
+    requestOtp.mutate({ silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap once per invite token
+  }, [invite]);
 
   const register = useMutation({
     mutationFn: (body: { password: string; otp: string }) =>
@@ -100,7 +113,9 @@ export default function PortalRegisterPage({
     resolver: zodResolver(registerSchema),
   });
 
-  if (isLoading) {
+  const awaitingInitialOtp = !!invite && !otpReady && !requestOtp.isError;
+
+  if (isLoading || awaitingInitialOtp) {
     return (
       <div className="relative flex min-h-screen items-center justify-center p-4">
         <div className="absolute start-3 top-3 z-10 sm:start-4 sm:top-4">
@@ -148,15 +163,22 @@ export default function PortalRegisterPage({
             </p>
           </div>
 
-          {!otpSent ? (
-            <Button
-              className="w-full"
-              variant="brand"
-              onClick={() => requestOtp.mutate()}
-              disabled={requestOtp.isPending}
-            >
-              {requestOtp.isPending ? "در حال ارسال..." : "درخواست کد یک‌بارمصرف"}
-            </Button>
+          {!otpReady ? (
+            <div className="space-y-3">
+              <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                صدور کد یک‌بارمصرف ناموفق بود. دوباره تلاش کنید.
+              </p>
+              <Button
+                className="w-full"
+                variant="brand"
+                onClick={() => requestOtp.mutate({})}
+                disabled={requestOtp.isPending}
+              >
+                {requestOtp.isPending
+                  ? "در حال ارسال..."
+                  : "درخواست مجدد کد یک‌بارمصرف"}
+              </Button>
+            </div>
           ) : (
             <>
               {devOtp && (
@@ -223,6 +245,17 @@ export default function PortalRegisterPage({
                   {register.isPending ? "در حال ثبت‌نام..." : "ثبت‌نام"}
                 </Button>
               </form>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => requestOtp.mutate({})}
+                disabled={requestOtp.isPending}
+              >
+                {requestOtp.isPending
+                  ? "در حال ارسال..."
+                  : "ارسال مجدد کد یک‌بارمصرف"}
+              </Button>
             </>
           )}
         </CardContent>

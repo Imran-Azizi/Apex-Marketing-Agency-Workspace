@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
+import { env } from "../../config/env.js";
 import { AppError } from "../../utils/response.js";
 import { hashPassword } from "../../utils/passwords.js";
 import { generateOtp, hashToken } from "../../utils/tokens.js";
@@ -70,26 +71,37 @@ export const portalService = {
 
     const otp = generateOtp(6);
     const codeHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     await prisma.$transaction([
       prisma.portalInvite.update({
         where: { id: invite.id },
         data: { attempts: { increment: 1 } },
       }),
+      // Invalidate prior unused register OTPs so only the latest code is valid
+      prisma.otpCode.updateMany({
+        where: {
+          portalInviteId: invite.id,
+          purpose: "REGISTER",
+          usedAt: null,
+        },
+        data: { usedAt: new Date() },
+      }),
       prisma.otpCode.create({
         data: {
           codeHash,
           portalInviteId: invite.id,
           purpose: "REGISTER",
-          expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+          expiresAt,
         },
       }),
     ]);
 
-    // v1: OTP returned for sales to send manually via WhatsApp
+    // Plaintext OTP is returned when PORTAL_EXPOSE_OTP is enabled (default)
+    // so registration works without an automated WhatsApp/SMS provider.
     return {
-      message: "کد یک‌بارمصرف تولید شد. فروش باید آن را از واتساپ ارسال کند.",
-      otpDev: process.env.NODE_ENV === "production" ? undefined : otp,
+      message: "کد یک‌بارمصرف تولید شد. آن را وارد کنید یا از طریق واتساپ دریافت کنید.",
+      otpDev: env.portalExposeOtp ? otp : undefined,
       expiresInMinutes: 15,
     };
   },

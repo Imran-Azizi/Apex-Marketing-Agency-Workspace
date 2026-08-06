@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
+import { env } from '../../config/env.js';
 import { AppError } from '../../utils/response.js';
 import { normalizeWhatsapp } from '../../utils/whatsappNormalize.js';
 import { writeAudit } from '../../middleware/audit.js';
@@ -1328,7 +1329,7 @@ export const crmService = {
 
     return {
       ...invite,
-      registerUrl: `${process.env.WEB_URL || 'http://localhost:3000'}/portal/register/${invite.token}`,
+      registerUrl: `${env.webUrl}/portal/register/${invite.token}`,
     };
   },
 
