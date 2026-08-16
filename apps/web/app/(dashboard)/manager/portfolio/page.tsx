@@ -85,11 +85,11 @@ type ListPayload = {
 export default function PortfolioAdminPage() {
   const qc = useQueryClient();
   const { data: me } = useMeQuery();
-  const canEdit = hasPermission(me?.permissions, "portfolio.edit", me?.roleCode);
+  const canEdit = hasPermission(me?.permissions, "portfolio.edit", me?.role);
   const canDelete = hasPermission(
     me?.permissions,
     "portfolio.delete",
-    me?.roleCode,
+    me?.role,
   );
 
   const [q, setQ] = useState("");
