@@ -2,7 +2,7 @@ import {
   CUSTOMER_FACING_STATUS_LABELS,
   getCustomerFacingStatusLabel,
 } from "@/lib/project-status";
-import { storagePublicUrl } from "@/lib/api";
+import { resolveAssetSrc, storagePublicUrl } from "@/lib/api";
 
 export const PORTAL_STATUS_LABELS = CUSTOMER_FACING_STATUS_LABELS;
 
@@ -22,6 +22,7 @@ export type PortalProjectSummary = {
   deadlineAt: string | null;
   budget: number | null;
   thumbnailStorageKey: string | null;
+  thumbnailUrl?: string | null;
 };
 
 export type PortalDashboard = {
@@ -75,8 +76,13 @@ export type PortalProjectsList = {
 
 export function projectThumbnailUrl(
   storageKey: string | null | undefined,
+  opts?: { url?: string | null; meta?: unknown },
 ): string | null {
-  return storagePublicUrl(storageKey || "");
+  return resolveAssetSrc({
+    url: opts?.url,
+    storageKey,
+    meta: opts?.meta,
+  });
 }
 
 export function assetDownloadUrl(storageKey: string): string | null {

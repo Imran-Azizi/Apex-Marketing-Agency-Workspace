@@ -6,9 +6,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiDelete } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { getMe } from "@/lib/auth";
+import { hasPermission } from "@/lib/rbac";
 import { PageHeader } from "@/components/shared/page-header";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { EmptyState } from "@/components/shared/empty-state";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +36,12 @@ import { getProjectStatusLabel } from "@/lib/project-status";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import type { ProjectProgress } from "@/lib/project-progress";
 
+interface AssignmentRecord {
+  role: string;
+  teamProfile?: { displayName?: string | null };
+  user?: { fullName?: string | null };
+}
+
 interface Project {
   id: string;
   code: string;
@@ -42,6 +51,23 @@ interface Project {
   deadlineAt: string | null;
   progress?: ProjectProgress | number | null;
   crmCustomer: { personName: string; companyName: string | null };
+  assignments?: AssignmentRecord[];
+}
+
+function getAssignedPerson(project: Project, role: "EDITOR" | "NARRATOR") {
+  const assignment = project.assignments?.find((item) => item.role === role);
+  return (
+    assignment?.teamProfile?.displayName || assignment?.user?.fullName || null
+  );
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("");
 }
 
 export default function ProjectsPage() {
@@ -60,16 +86,19 @@ export default function ProjectsPage() {
     queryFn: getMe,
     retry: false,
   });
-  const isManager = me?.role === "MANAGER" || me?.role === "ADMIN";
+  const canDeleteProject = hasPermission(me?.permissions, "projects.delete", me?.role);
+  const canViewProjects = hasPermission(me?.permissions, "projects.view", me?.role);
 
   useEffect(() => {
-    if (me?.role === "NARRATOR") {
+    if (!me?.role) return;
+    if (canViewProjects) return;
+    if (me.role === "NARRATOR") {
       router.replace("/narrator/dashboard");
     }
-    if (me?.role === "EDITOR") {
+    if (me.role === "EDITOR") {
       router.replace("/editor/dashboard");
     }
-  }, [me, router]);
+  }, [me, router, canViewProjects]);
 
   const deleteProject = useMutation({
     mutationFn: (id: string) => apiDelete(`/projects/${id}`),
@@ -98,8 +127,12 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div>
-      <PageHeader title="پروژه‌ها" subtitle="لیست پروژه‌های فعال و تکمیل‌شده" />
+    <div className="min-w-0">
+      <PageHeader
+        inline
+        title="پروژه‌ها"
+        subtitle="لیست پروژه‌های فعال و تکمیل‌شده"
+      />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">
@@ -137,7 +170,7 @@ export default function ProjectsPage() {
         </DialogContent>
       </Dialog>
 
-      {isLoading && <LoadingTable columns={isManager ? 7 : 6} />}
+      {isLoading && <LoadingTable columns={canDeleteProject ? 9 : 8} />}
 
       {error && <EmptyState title="بارگذاری پروژه‌ها ناموفق بود" />}
 
@@ -146,18 +179,38 @@ export default function ProjectsPage() {
       )}
 
       {data && data.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border">
-          <Table>
+        <HorizontalScroll>
+          <Table className="min-w-[48rem]">
             <TableHeader>
-              <TableRow>
-                <TableHead>کد</TableHead>
-                <TableHead>عنوان</TableHead>
-                <TableHead>مشتری</TableHead>
-                <TableHead>وضعیت</TableHead>
-                <TableHead className="min-w-[160px]">پیشرفت پروژه</TableHead>
-                <TableHead>مهلت</TableHead>
-                {isManager && (
-                  <TableHead className="w-14 text-center">عملیات</TableHead>
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
+                <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  کد
+                </TableHead>
+                <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  عنوان
+                </TableHead>
+                <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  مشتری
+                </TableHead>
+                <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  ادیتور
+                </TableHead>
+                <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  نریتور
+                </TableHead>
+                <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  وضعیت
+                </TableHead>
+                <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  پیشرفت پروژه
+                </TableHead>
+                <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                  مهلت
+                </TableHead>
+                {canDeleteProject && (
+                  <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    عملیات
+                  </TableHead>
                 )}
               </TableRow>
             </TableHeader>
@@ -178,25 +231,81 @@ export default function ProjectsPage() {
                   }}
                 >
                   <TableCell>
-                    <span className="font-medium text-foreground" dir="ltr">
+                    <span
+                      className="whitespace-nowrap font-medium text-foreground"
+                      dir="ltr"
+                    >
                       {project.code}
                     </span>
                   </TableCell>
-                  <TableCell>{project.title}</TableCell>
                   <TableCell>
-                    {project.crmCustomer.personName}
-                    {project.crmCustomer.companyName && (
-                      <span className="block text-xs text-muted-foreground">
-                        {project.crmCustomer.companyName}
+                    <span className="block min-w-[8rem] max-w-[16rem] font-medium leading-snug">
+                      {project.title}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <div className="min-w-[8rem]">
+                      <span className="font-medium">
+                        {project.crmCustomer.personName}
+                      </span>
+                      {project.crmCustomer.companyName && (
+                        <span className="block text-xs text-muted-foreground">
+                          {project.crmCustomer.companyName}
+                        </span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {getAssignedPerson(project, "EDITOR") ? (
+                      <div
+                        className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
+                        title={getAssignedPerson(project, "EDITOR") || ""}
+                      >
+                        <Avatar className="h-8 w-8">
+                          <AvatarFallback>
+                            {initials(getAssignedPerson(project, "EDITOR") || "?")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="truncate text-sm font-medium">
+                          {getAssignedPerson(project, "EDITOR")}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
+                        تعیین نشده
                       </span>
                     )}
                   </TableCell>
                   <TableCell>
-                    <Badge variant="secondary">
+                    {getAssignedPerson(project, "NARRATOR") ? (
+                      <div
+                        className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
+                        title={getAssignedPerson(project, "NARRATOR") || ""}
+                      >
+                        <Avatar className="h-8 w-8">
+                          <AvatarFallback>
+                            {initials(getAssignedPerson(project, "NARRATOR") || "?")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="truncate text-sm font-medium">
+                          {getAssignedPerson(project, "NARRATOR")}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
+                        تعیین نشده
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="whitespace-nowrap">
                       {getProjectStatusLabel(project.status)}
                     </Badge>
                   </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
+                  <TableCell
+                    className="min-w-[10rem]"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <ProjectProgressBar
                       progress={project.progress}
                       status={project.status}
@@ -204,12 +313,12 @@ export default function ProjectsPage() {
                       showTitle={false}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                     {project.deadlineAt
                       ? formatDate(project.deadlineAt)
                       : "—"}
                   </TableCell>
-                  {isManager && (
+                  {canDeleteProject && (
                     <TableCell
                       className="text-center"
                       onClick={(e) => e.stopPropagation()}
@@ -218,7 +327,7 @@ export default function ProjectsPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
                         title="حذف پروژه"
                         aria-label="حذف پروژه"
                         onClick={(e) => {
@@ -234,7 +343,7 @@ export default function ProjectsPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </HorizontalScroll>
       )}
     </div>
   );

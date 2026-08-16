@@ -447,9 +447,7 @@ function VersionCard({
               {locked ? (
                 <p className="rounded-lg bg-amber-500/5 px-2.5 py-2 text-[11px] leading-5 text-muted-foreground">
                   {video.accessMessage ||
-                    (video.accessStatus === "LOCKED_APPROVAL"
-                      ? "پرداخت تکمیل شده — در انتظار تأیید تحویل مدیر."
-                      : "پس از تسویه پرداخت، پخش و دانلود فعال می‌شود.")}
+                    "پس از تسویه پرداخت، پخش و دانلود فعال می‌شود."}
                 </p>
               ) : null}
             </div>

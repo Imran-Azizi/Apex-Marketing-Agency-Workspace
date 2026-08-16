@@ -4,14 +4,14 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import {
-  formatFileSize,
   uploadFileWithProgress,
-  filePreviewUrl,
   downloadStoredFile,
   downloadMediaFile,
 } from "@/lib/upload";
 import { UPLOAD_PURPOSE } from "@/lib/media-manager";
 import { cn, formatDate, formatCurrency } from "@/lib/utils";
+import { hasPermission } from "@/lib/rbac";
+import { useMeQuery } from "@/lib/permissions";
 import {
   CurrencyField,
   validateCurrencyInput,
@@ -41,7 +41,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
-  Download,
   Loader2,
   Mic2,
   RefreshCw,
@@ -50,6 +49,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ALERT_BANNER, ALERT_CALLOUT, ALERT_ICON } from "@/lib/theme-tones";
+import {
+  NarrationAudioVersions,
+  type NarrationTakeRecord,
+} from "@/components/narration/narration-audio-versions";
 
 type NarrationStatus =
   | "PENDING_NARRATION"
@@ -83,6 +86,20 @@ type NarrationTask = {
     sizeBytes?: number | null;
     createdAt: string;
   } | null;
+  takes?: Array<{
+    id: string;
+    version: number;
+    createdAt: string;
+    projectFile?: {
+      id: string;
+      name: string;
+      storageKey: string;
+      mimeType?: string | null;
+      sizeBytes?: number | null;
+      createdAt: string;
+    } | null;
+    uploadedBy?: { id: string; fullName: string } | null;
+  }>;
   contentVersion?: {
     id: string;
     versionNumber: number;
@@ -194,7 +211,12 @@ export function ProjectNarrationPanel({
   roleCode?: string | null;
 }) {
   const qc = useQueryClient();
-  const isManager = roleCode === "MANAGER" || roleCode === "ADMIN";
+  const { data: me } = useMeQuery();
+  const isManager = hasPermission(
+    me?.permissions,
+    ["projects.assign", "narration.approve", "narration.edit", "narration.revise"],
+    roleCode,
+  );
   const isNarrator = roleCode === "NARRATOR";
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
@@ -205,7 +227,6 @@ export function ProjectNarrationPanel({
   const [narrationCost, setNarrationCost] = useState("");
   const [narrationCostError, setNarrationCostError] = useState<string>();
   const [revisionNotes, setRevisionNotes] = useState("");
-  const [downloadingAudio, setDownloadingAudio] = useState(false);
 
   const taskQ = useQuery({
     queryKey: ["narration-task", projectId],
@@ -338,6 +359,41 @@ export function ProjectNarrationPanel({
       "REVISION_REQUESTED",
     ].includes(task.status);
 
+  const audioVersions = useMemo((): NarrationTakeRecord[] => {
+    if (!task) return [];
+    if (task.takes?.length) {
+      return task.takes.map((take) => ({
+        id: take.id,
+        version: take.version,
+        createdAt: take.createdAt,
+        projectFile: take.projectFile ?? undefined,
+      }));
+    }
+    if (!task.audioFile) return [];
+    return [
+      {
+        id: task.audioFile.id,
+        version: 1,
+        createdAt: task.audioFile.createdAt,
+        isCurrent: true,
+        projectFile: task.audioFile,
+      },
+    ];
+  }, [task]);
+
+  const handleAudioDownload = async (file: {
+    id: string;
+    name: string;
+    storageKey: string;
+  }) => {
+    if (file.storageKey) {
+      await downloadStoredFile(file.storageKey, file.name);
+    } else {
+      await downloadMediaFile(file.id, file.name);
+    }
+    toast.success("فایل صوتی با موفقیت دانلود شد");
+  };
+
   if (taskQ.isLoading) {
     return (
       <div className="space-y-4">
@@ -394,10 +450,6 @@ export function ProjectNarrationPanel({
               </Badge>
             )}
           </div>
-          <p className="text-sm text-muted-foreground">
-            آماده‌سازی متن، ارسال دستی به نریتور، دریافت فایل صوتی و تأیید یا
-            درخواست اصلاح
-          </p>
         </div>
         {isManager && (
           <Button
@@ -434,19 +486,6 @@ export function ProjectNarrationPanel({
         </div>
       ) : (
         <>
-          {isManager && !sentToNarrator && (
-            <div className="flex gap-3 rounded-2xl border border-brand/25 bg-brand/5 px-4 py-3.5 text-foreground">
-              <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
-              <div>
-                <p className="text-sm font-medium">متن نریشن آماده است</p>
-                <p className="mt-1 text-sm leading-7 text-muted-foreground">
-                  تا زمانی که نریتور را انتخاب و ارسال نکنید، هیچ اعلان یا
-                  دسترسی برای نریتور فعال نمی‌شود.
-                </p>
-              </div>
-            </div>
-          )}
-
           <section className="rounded-2xl border border-border/70 bg-card p-4 sm:p-5">
             <p className="mb-3 text-xs font-medium text-muted-foreground">
               پیشرفت مرحله
@@ -559,7 +598,11 @@ export function ProjectNarrationPanel({
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold">فایل صوتی</p>
+              <p className="text-sm font-semibold">
+                {audioVersions.length > 1
+                  ? `نسخه‌های فایل صوتی (${audioVersions.length.toLocaleString("fa-AF", { numberingSystem: "latn" })})`
+                  : "فایل صوتی"}
+              </p>
               <div className="flex flex-wrap gap-2">
                 {isNarrator && task.status === "PENDING_NARRATION" && (
                   <Button
@@ -648,78 +691,20 @@ export function ProjectNarrationPanel({
               </div>
             )}
 
-            {task.audioFile ? (
-              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium">{task.audioFile.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {task.submittedAt
-                        ? formatDate(task.submittedAt)
-                        : formatDate(task.audioFile.createdAt)}
-                      {task.audioFile.sizeBytes != null && (
-                        <>
-                          {" · "}
-                          {formatFileSize(task.audioFile.sizeBytes)}
-                        </>
-                      )}
-                    </p>
-                  </div>
-                  {(task.audioFile.storageKey || task.audioFile.id) && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="gap-1.5"
-                      disabled={downloadingAudio}
-                      aria-label="دانلود فایل صوتی نریشن"
-                      title="دانلود فایل صوتی"
-                      onClick={async () => {
-                        const file = task.audioFile!;
-                        setDownloadingAudio(true);
-                        try {
-                          if (file.storageKey) {
-                            await downloadStoredFile(
-                              file.storageKey,
-                              file.name,
-                            );
-                          } else {
-                            await downloadMediaFile(file.id, file.name);
-                          }
-                          toast.success("فایل صوتی با موفقیت دانلود شد");
-                        } catch (e) {
-                          toast.error(
-                            e instanceof Error
-                              ? e.message
-                              : "دانلود ناموفق بود",
-                          );
-                        } finally {
-                          setDownloadingAudio(false);
-                        }
-                      }}
-                    >
-                      {downloadingAudio ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Download className="h-3.5 w-3.5" />
-                      )}
-                    </Button>
-                  )}
-                </div>
-                <audio
-                  controls
-                  className="w-full"
-                  src={filePreviewUrl(task.audioFile.storageKey) || undefined}
-                >
-                  مرورگر شما از پخش صوت پشتیبانی نمی‌کند.
-                </audio>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 rounded-xl border border-dashed border-border/70 px-4 py-8 text-sm text-muted-foreground">
-                <Clock3 className="h-4 w-4" />
-                هنوز فایل صوتی آپلود نشده است
-              </div>
-            )}
+            <NarrationAudioVersions
+              takes={audioVersions}
+              currentFileId={task.audioFile?.id}
+              onDownload={async (file) => {
+                try {
+                  await handleAudioDownload(file);
+                } catch (e) {
+                  toast.error(
+                    e instanceof Error ? e.message : "دانلود ناموفق بود",
+                  );
+                  throw e;
+                }
+              }}
+            />
           </section>
         </>
       )}

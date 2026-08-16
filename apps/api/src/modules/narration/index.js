@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
-import { requireInternal, requirePermission, denyRoles } from '../../middleware/rbac.js';
+import { requireInternal, requirePermission } from '../../middleware/rbac.js';
 import { requireCsrf } from '../../middleware/csrf.js';
 import { ok } from '../../utils/response.js';
 import { narrationService } from './service.js';
@@ -9,7 +9,7 @@ const router = Router();
 
 router.use(requireAuth, requireInternal);
 
-router.get('/narrators', requirePermission('narration:assign'), async (req, res, next) => {
+router.get('/narrators', requirePermission('projects.assign'), async (req, res, next) => {
   try {
     ok(res, await narrationService.listAvailableNarrators());
   } catch (e) {
@@ -17,7 +17,7 @@ router.get('/narrators', requirePermission('narration:assign'), async (req, res,
   }
 });
 
-router.get('/my-tasks', requirePermission('voice:upload'), async (req, res, next) => {
+router.get('/my-tasks', requirePermission('narration.view'), async (req, res, next) => {
   try {
     ok(res, await narrationService.listMyTasks(req.auth));
   } catch (e) {
@@ -25,7 +25,7 @@ router.get('/my-tasks', requirePermission('voice:upload'), async (req, res, next
   }
 });
 
-router.get('/dashboard', requirePermission('voice:upload'), async (req, res, next) => {
+router.get('/dashboard', requirePermission('narration.view'), async (req, res, next) => {
   try {
     ok(res, await narrationService.getNarratorDashboard(req.auth));
   } catch (e) {
@@ -33,7 +33,7 @@ router.get('/dashboard', requirePermission('voice:upload'), async (req, res, nex
   }
 });
 
-router.get('/projects', requirePermission('voice:upload'), async (req, res, next) => {
+router.get('/projects', requirePermission('narration.view'), async (req, res, next) => {
   try {
     ok(res, await narrationService.listNarratorProjects(req.auth, req.query || {}));
   } catch (e) {
@@ -43,7 +43,7 @@ router.get('/projects', requirePermission('voice:upload'), async (req, res, next
 
 router.get(
   '/workspace/:projectId',
-  requirePermission('voice:upload'),
+  requirePermission('narration.view'),
   async (req, res, next) => {
     try {
       ok(res, await narrationService.getNarratorWorkspace(req.params.projectId, req.auth));
@@ -55,8 +55,7 @@ router.get(
 
 router.get(
   '/projects/:projectId',
-  denyRoles('NARRATOR'),
-  requirePermission('project:read'),
+  requirePermission('projects.view', 'projects.assign', 'narration.approve', 'narration.edit'),
   async (req, res, next) => {
     try {
       ok(res, await narrationService.getProjectTask(req.params.projectId, req.auth));
@@ -69,7 +68,7 @@ router.get(
 router.post(
   '/projects/:projectId/assign',
   requireCsrf,
-  requirePermission('narration:assign'),
+  requirePermission('projects.assign'),
   async (req, res, next) => {
     try {
       ok(
@@ -90,7 +89,7 @@ router.post(
 router.patch(
   '/projects/:projectId/deadline',
   requireCsrf,
-  requirePermission('narration:assign'),
+  requirePermission('narration.edit'),
   async (req, res, next) => {
     try {
       ok(
@@ -111,7 +110,7 @@ router.patch(
 router.post(
   '/projects/:projectId/start',
   requireCsrf,
-  requirePermission('voice:upload'),
+  requirePermission('narration.upload'),
   async (req, res, next) => {
     try {
       ok(res, await narrationService.markInProgress(req.params.projectId, req.auth));
@@ -124,7 +123,7 @@ router.post(
 router.post(
   '/projects/:projectId/submit',
   requireCsrf,
-  requirePermission('voice:upload'),
+  requirePermission('narration.upload'),
   async (req, res, next) => {
     try {
       ok(
@@ -145,7 +144,7 @@ router.post(
 router.post(
   '/projects/:projectId/accept',
   requireCsrf,
-  requirePermission('narration:assign'),
+  requirePermission('narration.approve'),
   async (req, res, next) => {
     try {
       ok(res, await narrationService.acceptNarration(req.params.projectId, req.auth, req));
@@ -158,7 +157,7 @@ router.post(
 router.post(
   '/projects/:projectId/request-revision',
   requireCsrf,
-  requirePermission('narration:assign'),
+  requirePermission('narration.revise'),
   async (req, res, next) => {
     try {
       ok(

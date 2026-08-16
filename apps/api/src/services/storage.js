@@ -70,9 +70,9 @@ function getS3() {
   return s3Client;
 }
 
-function publicUrlForKey(key) {
+function publicUrlForKey(key, opts = {}) {
   if (isCloudinary()) {
-    return cloudinaryDriver.publicUrl(key);
+    return cloudinaryDriver.publicUrl(key, opts);
   }
   const base = env.storagePublicBase.replace(/\/$/, "");
   const encoded = String(key)
@@ -80,6 +80,31 @@ function publicUrlForKey(key) {
     .map((part) => encodeURIComponent(part))
     .join("/");
   return `${base}/${encoded}`;
+}
+
+/** Short TTL cache so repeated <img> hits don't spam Cloudinary Admin API. */
+const deliveryUrlCache = new Map();
+const DELIVERY_URL_TTL_MS = 5 * 60 * 1000;
+
+function getCachedDeliveryUrl(key) {
+  const hit = deliveryUrlCache.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    deliveryUrlCache.delete(key);
+    return null;
+  }
+  return hit.url;
+}
+
+function setCachedDeliveryUrl(key, url) {
+  if (deliveryUrlCache.size > 500) {
+    const oldest = deliveryUrlCache.keys().next().value;
+    if (oldest != null) deliveryUrlCache.delete(oldest);
+  }
+  deliveryUrlCache.set(key, {
+    url,
+    expiresAt: Date.now() + DELIVERY_URL_TTL_MS,
+  });
 }
 
 /**
@@ -91,9 +116,32 @@ export const storage = {
   isCloudinary,
   isS3Compatible,
 
-  publicUrl(key) {
+  publicUrl(key, opts = {}) {
     assertStorageConfigured();
-    return publicUrlForKey(key);
+    return publicUrlForKey(key, opts);
+  },
+
+  /**
+   * Best-effort public delivery URL. For Cloudinary, prefers Admin-resolved
+   * secure_url so extension/resource-type mismatches (e.g. .jfif) still work.
+   */
+  async resolveDeliveryUrl(key, opts = {}) {
+    assertStorageConfigured();
+    const storageKey = String(key || "").replace(/^\/+/, "");
+    if (!storageKey) {
+      throw new AppError("File key required", 400, "INVALID_KEY");
+    }
+    const cached = getCachedDeliveryUrl(storageKey);
+    if (cached) return cached;
+
+    let url;
+    if (isCloudinary() && typeof cloudinaryDriver.resolveDeliveryUrl === "function") {
+      url = await cloudinaryDriver.resolveDeliveryUrl(storageKey, opts);
+    } else {
+      url = publicUrlForKey(storageKey, opts);
+    }
+    if (url) setCachedDeliveryUrl(storageKey, url);
+    return url;
   },
 
   async saveBuffer(
@@ -109,9 +157,7 @@ export const storage = {
   ) {
     assertStorageConfigured();
 
-    const context =
-      uploadContext ||
-      parseUploadContext({ folder }, {});
+    const context = uploadContext || parseUploadContext({ folder }, {});
     const placement = resolveMediaPlacement(context, {
       contentType,
       filename,
@@ -258,6 +304,20 @@ export const storage = {
     await getS3().send(
       new DeleteObjectCommand({ Bucket: env.s3Bucket, Key: key }),
     );
+  },
+
+  /**
+   * Read object bytes into a Buffer (used by backup restore/download fallbacks).
+   */
+  async readBuffer(key) {
+    assertStorageConfigured();
+    if (isCloudinary() && typeof cloudinaryDriver.readBuffer === "function") {
+      return cloudinaryDriver.readBuffer(key);
+    }
+    const { stream } = await this.openReadStream(key);
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    return Buffer.concat(chunks);
   },
 
   /** Short-lived direct download URL for remote storage (optional fast path). */

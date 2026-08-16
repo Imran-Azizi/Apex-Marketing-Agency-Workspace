@@ -3,6 +3,8 @@ export type FinalVideoType = "WATERMARKED" | "CLEAN";
 export type FinalVideoStatus =
   | "DRAFT"
   | "UPLOADED"
+  | "PENDING_REVIEW"
+  | "REVISION_REQUESTED"
   | "APPROVED"
   | "SENT_TO_CUSTOMER"
   | "VIEWED_BY_CUSTOMER"
@@ -27,6 +29,9 @@ export type FinalVideoItem = {
   sentAt?: string | null;
   allowDownload?: boolean;
   approvedAt?: string | null;
+  revisionNotes?: string | null;
+  revisionRequestedAt?: string | null;
+  reviewedBy?: string | null;
   viewedAt?: string | null;
   customerApprovedAt?: string | null;
 };
@@ -63,7 +68,9 @@ export const VIDEO_TYPE_LABELS: Record<FinalVideoType, string> = {
 
 export const FINAL_STATUS_LABELS: Record<FinalVideoStatus, string> = {
   DRAFT: "پیش‌نویس",
-  UPLOADED: "آپلود شده",
+  UPLOADED: "در انتظار بررسی",
+  PENDING_REVIEW: "در انتظار بررسی",
+  REVISION_REQUESTED: "نیازمند اصلاح",
   APPROVED: "تأیید شده",
   SENT_TO_CUSTOMER: "ارسال‌شده برای مشتری",
   VIEWED_BY_CUSTOMER: "مشاهده‌شده توسط مشتری",
@@ -72,8 +79,6 @@ export const FINAL_STATUS_LABELS: Record<FinalVideoStatus, string> = {
 
 export const ACCEPTED_VIDEO_TYPES =
   "video/mp4,video/webm,video/quicktime,video/x-matroska,.mp4,.webm,.mov,.mkv";
-
-export const MAX_FINAL_VIDEO_BYTES = 200 * 1024 * 1024;
 
 export function isAcceptedVideoFile(file: File): boolean {
   if (file.type && file.type.startsWith("video/")) return true;
@@ -86,9 +91,6 @@ export function isAcceptedVideoFile(file: File): boolean {
 export function validateFinalVideoFile(file: File): string | null {
   if (!isAcceptedVideoFile(file)) {
     return "فقط فایل‌های ویدیویی (MP4، WebM، MOV، MKV) مجاز هستند";
-  }
-  if (file.size > MAX_FINAL_VIDEO_BYTES) {
-    return "حجم فایل نباید بیشتر از ۲۰۰ مگابایت باشد";
   }
   return null;
 }

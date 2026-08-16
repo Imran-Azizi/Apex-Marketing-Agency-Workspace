@@ -252,6 +252,20 @@ export const env = {
     process.env.OPENROUTER_BACKUP_MODEL ||
     process.env.AI_BACKUP_MODEL ||
     "openai/gpt-4o-mini",
+  /** OpenRouter image model for storyboard stills (POST /images). */
+  openrouterImageModel:
+    process.env.OPENROUTER_IMAGE_MODEL ||
+    process.env.AI_IMAGE_MODEL ||
+    "google/gemini-2.5-flash-image",
+  /**
+   * Image generation provider:
+   * auto | openrouter | openai | free (Pollinations, no paid credits)
+   */
+  aiImageProvider: String(
+    process.env.AI_IMAGE_PROVIDER || "auto",
+  ).toLowerCase(),
+  pollinationsApiKey: process.env.POLLINATIONS_API_KEY || "",
+  pollinationsImageModel: process.env.POLLINATIONS_IMAGE_MODEL || "flux-realism",
 
   // OpenAI (optional / replaceable)
   openaiApiKey: process.env.OPENAI_API_KEY || "",
@@ -303,6 +317,22 @@ export const env = {
     "dev-signed-url-secret-32-characters",
   ),
   signedUrlTtl: Number(process.env.SIGNED_URL_TTL_SECONDS || 300),
+
+  // SMTP — optional; required to email backup archives
+  smtpHost: process.env.SMTP_HOST || "",
+  smtpPort: Number(process.env.SMTP_PORT || 587),
+  smtpSecure: bool("SMTP_SECURE", false),
+  smtpUser: process.env.SMTP_USER || "",
+  smtpPass: process.env.SMTP_PASS || "",
+  mailFrom:
+    process.env.MAIL_FROM ||
+    process.env.SMTP_FROM ||
+    process.env.SMTP_USER ||
+    "",
+  /** Default recipient for automatic / manual backups when schedule.emailTo is empty */
+  backupEmailTo: process.env.BACKUP_EMAIL_TO || "",
+  /** Max attachment size for emailing backups (bytes). Larger files stay in object storage only. */
+  backupEmailMaxBytes: Number(process.env.BACKUP_EMAIL_MAX_BYTES || 15 * 1024 * 1024),
 };
 
 /** Active LLM settings based on AI_PROVIDER */
@@ -315,7 +345,7 @@ export function getActiveAiConfig() {
       enabled: Boolean(env.openrouterApiKey),
       reasoningModel: env.aiDefaultModel || env.openrouterModel,
       lightModel: env.aiBackupModel || env.openrouterBackupModel,
-      imageModel: null,
+      imageModel: env.openrouterImageModel,
     };
   }
   if (provider === "openai") {

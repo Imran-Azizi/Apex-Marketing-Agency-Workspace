@@ -1,20 +1,31 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  BadgeCheck,
   CalendarClock,
   CreditCard,
   Download,
   Eye,
+  FolderKanban,
   Globe,
+  HandCoins,
+  Loader2,
   Phone,
   Printer,
   Receipt,
   User,
   UserRoundPen,
+  Wallet,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { api, apiGet } from "@/lib/api";
+import { apiGet } from "@/lib/api";
+import { paymentMethodLabel } from "@/lib/payment-methods";
+import {
+  downloadPaymentReceiptPdf,
+  printPaymentReceipt,
+} from "@/lib/payment-receipt";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,39 +38,27 @@ import {
 } from "@/components/ui/dialog";
 import { ModalLoader } from "@/components/loading/section-loader";
 import { ErrorState } from "@/components/loading/error-state";
+import { ApexMark } from "@/components/brand/apex-mark";
 import type { PaymentReceipt } from "./payment-types";
 
 /** A6 portrait: 105 × 148 mm */
 const A6_W = "105mm";
 const A6_H = "148mm";
 
-async function fetchReceiptHtml(paymentId: string, autoprint = false) {
-  const { data } = await api.get<string>(
-    `/crm/payments/${paymentId}/receipt.html${autoprint ? "?autoprint=1" : ""}`,
-    {
-      responseType: "text",
-      transformResponse: [(raw) => raw],
-      headers: { Accept: "text/html" },
-    },
-  );
-  return typeof data === "string" ? data : String(data);
-}
-
-function openHtmlInNewWindow(html: string) {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, "_blank", "noopener,noreferrer");
-  if (!win) {
-    URL.revokeObjectURL(url);
-    throw new Error("پنجره رسید مسدود شد. لطفاً pop-up را مجاز کنید.");
-  }
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
 function formatReceiptAmount(amount: number) {
   return `${Number(amount).toLocaleString("fa-AF", {
     numberingSystem: "latn",
   })} افغانی`;
+}
+
+function formatPaymentVerification(status: string | null | undefined) {
+  const map: Record<string, string> = {
+    VERIFIED: "تایید شده",
+    PENDING: "در انتظار تأیید",
+    REJECTED: "رد شده",
+  };
+  const key = String(status || "").toUpperCase();
+  return map[key] || status || "—";
 }
 
 /** Split date/time so RTL Persian date and LTR time never scramble. */
@@ -80,16 +79,14 @@ function splitReceiptDateTime(value: string | Date): {
     day: "numeric",
   }).format(date);
 
-  let hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const ampm = hours >= 12 ? "PM" : "AM";
-  hours = hours % 12;
-  if (hours === 0) hours = 12;
+  const timePart = new Intl.DateTimeFormat("fa-AF", {
+    numberingSystem: "latn",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
 
-  return {
-    datePart,
-    timePart: `${hours}:${minutes} ${ampm}`,
-  };
+  return { datePart, timePart };
 }
 
 function ReceiptDateTimeValue({ value }: { value: string | Date }) {
@@ -121,6 +118,8 @@ export function PaymentReceiptDialog({
   open,
   onOpenChange,
 }: PaymentReceiptDialogProps) {
+  const [busy, setBusy] = useState<"print" | "pdf" | null>(null);
+
   const { data: receipt, isLoading, error } = useQuery({
     queryKey: ["payment-receipt", paymentId],
     queryFn: () => apiGet<PaymentReceipt>(`/crm/payments/${paymentId}/receipt`),
@@ -128,26 +127,27 @@ export function PaymentReceiptDialog({
   });
 
   const handlePrint = async () => {
-    if (!paymentId) return;
+    if (!paymentId || busy) return;
+    setBusy("print");
     try {
-      const html = await fetchReceiptHtml(paymentId, true);
-      openHtmlInNewWindow(html);
+      await printPaymentReceipt(paymentId);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "چاپ ناموفق بود");
+    } finally {
+      setBusy(null);
     }
   };
 
   const handleDownloadPdf = async () => {
-    if (!paymentId) return;
+    if (!paymentId || busy) return;
+    setBusy("pdf");
     try {
-      const html = await fetchReceiptHtml(paymentId, true);
-      openHtmlInNewWindow(html);
-      toast.message("برای دانلود PDF", {
-        description:
-          "در پنجره چاپ، اندازه کاغذ را A6 انتخاب کنید و سپس Save as PDF بزنید.",
-      });
+      const { filename } = await downloadPaymentReceiptPdf(paymentId);
+      toast.success("PDF دانلود شد", { description: filename });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "دانلود ناموفق بود");
+      toast.error(e instanceof Error ? e.message : "دانلود PDF ناموفق بود");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -185,6 +185,7 @@ export function PaymentReceiptDialog({
             variant="outline"
             className="rounded-xl"
             onClick={() => onOpenChange(false)}
+            disabled={!!busy}
           >
             بستن
           </Button>
@@ -192,39 +193,33 @@ export function PaymentReceiptDialog({
             type="button"
             variant="outline"
             className="rounded-xl"
-            disabled={!receipt}
+            disabled={!receipt || !!busy}
             onClick={handlePrint}
           >
-            <Printer className="h-4 w-4" />
+            {busy === "print" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4" />
+            )}
             چاپ
           </Button>
           <Button
             type="button"
             variant="brand"
             className="rounded-xl shadow-md shadow-brand/20"
-            disabled={!receipt}
+            disabled={!receipt || !!busy}
             onClick={handleDownloadPdf}
           >
-            <Download className="h-4 w-4" />
+            {busy === "pdf" ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
             دانلود PDF
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function ApexMark({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn("relative inline-block size-5 shrink-0", className)}
-      aria-hidden
-    >
-      <span className="absolute start-[6px] top-0 size-[7px] rotate-45 bg-brand" />
-      <span className="absolute start-0 top-[6px] size-[7px] rotate-45 bg-brand/70" />
-      <span className="absolute end-0 top-[6px] size-[7px] rotate-45 bg-brand/70" />
-      <span className="absolute start-[6px] bottom-0 size-[7px] rotate-45 bg-brand/45" />
-    </span>
   );
 }
 
@@ -252,9 +247,21 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
       content: formatReceiptAmount(receipt.payment.amount),
     },
     {
+      label: "روش پرداخت",
+      icon: HandCoins,
+      content:
+        receipt.payment.methodLabel ||
+        paymentMethodLabel(receipt.payment.method),
+    },
+    {
       label: "تاریخ و زمان",
       icon: CalendarClock,
       content: <ReceiptDateTimeValue value={paidAt} />,
+    },
+    {
+      label: "وضعیت",
+      icon: BadgeCheck,
+      content: formatPaymentVerification(receipt.payment.verification),
     },
     {
       label: "ثبت‌کننده",
@@ -262,6 +269,28 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
       content: recorderName,
     },
   ];
+
+  if (receipt.contract?.title) {
+    rows.push({
+      label: "قرارداد / پروژه",
+      icon: FolderKanban,
+      content: receipt.contract.title,
+    });
+  }
+  if (
+    receipt.contract &&
+    receipt.contract.remainingBalance != null &&
+    Number.isFinite(Number(receipt.contract.remainingBalance))
+  ) {
+    rows.push({
+      label: "مانده حساب",
+      icon: Wallet,
+      amount: true,
+      content: formatReceiptAmount(receipt.contract.remainingBalance),
+    });
+  }
+
+  const compact = rows.length > 5;
 
   return (
     <article
@@ -274,29 +303,30 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
         "shadow-[0_18px_40px_-12px_rgba(15,23,42,0.18)] dark:shadow-black/50",
       )}
     >
-      {/* Brand accent strip */}
-      <div className="h-[3px] bg-gradient-to-l from-teal-800 via-teal-600 to-teal-500" />
+      <div className="h-[3px] bg-gradient-to-l from-[#1f2937] via-[#d4af37] to-[#e8c547]" />
 
-      <header className="px-4 pb-0 pt-3.5">
+      <header className={cn("px-4 pb-0", compact ? "pt-3" : "pt-3.5")}>
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 text-start">
             <div className="inline-flex items-center gap-1.5">
-              <ApexMark />
-              <span className="text-[15px] font-black tracking-[0.12em] text-teal-800">
-                APEX
-              </span>
+              <ApexMark className="h-10 w-10" decorative tone="onLight" />
             </div>
             <p className="mt-0.5 text-[8.5px] font-medium tracking-wide text-slate-400">
               سیستم مدیریت مشتریان و پروژه‌ها
             </p>
           </div>
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-teal-700/12 bg-teal-50/80 text-teal-700">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-[#d4af37]/25 bg-[#d4af37]/10 text-[#b8962e]">
             <Receipt className="size-3.5" strokeWidth={1.7} />
           </div>
         </div>
 
-        <div className="mt-3.5 border-y border-slate-100 py-2.5 text-center">
-          <h2 className="text-[17px] font-black tracking-tight text-teal-800">
+        <div
+          className={cn(
+            "border-y border-slate-100 text-center",
+            compact ? "mt-2.5 py-2" : "mt-3.5 py-2.5",
+          )}
+        >
+          <h2 className="text-[17px] font-black tracking-tight text-[#1f2937]">
             رسید پرداخت
           </h2>
           {paymentNo && (
@@ -310,8 +340,7 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
         </div>
       </header>
 
-      <div className="flex flex-1 flex-col px-3.5 pb-0 pt-3">
-        {/* Main fields — icon+label right, value centered (reference layout) */}
+      <div className={cn("flex flex-1 flex-col px-3.5 pb-0", compact ? "pt-2" : "pt-3")}>
         <div className="overflow-hidden rounded-xl border border-slate-200/90 bg-white">
           {rows.map((row, index) => {
             const Icon = row.icon;
@@ -319,24 +348,40 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
               <div
                 key={row.label}
                 className={cn(
-                  "relative flex min-h-[48px] items-center px-3 py-3",
+                  "relative flex items-center px-3",
+                  compact ? "min-h-[38px] py-2" : "min-h-[48px] py-3",
                   index < rows.length - 1 &&
                     "border-b border-dashed border-slate-200",
                 )}
               >
                 <div className="relative z-[1] flex shrink-0 items-center gap-2 bg-white pe-2">
-                  <span className="flex size-8 items-center justify-center rounded-lg bg-teal-50 text-teal-700 ring-1 ring-teal-700/10">
-                    <Icon className="size-[15px]" strokeWidth={1.7} />
+                  <span
+                    className={cn(
+                      "flex items-center justify-center rounded-lg bg-[#d4af37]/10 text-[#b8962e] ring-1 ring-[#d4af37]/20",
+                      compact ? "size-7" : "size-8",
+                    )}
+                  >
+                    <Icon
+                      className={compact ? "size-[13px]" : "size-[15px]"}
+                      strokeWidth={1.7}
+                    />
                   </span>
-                  <span className="whitespace-nowrap text-[11px] font-semibold text-slate-700">
+                  <span
+                    className={cn(
+                      "whitespace-nowrap font-semibold text-slate-700",
+                      compact ? "text-[10px]" : "text-[11px]",
+                    )}
+                  >
                     {row.label}
                   </span>
                 </div>
                 <div
                   className={cn(
                     "pointer-events-none absolute inset-0 flex items-center justify-center px-3",
-                    "text-[12.5px] font-bold leading-snug text-slate-900",
-                    row.amount && "text-[13.5px] tabular-nums text-teal-700",
+                    "font-bold leading-snug text-slate-900",
+                    compact ? "text-[11.5px]" : "text-[12.5px]",
+                    row.amount && "tabular-nums text-[#b8962e]",
+                    row.amount && !compact && "text-[13.5px]",
                   )}
                 >
                   <span className="max-w-[58%] truncate text-center">
@@ -353,7 +398,7 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
         </p>
       </div>
 
-      <div className="mt-auto flex items-center justify-between gap-2 bg-teal-800 px-3.5 py-2 text-[9px] font-semibold text-white">
+      <div className="mt-auto flex items-center justify-between gap-2 bg-[#1f2937] px-3.5 py-2 text-[9px] font-semibold text-white">
         <span className="inline-flex items-center gap-1.5" dir="ltr">
           <Globe className="size-2.5 opacity-80" />
           www.apex.com
@@ -367,10 +412,7 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
   );
 }
 
-export async function printPaymentReceipt(paymentId: string) {
-  const html = await fetchReceiptHtml(paymentId, true);
-  openHtmlInNewWindow(html);
-}
+export { printPaymentReceipt, downloadPaymentReceiptPdf };
 
 export function PaymentReceiptActions({
   paymentId,
@@ -379,6 +421,8 @@ export function PaymentReceiptActions({
   paymentId: string;
   onView: () => void;
 }) {
+  const [busy, setBusy] = useState<"print" | "pdf" | null>(null);
+
   return (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
       <Button
@@ -388,6 +432,7 @@ export function PaymentReceiptActions({
         className="rounded-lg"
         onClick={onView}
         title="مشاهده رسید"
+        disabled={!!busy}
       >
         <Eye className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">مشاهده رسید</span>
@@ -398,15 +443,23 @@ export function PaymentReceiptActions({
         variant="outline"
         className="rounded-lg"
         title="چاپ"
+        disabled={!!busy}
         onClick={async () => {
+          setBusy("print");
           try {
             await printPaymentReceipt(paymentId);
           } catch (e) {
             toast.error(e instanceof Error ? e.message : "چاپ ناموفق بود");
+          } finally {
+            setBusy(null);
           }
         }}
       >
-        <Printer className="h-3.5 w-3.5" />
+        {busy === "print" ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Printer className="h-3.5 w-3.5" />
+        )}
         <span className="hidden sm:inline">چاپ</span>
       </Button>
       <Button
@@ -415,19 +468,26 @@ export function PaymentReceiptActions({
         variant="ghost"
         className="rounded-lg"
         title="دانلود PDF"
+        disabled={!!busy}
         onClick={async () => {
+          setBusy("pdf");
           try {
-            await printPaymentReceipt(paymentId);
-            toast.message("برای دانلود PDF", {
-              description:
-                "اندازه کاغذ را A6 انتخاب کنید، سپس Save as PDF بزنید.",
-            });
+            const { filename } = await downloadPaymentReceiptPdf(paymentId);
+            toast.success("PDF دانلود شد", { description: filename });
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : "دانلود ناموفق بود");
+            toast.error(
+              e instanceof Error ? e.message : "دانلود PDF ناموفق بود",
+            );
+          } finally {
+            setBusy(null);
           }
         }}
       >
-        <Download className="h-3.5 w-3.5" />
+        {busy === "pdf" ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Download className="h-3.5 w-3.5" />
+        )}
         <span className="hidden sm:inline">PDF</span>
       </Button>
     </div>

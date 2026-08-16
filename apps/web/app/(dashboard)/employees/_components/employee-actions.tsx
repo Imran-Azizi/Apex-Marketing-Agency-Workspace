@@ -27,6 +27,9 @@ interface EmployeeActionsProps {
   onToggleStatus: (employee: Employee) => void;
   onResetPassword: (employee: Employee) => void;
   onDelete: (employee: Employee) => void;
+  canEdit?: boolean;
+  canDisable?: boolean;
+  canDelete?: boolean;
 }
 
 export function EmployeeActions({
@@ -35,6 +38,9 @@ export function EmployeeActions({
   onToggleStatus,
   onResetPassword,
   onDelete,
+  canEdit = true,
+  canDisable = true,
+  canDelete = true,
 }: EmployeeActionsProps) {
   const router = useRouter();
   const isManagerRole =
@@ -63,7 +69,7 @@ export function EmployeeActions({
           <Eye className="me-2 h-4 w-4" />
           مشاهده پروفایل
         </DropdownMenuItem>
-        {!isManagerRole && (
+        {!isManagerRole && canEdit && (
           <DropdownMenuItem
             className="cursor-pointer"
             onClick={() => onEdit(employee)}
@@ -72,6 +78,7 @@ export function EmployeeActions({
             ویرایش کارمند
           </DropdownMenuItem>
         )}
+        {canDisable ? (
         <DropdownMenuItem
           className="cursor-pointer"
           onClick={() => onToggleStatus(employee)}
@@ -88,6 +95,8 @@ export function EmployeeActions({
             </>
           )}
         </DropdownMenuItem>
+        ) : null}
+        {canEdit ? (
         <DropdownMenuItem
           className="cursor-pointer"
           onClick={() => onResetPassword(employee)}
@@ -95,7 +104,8 @@ export function EmployeeActions({
           <KeyRound className="me-2 h-4 w-4" />
           بازنشانی رمز عبور
         </DropdownMenuItem>
-        {!isManagerRole && (
+        ) : null}
+        {!isManagerRole && canDelete && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem

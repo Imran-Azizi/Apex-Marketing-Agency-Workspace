@@ -1,30 +1,33 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clapperboard, RefreshCw } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { apiGet } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import type { PublicService } from "@/lib/services";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { PublicSection } from "@/components/public/public-section";
+import { ServiceCardsGrid } from "@/components/public/service-cards";
 
-interface Service {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  startingPrice: string | null;
-  revisionCount: number;
-}
-
-export function PublicServicesSection() {
+export function PublicServicesSection({
+  previewLimit = 3,
+}: {
+  previewLimit?: number;
+}) {
+  const [showAll, setShowAll] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["public-services"],
-    queryFn: () => apiGet<Service[]>("/public/services"),
+    queryFn: () => apiGet<PublicService[]>("/public/services"),
     staleTime: 10 * 60_000,
     refetchOnWindowFocus: false,
   });
+
+  const items = showAll
+    ? data || []
+    : (data || []).slice(0, previewLimit);
+  const hasMore = (data?.length || 0) > previewLimit;
 
   return (
     <PublicSection
@@ -35,9 +38,9 @@ export function PublicServicesSection() {
       tone="muted"
     >
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-52 rounded-2xl" />
+            <Skeleton key={i} className="aspect-[4/5] rounded-3xl" />
           ))}
         </div>
       ) : null}
@@ -50,45 +53,25 @@ export function PublicServicesSection() {
       ) : null}
 
       {data && data.length === 0 ? (
-        <EmptyState title="خدمتی ثبت نشده است" />
+        <EmptyState
+          title="خدمتی منتشر نشده است"
+          description="به‌زودی خدمات جدید در این بخش نمایش داده می‌شوند."
+        />
       ) : null}
 
-      {data && data.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data.map((service) => (
-            <article
-              key={service.id}
-              className="group flex h-full flex-col rounded-2xl border border-border/70 bg-card p-6 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-brand/30 hover:shadow-md"
-            >
-              <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-brand/10 text-brand transition-transform group-hover:scale-105">
-                <Clapperboard className="h-5 w-5" />
-              </div>
-              <h3 className="text-lg font-semibold tracking-tight text-foreground">
-                {service.name}
-              </h3>
-              {service.startingPrice ? (
-                <p className="mt-1 text-sm font-medium text-brand">
-                  از {formatCurrency(Number(service.startingPrice))}
-                </p>
-              ) : null}
-              {service.description ? (
-                <p className="mt-3 flex-1 text-sm leading-7 text-muted-foreground">
-                  {service.description}
-                </p>
-              ) : (
-                <div className="flex-1" />
-              )}
-              <div className="mt-5 flex items-center gap-2 border-t border-border/60 pt-4">
-                <RefreshCw className="h-3.5 w-3.5 text-muted-foreground" />
-                <Badge variant="brand" className="font-normal">
-                  {service.revisionCount.toLocaleString("fa-AF", {
-                    numberingSystem: "latn",
-                  })}{" "}
-                  دور بازبینی
-                </Badge>
-              </div>
-            </article>
-          ))}
+      {items.length > 0 ? <ServiceCardsGrid services={items} /> : null}
+
+      {hasMore ? (
+        <div className="mt-8 flex justify-center">
+          <Button
+            type="button"
+            variant="brand"
+            className="gap-2 rounded-full px-5"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            {showAll ? "نمایش کمتر" : "مشاهده همه خدمات"}
+            {!showAll ? <ArrowLeft className="h-4 w-4" /> : null}
+          </Button>
         </div>
       ) : null}
     </PublicSection>

@@ -1,12 +1,14 @@
 import { SCENARIO_PROMPT } from './scenario.prompt.js';
 import { NARRATION_PROMPT } from './narration.prompt.js';
 import { STORYBOARD_PROMPT } from './storyboard.prompt.js';
+import { PORTFOLIO_PROMPT } from './portfolio.prompt.js';
 import { PROMPT_VERSION } from '../models.config.js';
 
 export const AGENT_PROMPTS = {
   SCENARIO: SCENARIO_PROMPT,
   NARRATION: NARRATION_PROMPT,
   STORYBOARD: STORYBOARD_PROMPT,
+  PORTFOLIO: PORTFOLIO_PROMPT,
 };
 
 export function getAgentPrompt(agentType) {
@@ -19,4 +21,4 @@ export function getAgentPrompt(agentType) {
 }
 
 export { PROMPT_VERSION };
-export { SCENARIO_PROMPT, NARRATION_PROMPT, STORYBOARD_PROMPT };
+export { SCENARIO_PROMPT, NARRATION_PROMPT, STORYBOARD_PROMPT, PORTFOLIO_PROMPT };

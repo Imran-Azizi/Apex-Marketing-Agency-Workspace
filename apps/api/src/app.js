@@ -17,12 +17,16 @@ import aiRoutes from "./modules/ai/index.js";
 import deliveryRoutes from "./modules/delivery/index.js";
 import publicRoutes from "./modules/public/index.js";
 import settingsRoutes from "./modules/settings/index.js";
+import permissionRoutes from "./modules/permissions/index.js";
 import notificationRoutes from "./modules/notifications/index.js";
 import auditRoutes from "./modules/audit/index.js";
 import fileRoutes from "./modules/files/index.js";
 import narrationRoutes from "./modules/narration/index.js";
 import employeeRoutes from "./modules/employees/index.js";
 import productionRoutes from "./modules/production/index.js";
+import backupRoutes from "./modules/backup/index.js";
+import portfolioRoutes from "./modules/portfolio/index.js";
+import servicesRoutes from "./modules/services/index.js";
 import { storage } from "./services/storage.js";
 
 export function createApp() {
@@ -75,8 +79,8 @@ export function createApp() {
   app.use(globalLimiter);
   app.use(issueCsrf);
 
-  // /files/<key> → public Cloudinary / R2 / S3 URL (compatibility for frontend previews)
-  app.use("/files", (req, res) => {
+  // /files/<key> → resolved Cloudinary / R2 / S3 URL (compatibility for frontend previews)
+  app.use("/files", async (req, res, next) => {
     const key = String(req.path || "").replace(/^\/+/, "");
     if (!key) {
       res.status(404).json({
@@ -86,15 +90,18 @@ export function createApp() {
       return;
     }
     try {
-      res.redirect(302, storage.publicUrl(decodeURIComponent(key)));
+      const decoded = decodeURIComponent(key);
+      const url = await storage.resolveDeliveryUrl(decoded);
+      res.redirect(302, url);
     } catch (err) {
-      res.status(502).json({
-        success: false,
-        error: {
-          code: err?.code || "STORAGE_URL_FAILED",
-          message: err?.message || "Could not resolve file URL",
-        },
-      });
+      if (err?.statusCode === 404 || err?.code === "NOT_FOUND") {
+        res.status(404).json({
+          success: false,
+          error: { code: "NOT_FOUND", message: "فایل یافت نشد" },
+        });
+        return;
+      }
+      next(err);
     }
   });
 
@@ -106,12 +113,16 @@ export function createApp() {
   app.use("/api/v1/ai", aiRoutes);
   app.use("/api/v1/delivery", deliveryRoutes);
   app.use("/api/v1/settings", settingsRoutes);
+  app.use("/api/v1/permissions", permissionRoutes);
   app.use("/api/v1/employees", employeeRoutes);
   app.use("/api/v1/notifications", notificationRoutes);
   app.use("/api/v1/audit", auditRoutes);
   app.use("/api/v1/files", fileRoutes);
   app.use("/api/v1/narration", narrationRoutes);
   app.use("/api/v1/production", productionRoutes);
+  app.use("/api/v1/portfolio", portfolioRoutes);
+  app.use("/api/v1/backup", backupRoutes);
+  app.use("/api/v1/services", servicesRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

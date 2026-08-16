@@ -12,9 +12,6 @@ import {
 import { prisma } from "../../db/prisma.js";
 import { normalizeDigitsDeep } from "../../utils/toEnglishDigits.js";
 
-/** Max upload size (matches prior behavior). Cloudinary free plans may be lower. */
-const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
-
 const ALLOWED_MIME_PREFIXES = [
   "image/",
   "video/",
@@ -37,16 +34,9 @@ function isAllowedMime(mime) {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_UPLOAD_BYTES },
   fileFilter(_req, file, cb) {
     if (!isAllowedMime(file.mimetype)) {
-      cb(
-        new AppError(
-          "نوع فایل مجاز نیست",
-          400,
-          "FILE_TYPE_NOT_ALLOWED",
-        ),
-      );
+      cb(new AppError("نوع فایل مجاز نیست", 400, "FILE_TYPE_NOT_ALLOWED"));
       return;
     }
     cb(null, true);
@@ -169,6 +159,24 @@ async function assertMediaAccess(file, auth) {
   throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
 }
 
+function pipeFileStream(stream, res) {
+  stream.on("error", (err) => {
+    console.error("[files] stream error:", err?.message || err);
+    if (!res.headersSent) {
+      res.status(502).json({
+        success: false,
+        error: { code: "STREAM_FAILED", message: "خواندن فایل ناموفق بود" },
+      });
+      return;
+    }
+    res.destroy(err);
+  });
+  res.on("close", () => {
+    if (!stream.destroyed) stream.destroy();
+  });
+  stream.pipe(res);
+}
+
 async function streamStoredFile(
   req,
   res,
@@ -178,18 +186,61 @@ async function streamStoredFile(
   const head = await storage.head(storageKey);
   const fileSize = head.size;
   const range = req.headers.range;
+  const inferredExt = String(storageKey || "")
+    .split(".")
+    .pop()
+    ?.toLowerCase();
+  const inferredMime =
+    inferredExt === "pdf"
+      ? "application/pdf"
+      : inferredExt === "docx"
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        : inferredExt === "doc"
+          ? "application/msword"
+          : null;
   const contentType =
-    mimeType || head.contentType || "application/octet-stream";
+    mimeType ||
+    (head.contentType && head.contentType !== "application/octet-stream"
+      ? head.contentType
+      : null) ||
+    inferredMime ||
+    head.contentType ||
+    "application/octet-stream";
+
+  /**
+   * Cloudinary video/audio: after ACL, send the player straight to a short-lived
+   * CDN URL. Proxying the body through Node+undici causes frequent "terminated"
+   * failures on HTTP/2 (especially with Range seeking).
+   */
+  const isAv =
+    String(contentType).startsWith("video/") ||
+    String(contentType).startsWith("audio/") ||
+    head.resourceType === "video";
+  if (isAv && storage.isCloudinary()) {
+    try {
+      const url = await storage.createPresignedGetUrl(storageKey);
+      if (url) {
+        res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+        res.redirect(302, url);
+        return;
+      }
+    } catch (err) {
+      console.warn(
+        "[files] cloudinary CDN redirect failed, falling back to proxy:",
+        err?.message || err,
+      );
+    }
+  }
 
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
   res.setHeader("Content-Type", contentType);
-  if (downloadName) {
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename*=UTF-8''${encodeURIComponent(downloadName)}`,
-    );
-  }
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename*=UTF-8''${encodeURIComponent(
+      downloadName || path.basename(storageKey) || "file",
+    )}`,
+  );
 
   if (range) {
     const match = /^bytes=(\d*)-(\d*)$/.exec(range);
@@ -220,13 +271,13 @@ async function streamStoredFile(
       contentRange || `bytes ${start}-${chunkEnd}/${fileSize}`,
     );
     res.setHeader("Content-Length", contentLength ?? chunkEnd - start + 1);
-    stream.pipe(res);
+    pipeFileStream(stream, res);
     return;
   }
 
   const { stream, contentLength } = await storage.openReadStream(storageKey);
   res.setHeader("Content-Length", contentLength ?? fileSize);
-  stream.pipe(res);
+  pipeFileStream(stream, res);
 }
 
 router.post(
@@ -234,19 +285,16 @@ router.post(
   requireAuth,
   requireCsrf,
   (req, res, next) => {
+    // Final videos can take several minutes on slow Cloudinary links.
+    req.setTimeout(20 * 60 * 1000);
+    res.setTimeout(20 * 60 * 1000);
+    next();
+  },
+  (req, res, next) => {
     upload.single("file")(req, res, (err) => {
       if (!err) return next();
       if (err instanceof AppError) return next(err);
       if (err instanceof multer.MulterError) {
-        if (err.code === "LIMIT_FILE_SIZE") {
-          return next(
-            new AppError(
-              "حجم فایل بیشتر از حد مجاز است (حداکثر ۲۰۰ مگابایت)",
-              400,
-              "FILE_TOO_LARGE",
-            ),
-          );
-        }
         return next(
           new AppError(err.message || "آپلود ناموفق", 400, "UPLOAD_FAILED"),
         );

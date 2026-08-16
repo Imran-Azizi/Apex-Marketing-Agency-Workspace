@@ -11,6 +11,9 @@ import {
   getActiveProviderInfo,
   sanitizeAiInput,
 } from '../../services/ai/index.js';
+import {
+  attachStoryboardImages,
+} from '../../services/ai/storyboard-images.js';
 import { rebuildProjectContext } from '../../services/projectContext.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { env, getActiveAiConfig } from '../../config/env.js';
@@ -64,6 +67,15 @@ const AGENT_STEP_KEY = {
   NARRATION: 'narration',
   STORYBOARD: 'storyboard',
 };
+
+const USER_PROMPT_MAX_CHARS = 4000;
+
+function normalizeUserPrompt(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  return text.slice(0, USER_PROMPT_MAX_CHARS);
+}
 
 function initSteps() {
   return PIPELINE_STEPS.map((s) => ({
@@ -173,7 +185,15 @@ async function loadProjectInput(projectId) {
   };
 }
 
-async function executePipelineJob({ projectId, workflowId, auth, changeNotes, req }) {
+async function executePipelineJob({
+  projectId,
+  workflowId,
+  auth,
+  changeNotes,
+  req,
+  userPrompt = null,
+  baseVersionId = null,
+}) {
   let steps = initSteps();
   const touch = async (nextSteps, extra = {}) => {
     steps = nextSteps;
@@ -185,6 +205,43 @@ async function executePipelineJob({ projectId, workflowId, auth, changeNotes, re
 
   try {
     const { input } = await loadProjectInput(projectId);
+    const normalizedPrompt = normalizeUserPrompt(userPrompt);
+
+    if (normalizedPrompt) {
+      input.userInstructions = normalizedPrompt;
+      // Keep managerNotes aligned for older prompt templates / logs
+      input.managerNotes = [input.managerNotes, normalizedPrompt].filter(Boolean).join('\n\n');
+    }
+
+    if (baseVersionId) {
+      const baseVersion = await prisma.contentVersion.findFirst({
+        where: { id: baseVersionId, projectId },
+        select: {
+          id: true,
+          versionNumber: true,
+          scenario: true,
+          narration: true,
+          storyboard: true,
+        },
+      });
+      if (!baseVersion) {
+        throw new AppError('نسخه پایه برای ویرایش یافت نشد', 404, 'NOT_FOUND');
+      }
+      input.priorOutputs = {
+        scenario: baseVersion.scenario || null,
+        narration: baseVersion.narration || null,
+        storyboard: baseVersion.storyboard || null,
+      };
+      input.revisionOfVersionId = baseVersion.id;
+      input.revisionOfVersionNumber = baseVersion.versionNumber;
+      if (normalizedPrompt) {
+        input.userInstructions = [
+          `Revise the provided priorOutputs (version ${baseVersion.versionNumber}) according to these manager edit instructions.`,
+          'Preserve strong existing ideas unless the instructions ask to change them.',
+          normalizedPrompt,
+        ].join('\n');
+      }
+    }
 
     await touch(
       markStep(steps, 'read_project', {
@@ -347,6 +404,22 @@ async function executePipelineJob({ projectId, workflowId, auth, changeNotes, re
       }),
     );
 
+    let storyboardOutput = outputs.storyboard || null;
+    let storyboardImagesMeta = null;
+    if (storyboardOutput) {
+      try {
+        storyboardOutput = await attachStoryboardImages(storyboardOutput, {
+          projectId,
+          scenario: outputs.scenario || null,
+          narration: outputs.narration || null,
+        });
+        storyboardImagesMeta = storyboardOutput.imagesMeta || null;
+        delete storyboardOutput.imagesMeta;
+      } catch (imgErr) {
+        console.warn('[AI storyboard images]', imgErr.message);
+      }
+    }
+
     const last = await prisma.contentVersion.findFirst({
       where: { projectId, kind: 'BUNDLE' },
       orderBy: { versionNumber: 'desc' },
@@ -360,7 +433,7 @@ async function executePipelineJob({ projectId, workflowId, auth, changeNotes, re
         versionNumber,
         scenario: outputs.scenario || null,
         narration: outputs.narration || null,
-        storyboard: outputs.storyboard || null,
+        storyboard: storyboardOutput,
         extras: {
           provider: pipeline.provider,
           model: pipeline.model,
@@ -369,6 +442,9 @@ async function executePipelineJob({ projectId, workflowId, auth, changeNotes, re
           usedFallback: pipeline.usedFallback || false,
           fallbackCode: pipeline.fallbackCode || null,
           fallbackNotice: pipeline.fallbackError || null,
+          userInstructions: normalizedPrompt || null,
+          revisionOfVersionId: baseVersionId || null,
+          storyboardImages: storyboardImagesMeta,
           stepResults: (pipeline.steps || []).map((s) => ({
             agentType: s.agentType,
             feature: s.feature || s.agentType,
@@ -386,7 +462,14 @@ async function executePipelineJob({ projectId, workflowId, auth, changeNotes, re
         aiRunId: runByAgent.SCENARIO || runByAgent.NARRATION || runByAgent.STORYBOARD || null,
         workflowId,
         changeNotes:
-          changeNotes || (versionNumber > 1 ? 'بازتولید توسط هوش مصنوعی' : 'تولید اولیه توسط هوش مصنوعی'),
+          changeNotes ||
+          (baseVersionId
+            ? normalizedPrompt
+              ? `ویرایش با هوش مصنوعی: ${normalizedPrompt.slice(0, 120)}`
+              : 'ویرایش با هوش مصنوعی'
+            : versionNumber > 1
+              ? 'بازتولید توسط هوش مصنوعی'
+              : 'تولید اولیه توسط هوش مصنوعی'),
       },
     });
 
@@ -641,8 +724,15 @@ export const aiService = {
   /**
    * Full "Generate Content" pipeline — always creates a NEW content version.
    * Runs async by default so the UI can poll workflow progress.
+   * Optional userPrompt is high-priority creative / edit guidance for the agents.
+   * Optional baseVersionId loads that version as priorOutputs for guided revision.
    */
-  async generateContent(projectId, auth, req, { changeNotes, sync } = {}) {
+  async generateContent(
+    projectId,
+    auth,
+    req,
+    { changeNotes, sync, userPrompt, baseVersionId } = {},
+  ) {
     await this.ensureAgentsSeeded();
     const existingRunning = await prisma.aiWorkflowExecution.findFirst({
       where: { projectId, status: { in: ['PENDING', 'RUNNING'] } },
@@ -651,6 +741,7 @@ export const aiService = {
       throw new AppError('یک اجرای هوش مصنوعی در حال انجام است', 409, 'AI_BUSY');
     }
 
+    const normalizedPrompt = normalizeUserPrompt(userPrompt);
     const steps = initSteps();
     const workflow = await prisma.aiWorkflowExecution.create({
       data: {
@@ -667,20 +758,27 @@ export const aiService = {
       action: 'AI_PIPELINE_STARTED',
       entityType: 'AiWorkflowExecution',
       entityId: workflow.id,
-      message: 'شروع تولید محتوا',
-      meta: { changeNotes: changeNotes || null },
+      message: baseVersionId ? 'شروع ویرایش محتوا با هوش مصنوعی' : 'شروع تولید محتوا',
+      meta: {
+        changeNotes: changeNotes || null,
+        userPrompt: normalizedPrompt,
+        baseVersionId: baseVersionId || null,
+      },
     });
 
     const runSync = sync === true || env.aiAsyncPipeline === false;
+    const jobArgs = {
+      projectId,
+      workflowId: workflow.id,
+      auth,
+      changeNotes,
+      req,
+      userPrompt: normalizedPrompt,
+      baseVersionId: baseVersionId || null,
+    };
 
     if (runSync) {
-      const result = await executePipelineJob({
-        projectId,
-        workflowId: workflow.id,
-        auth,
-        changeNotes,
-        req,
-      });
+      const result = await executePipelineJob(jobArgs);
       return {
         workflow: await this.getWorkflow(workflow.id),
         version: result.version,
@@ -689,13 +787,7 @@ export const aiService = {
     }
 
     setImmediate(() => {
-      executePipelineJob({
-        projectId,
-        workflowId: workflow.id,
-        auth,
-        changeNotes,
-        req,
-      }).catch((err) => {
+      executePipelineJob(jobArgs).catch((err) => {
         console.error('[AI pipeline]', workflow.id, err.message);
       });
     });
@@ -704,11 +796,13 @@ export const aiService = {
       workflow: await this.getWorkflow(workflow.id),
       version: null,
       async: true,
-      message: 'تولید محتوا در پس‌زمینه شروع شد',
+      message: baseVersionId
+        ? 'ویرایش محتوا در پس‌زمینه شروع شد'
+        : 'تولید محتوا در پس‌زمینه شروع شد',
     };
   },
 
-  async updateVersionContent(projectId, versionId, { scenario, narration, storyboard, extras, changeNotes }, auth, req) {
+  async updateVersionContent(projectId, versionId, { scenario, narration, storyboard, extras, changeNotes, editPrompt }, auth, req) {
     const version = await prisma.contentVersion.findFirst({
       where: { id: versionId, projectId },
     });
@@ -730,15 +824,32 @@ export const aiService = {
         ? normalizeStoryboardOutput(storyboard, projectId)
         : version.storyboard;
 
+    const normalizedEditPrompt = normalizeUserPrompt(editPrompt);
+    const nextChangeNotes =
+      changeNotes ||
+      (normalizedEditPrompt ? `ویرایش با دستور: ${normalizedEditPrompt.slice(0, 180)}` : null) ||
+      version.changeNotes;
+
+    const prevExtras =
+      version.extras && typeof version.extras === 'object' && !Array.isArray(version.extras)
+        ? version.extras
+        : {};
+    const nextExtras =
+      extras !== undefined
+        ? extras
+        : normalizedEditPrompt
+          ? { ...prevExtras, lastEditPrompt: normalizedEditPrompt }
+          : version.extras;
+
     const updated = await prisma.contentVersion.update({
       where: { id: versionId },
       data: {
         scenario: nextScenario,
         narration: nextNarration,
         storyboard: nextStoryboard,
-        extras: extras !== undefined ? extras : version.extras,
+        extras: nextExtras,
         status: 'UNDER_REVIEW',
-        changeNotes: changeNotes || version.changeNotes,
+        changeNotes: nextChangeNotes,
       },
     });
 
@@ -755,7 +866,8 @@ export const aiService = {
       action: 'AI_CONTENT_EDIT',
       entityType: 'ContentVersion',
       entityId: versionId,
-      message: 'ویرایش دستی مدیر',
+      message: normalizedEditPrompt ? 'ویرایش محتوا با دستورات مدیر' : 'ویرایش دستی مدیر',
+      meta: { editPrompt: normalizedEditPrompt },
     });
 
     return updated;

@@ -2,12 +2,30 @@
 
 import { use } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { getMe, type MeResponse } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { EditingMaterialsSkeleton } from "@/components/projects/editing-materials-panel";
+import {
+  EditingMaterialsSkeleton,
+  type ProductionWorkspaceTab,
+} from "@/components/projects/editing-materials-panel";
 import { ProjectProductionPanel } from "@/components/projects/project-production-panel";
+
+function resolveWorkspaceParam(
+  value: string | null,
+): ProductionWorkspaceTab | undefined {
+  if (
+    value === "customer" ||
+    value === "ai" ||
+    value === "narration" ||
+    value === "final"
+  ) {
+    return value;
+  }
+  return undefined;
+}
 
 export default function EditorTaskPage({
   params,
@@ -15,6 +33,8 @@ export default function EditorTaskPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = use(params);
+  const searchParams = useSearchParams();
+  const initialWorkspace = resolveWorkspaceParam(searchParams.get("workspace"));
   const { data: me, isLoading } = useQuery({
     queryKey: ["me", "internal"],
     queryFn: getMe,
@@ -52,6 +72,7 @@ export default function EditorTaskPage({
       <ProjectProductionPanel
         projectId={projectId}
         roleCode={(me as MeResponse | null)?.role}
+        initialWorkspaceTab={initialWorkspace}
       />
     </div>
   );

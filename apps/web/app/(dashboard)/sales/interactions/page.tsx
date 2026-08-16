@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
@@ -65,13 +66,13 @@ export default function SalesInteractionsPage() {
       )}
 
       {data && data.items.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border">
-          <Table>
+        <HorizontalScroll>
+          <Table className="min-w-[36rem]">
             <TableHeader>
               <TableRow className="bg-muted/40 hover:bg-muted/40">
                 <TableHead>مشتری</TableHead>
-                <TableHead>آخرین تماس</TableHead>
-                <TableHead>پیگیری بعدی</TableHead>
+                <TableHead className="whitespace-nowrap">آخرین تماس</TableHead>
+                <TableHead className="whitespace-nowrap">پیگیری بعدی</TableHead>
                 <TableHead>یادداشت فروش</TableHead>
               </TableRow>
             </TableHeader>
@@ -91,10 +92,10 @@ export default function SalesInteractionsPage() {
                       </span>
                     )}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                     {c.lastContactAt ? formatDate(c.lastContactAt) : "—"}
                   </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                     {c.nextFollowUpAt ? formatDate(c.nextFollowUpAt) : "—"}
                   </TableCell>
                   <TableCell className="max-w-xs truncate text-sm">
@@ -104,7 +105,7 @@ export default function SalesInteractionsPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
+        </HorizontalScroll>
       )}
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { Logo } from "@/components/brand/logo";
 
 const BOOT_KEY = "apex-boot-seen";
 
@@ -44,11 +45,7 @@ export function AppBootLoader() {
         phase === "exit" ? "pointer-events-none opacity-0" : "opacity-100",
       )}
     >
-      <div className="relative">
-        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-brand text-xl font-black text-brand-foreground shadow-lg shadow-brand/25">
-          ا
-        </div>
-      </div>
+      <Logo variant="mark" size="splash" />
       <div className="h-1 w-28 overflow-hidden rounded-full bg-secondary">
         <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-brand" />
       </div>

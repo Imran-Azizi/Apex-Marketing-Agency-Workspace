@@ -2,12 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import {
-  ArrowDownRight,
-  ArrowUpRight,
-  Minus,
-  type LucideIcon,
-} from "lucide-react";
+import { type LucideIcon } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TONE_CARD, TONE_ICON } from "@/lib/theme-tones";
@@ -102,36 +97,6 @@ export function AnimatedNumber({
   );
 }
 
-function MiniSparkline({ values }: { values: number[] }) {
-  if (!values.length) return null;
-  const max = Math.max(...values, 1);
-  const w = 64;
-  const h = 24;
-  const step = values.length > 1 ? w / (values.length - 1) : w;
-  const points = values
-    .map((v, i) => `${i * step},${h - (v / max) * (h - 2)}`)
-    .join(" ");
-
-  return (
-    <svg
-      width={w}
-      height={h}
-      viewBox={`0 0 ${w} ${h}`}
-      className="opacity-70"
-      aria-hidden
-    >
-      <polyline
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.75"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        points={points}
-      />
-    </svg>
-  );
-}
-
 export function KpiCard({
   metric,
   icon: Icon,
@@ -140,83 +105,36 @@ export function KpiCard({
   icon: LucideIcon;
 }) {
   const tone = metric.tone || "default";
-  const TrendIcon =
-    metric.trendPct == null
-      ? Minus
-      : metric.trendPct > 0
-        ? ArrowUpRight
-        : metric.trendPct < 0
-          ? ArrowDownRight
-          : Minus;
 
   const body = (
     <div
       className={cn(
-        "group relative flex h-full flex-col gap-3 rounded-2xl border p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md",
+        "group relative flex h-full min-h-[120px] flex-col justify-between gap-3 rounded-2xl border p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md sm:p-5",
         TONE_CARD[tone],
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="text-xs font-medium text-muted-foreground">{metric.label}</p>
-          <p className="text-2xl font-bold text-foreground">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <p className="text-xs font-medium leading-5 text-muted-foreground">
+            {metric.label}
+          </p>
+          <p className="text-xl font-bold leading-tight tracking-tight text-foreground sm:text-2xl">
             <AnimatedNumber value={metric.value} format={metric.format} />
           </p>
           {metric.description ? (
-            <p className="text-[11px] leading-5 text-muted-foreground">
+            <p className="text-[11px] leading-5 text-muted-foreground/90">
               {metric.description}
             </p>
           ) : null}
         </div>
         <span
           className={cn(
-            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-transform group-hover:scale-105",
+            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset ring-black/5 transition-transform group-hover:scale-105 dark:ring-white/10",
             TONE_ICON[tone],
           )}
         >
           <Icon className="h-5 w-5" aria-hidden />
         </span>
-      </div>
-
-      <div className="mt-auto flex items-end justify-between gap-2">
-        <div className="min-w-0 flex-1 space-y-1.5">
-          {typeof metric.progress === "number" ? (
-            <div
-              className="h-1.5 overflow-hidden rounded-full bg-muted"
-              role="progressbar"
-              aria-valuenow={metric.progress}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={metric.label}
-            >
-              <div
-                className="h-full rounded-full bg-brand transition-all duration-500"
-                style={{ width: `${Math.min(100, Math.max(0, metric.progress))}%` }}
-              />
-            </div>
-          ) : null}
-          {metric.trendPct != null ? (
-            <span
-              className={cn(
-                "inline-flex items-center gap-0.5 text-[11px] font-medium",
-                metric.trendPct > 0
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : metric.trendPct < 0
-                    ? "text-destructive"
-                    : "text-muted-foreground",
-              )}
-            >
-              <TrendIcon className="h-3.5 w-3.5" aria-hidden />
-              {metric.trendPct > 0 ? "+" : ""}
-              {metric.trendPct}% نسبت به بازه قبل
-            </span>
-          ) : null}
-        </div>
-        {metric.sparkline?.length ? (
-          <span className={cn(TONE_ICON[tone], "rounded-md p-1 text-current")}>
-            <MiniSparkline values={metric.sparkline} />
-          </span>
-        ) : null}
       </div>
     </div>
   );

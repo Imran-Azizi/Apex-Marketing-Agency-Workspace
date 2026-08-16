@@ -2,6 +2,10 @@ import { Router } from 'express';
 import { ok } from '../../utils/response.js';
 import { prisma } from '../../db/prisma.js';
 import { buildWhatsappCta } from '../../services/whatsapp.js';
+import {
+  portfolioService,
+  streamPortfolioVideo,
+} from '../portfolio/service.js';
 
 const router = Router();
 
@@ -12,22 +16,10 @@ function cachePublic(seconds = 60) {
   };
 }
 
-router.get('/services', cachePublic(120), async (req, res, next) => {
+router.get('/services', cachePublic(60), async (req, res, next) => {
   try {
-    ok(res, await prisma.service.findMany({
-      where: { isPublished: true, deletedAt: null },
-      orderBy: { sortOrder: 'asc' },
-    }));
-  } catch (e) { next(e); }
-});
-
-router.get('/styles', cachePublic(120), async (req, res, next) => {
-  try {
-    ok(res, await prisma.style.findMany({
-      where: { isPublished: true, deletedAt: null },
-      include: { service: { select: { id: true, name: true } } },
-      orderBy: { sortOrder: 'asc' },
-    }));
+    const { servicesService } = await import('../services/service.js');
+    ok(res, await servicesService.listPublic());
   } catch (e) { next(e); }
 });
 
@@ -71,6 +63,32 @@ router.get('/narrators/samples', cachePublic(120), async (req, res, next) => {
       },
     }));
   } catch (e) { next(e); }
+});
+
+router.get('/portfolio', cachePublic(60), async (req, res, next) => {
+  try {
+    ok(res, await portfolioService.listPublic());
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Stream published portfolio video without auth — only PUBLISHED items. */
+router.get('/portfolio/:id/stream', async (req, res, next) => {
+  try {
+    const file = await portfolioService.getPublishedStreamTarget(req.params.id);
+    await streamPortfolioVideo(req, res, file);
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/portfolio/:slug', cachePublic(60), async (req, res, next) => {
+  try {
+    ok(res, await portfolioService.getPublicBySlug(req.params.slug));
+  } catch (e) {
+    next(e);
+  }
 });
 
 router.get('/whatsapp-cta', cachePublic(60), async (req, res, next) => {

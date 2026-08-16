@@ -6,6 +6,9 @@
 const IMAGE_EXT = new Set([
   "jpg",
   "jpeg",
+  "jfif",
+  "jpe",
+  "jif",
   "png",
   "gif",
   "webp",
@@ -18,6 +21,22 @@ const IMAGE_EXT = new Set([
   "heic",
   "heif",
 ]);
+
+/** Extensions Cloudinary often normalizes away from the original filename. */
+const JPEG_FAMILY = new Set(["jpg", "jpeg", "jfif", "jpe", "jif"]);
+
+/**
+ * Delivery `format` for reconstructed CDN URLs.
+ * Prefer omitting format so Cloudinary serves the stored asset (e.g. .jfif → .jpg).
+ * @param {string | undefined} ext
+ * @returns {string | undefined}
+ */
+export function deliveryFormatForExtension(ext) {
+  if (!ext) return undefined;
+  const normalized = String(ext).toLowerCase();
+  if (JPEG_FAMILY.has(normalized)) return undefined;
+  return normalized;
+}
 
 const VIDEO_EXT = new Set([
   "mp4",

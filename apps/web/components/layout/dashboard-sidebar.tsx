@@ -1,25 +1,26 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { LogOut } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/lib/auth";
 import { getNavItems, getRoleLabel, type InternalRole } from "@/lib/rbac";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Logo } from "@/components/brand/logo";
+import { DashboardNav } from "@/components/layout/dashboard-nav";
 
 interface DashboardSidebarProps {
   role?: string | null;
+  permissions?: string[] | null;
 }
 
-export function DashboardSidebar({ role }: DashboardSidebarProps) {
+export function DashboardSidebar({ role, permissions }: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const navItems = getNavItems(role);
+  const navItems = getNavItems(role, permissions);
 
   async function handleLogout() {
     try {
@@ -36,49 +37,18 @@ export function DashboardSidebar({ role }: DashboardSidebarProps) {
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-e bg-sidebar text-sidebar-foreground lg:flex">
-      <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-6">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-accent text-sm font-bold text-white">
-          ا
-        </div>
-        <div className="min-w-0">
-          <span className="block text-lg font-bold leading-tight">اپیکس</span>
-          {role && (
-            <span className="text-xs text-sidebar-foreground/70">
-              {getRoleLabel(role)}
-            </span>
-          )}
-        </div>
+      <div className="flex h-16 items-center border-b border-sidebar-border px-6">
+        <Logo
+          size="md"
+          onDark
+          subtitle={role ? getRoleLabel(role) : undefined}
+          className="text-sidebar-foreground"
+        />
       </div>
 
-      <nav className="flex-1 space-y-1 p-4">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const hasMoreSpecific = navItems.some(
-            (other) =>
-              other.href !== item.href &&
-              other.href.startsWith(`${item.href}/`) &&
-              (pathname === other.href || pathname.startsWith(`${other.href}/`))
-          );
-          const active =
-            !hasMoreSpecific &&
-            (pathname === item.href || pathname.startsWith(`${item.href}/`));
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
-                active
-                  ? "bg-sidebar-accent text-white"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-border hover:text-sidebar-foreground"
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+        <DashboardNav items={navItems} pathname={pathname} />
+      </div>
 
       <div className="border-t border-sidebar-border p-4 space-y-2">
         {role && (

@@ -8,6 +8,8 @@ export const UPLOAD_PURPOSE = Object.freeze({
   PRODUCTION_FINAL: "production-final",
   NARRATION_AUDIO: "narration-audio",
   EMPLOYEE_PROFILE: "employee-profile",
+  EMPLOYEE_CV: "employee-cv",
+  SERVICE_IMAGE: "service-image",
   GENERIC: "generic",
 });
 
@@ -186,6 +188,29 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
     };
   }
 
+  if (purpose === UPLOAD_PURPOSE.SERVICE_IMAGE) {
+    return {
+      folderPath: `${MEDIA_ROOTS.IMAGES}/services`,
+      category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.EMPLOYEE_CV) {
+    if (context.userId) {
+      return {
+        folderPath: `${MEDIA_ROOTS.USERS}/${context.userId}/cv`,
+        category: MEDIA_ROOTS.DOCUMENTS,
+        purpose,
+      };
+    }
+    return {
+      folderPath: `${MEDIA_ROOTS.DOCUMENTS}/employee-cv`,
+      category: MEDIA_ROOTS.DOCUMENTS,
+      purpose,
+    };
+  }
+
   if (purpose === UPLOAD_PURPOSE.NARRATION_AUDIO && context.projectId) {
     return {
       folderPath: `${MEDIA_ROOTS.PROJECTS}/${context.projectId}/audio`,
@@ -233,8 +258,10 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
  */
 export function generateStorageKey(folderPath, filename) {
   const safeFolder = normalizeMediaFolderPath(folderPath);
-  const safeName = sanitizeFilename(filename);
-  return `${safeFolder}/${Date.now()}-${crypto.randomBytes(6).toString("hex")}-${safeName}`;
+  // Keep keys short and URL-safe — original display name is stored separately in DB.
+  const ext = extensionOf(filename);
+  const id = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}`;
+  return ext ? `${safeFolder}/${id}.${ext}` : `${safeFolder}/${id}`;
 }
 
 /**

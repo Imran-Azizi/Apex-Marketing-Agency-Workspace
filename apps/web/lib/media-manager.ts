@@ -8,6 +8,8 @@ export const UPLOAD_PURPOSE = {
   PRODUCTION_FINAL: "production-final",
   NARRATION_AUDIO: "narration-audio",
   EMPLOYEE_PROFILE: "employee-profile",
+  EMPLOYEE_CV: "employee-cv",
+  SERVICE_IMAGE: "service-image",
   GENERIC: "generic",
 } as const;
 

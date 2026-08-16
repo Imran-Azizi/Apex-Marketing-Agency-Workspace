@@ -12,14 +12,14 @@ function readCssVar(name: string, fallback: string): string {
 }
 
 const CHART_FALLBACKS = [
-  "hsl(174 72% 32%)",
-  "hsl(199 89% 42%)",
-  "hsl(38 92% 48%)",
+  "hsl(46 65% 52%)",
+  "hsl(217 19% 40%)",
+  "hsl(215 28% 17%)",
   "hsl(152 60% 38%)",
   "hsl(0 72% 51%)",
-  "hsl(262 52% 52%)",
-  "hsl(215 16% 47%)",
-  "hsl(330 70% 48%)",
+  "hsl(38 92% 48%)",
+  "hsl(218 11% 55%)",
+  "hsl(45 55% 38%)",
 ];
 
 export function getChartPalette(): string[] {
@@ -29,13 +29,13 @@ export function getChartPalette(): string[] {
 }
 
 export function getChartGridColor(): string {
-  return readCssVar("--chart-grid", "hsl(214 20% 88%)");
+  return readCssVar("--chart-grid", "hsl(220 13% 88%)");
 }
 
 export function getChartAxisColor(): string {
-  return readCssVar("--chart-axis", "hsl(215 12% 42%)");
+  return readCssVar("--chart-axis", "hsl(217 14% 40%)");
 }
 
 export function getBrandColor(): string {
-  return readCssVar("--brand", "hsl(174 72% 32%)");
+  return readCssVar("--brand", "hsl(46 65% 52%)");
 }

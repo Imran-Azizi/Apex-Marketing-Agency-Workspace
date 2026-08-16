@@ -7,6 +7,7 @@ import { hashToken, randomToken, signAccessToken, signRefreshToken, verifyRefres
 import { writeAudit } from '../../middleware/audit.js';
 import { normalizeWhatsapp } from '../../utils/whatsappNormalize.js';
 import { roleToPanel } from '../../config/cookies.js';
+import { effectiveFromUser } from '../../services/permissions/effective.js';
 import bcrypt from 'bcryptjs';
 
 function parseExpiryToDate(expiresIn) {
@@ -43,6 +44,7 @@ export const authService = {
       where: { email: email.toLowerCase(), deletedAt: null },
       include: {
         role: { include: { permissions: { include: { permission: true } } } },
+        userPermissions: { include: { permission: true } },
       },
     });
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
@@ -90,7 +92,7 @@ export const authService = {
         fullName: user.fullName,
         role: user.role.code,
         profileImage: user.profileImage || null,
-        permissions: user.role.permissions.map((p) => p.permission.code),
+        permissions: effectiveFromUser(user),
       },
     };
   },

@@ -1,41 +1,65 @@
 "use client";
 
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { getNavItems, getRoleLabel } from "@/lib/rbac";
-import { cn } from "@/lib/utils";
 import { filePreviewUrl } from "@/lib/upload";
 import { Badge } from "@/components/ui/badge";
 import { NotificationCenter } from "@/components/notifications/notification-center";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { Logo } from "@/components/brand/logo";
+import { DashboardNav } from "@/components/layout/dashboard-nav";
 
 interface DashboardTopbarProps {
   userName?: string;
   role?: string | null;
   profileImage?: string | null;
+  permissions?: string[] | null;
 }
 
 export function DashboardTopbar({
   userName,
   role,
   profileImage,
+  permissions,
 }: DashboardTopbarProps) {
   const pathname = usePathname();
-  const navItems = getNavItems(role);
+  const navItems = getNavItems(role, permissions);
   const initials = userName
     ?.split(" ")
     .map((n) => n[0])
     .join("")
     .slice(0, 2);
   const imageUrl = profileImage ? filePreviewUrl(profileImage) : null;
+  const [imageFailed, setImageFailed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [imageUrl]);
+
+  // Close the mobile drawer after route changes (covers nested/dynamic links).
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  function closeMobileNav() {
+    setMobileOpen(false);
+  }
 
   return (
     <header className="flex h-16 items-center justify-between border-b bg-background px-4 lg:px-6">
-      <Sheet>
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetTrigger asChild>
           <Button variant="ghost" size="icon" className="lg:hidden">
             <Menu className="h-5 w-5" />
@@ -43,45 +67,32 @@ export function DashboardTopbar({
         </SheetTrigger>
         <SheetContent
           side="right"
-          className="w-64 bg-sidebar p-0 text-sidebar-foreground"
+          className="flex w-[min(100%,16rem)] flex-col gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground sm:max-w-none"
         >
-          <div className="flex h-16 items-center justify-between gap-2 border-b border-sidebar-border px-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-accent text-sm font-bold text-white">
-                ا
-              </div>
-              <div>
-                <span className="block text-lg font-bold">اپیکس</span>
-                {role && (
-                  <span className="text-xs opacity-70">{getRoleLabel(role)}</span>
-                )}
-              </div>
-            </div>
-            <ThemeToggle className="text-sidebar-foreground hover:bg-sidebar-border hover:text-sidebar-foreground" />
+          <SheetHeader className="sr-only">
+            <SheetTitle>منوی ناوبری</SheetTitle>
+          </SheetHeader>
+
+          <div className="flex h-16 shrink-0 items-center border-b border-sidebar-border px-4 pe-12">
+            <Logo
+              size="md"
+              onDark
+              subtitle={role ? getRoleLabel(role) : undefined}
+              className="text-sidebar-foreground"
+            />
           </div>
-          <nav className="space-y-1 p-4">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active =
-                pathname === item.href ||
-                pathname.startsWith(`${item.href}/`);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium",
-                    active
-                      ? "bg-sidebar-accent text-white"
-                      : "text-sidebar-foreground/80 hover:bg-sidebar-border",
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
+
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
+            <DashboardNav
+              items={navItems}
+              pathname={pathname}
+              onNavigate={closeMobileNav}
+            />
+          </div>
+
+          <div className="shrink-0 border-t border-sidebar-border bg-sidebar p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <ThemeToggle variant="tabs" />
+          </div>
         </SheetContent>
       </Sheet>
 
@@ -97,11 +108,14 @@ export function DashboardTopbar({
         <NotificationCenter />
         <div className="flex items-center gap-2">
           <Avatar className="h-8 w-8 ring-1 ring-border/50">
-            {imageUrl ? (
+            {imageUrl && !imageFailed ? (
               <AvatarImage
                 src={imageUrl}
                 alt={userName || "کاربر"}
                 className="object-cover"
+                onLoadingStatusChange={(status) => {
+                  if (status === "error") setImageFailed(true);
+                }}
               />
             ) : null}
             <AvatarFallback className="bg-brand-muted text-xs text-brand">

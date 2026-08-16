@@ -15,6 +15,10 @@ import {
 } from "lucide-react";
 import { apiPatch, apiPost } from "@/lib/api";
 import { formatCurrency, cn } from "@/lib/utils";
+import {
+  CUSTOMER_PAYMENT_METHODS,
+  type CustomerPaymentMethod,
+} from "@/lib/payment-methods";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -224,6 +228,9 @@ export function CustomerDetailsForm({
   const [form, setForm] = useState<FormState>(baseline);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] =
+    useState<CustomerPaymentMethod | null>(null);
+  const [paymentMethodError, setPaymentMethodError] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
     agreedPrice?: string;
@@ -269,11 +276,13 @@ export function CustomerDetailsForm({
         paymentNumber?: string;
         awaitingApproval?: boolean;
         approvalStatus?: string;
+        method?: CustomerPaymentMethod;
+        methodLabel?: string;
         finance?: OpportunityFinance;
       }>(`/crm/payments`, {
         opportunityId: opportunity.id,
         amount: Number(paymentAmount),
-        method: "BANK_TRANSFER",
+        method: paymentMethod,
       }),
     onSuccess: async (res) => {
       const unlocked =
@@ -289,6 +298,8 @@ export function CustomerDetailsForm({
       }
       setPaymentOpen(false);
       setPaymentAmount("");
+      setPaymentMethod(null);
+      setPaymentMethodError("");
       setPaymentError("");
       if (onPaymentCreated) {
         await onPaymentCreated(res);
@@ -317,11 +328,17 @@ export function CustomerDetailsForm({
 
   const openPaymentModal = () => {
     setPaymentAmount("");
+    setPaymentMethod(null);
+    setPaymentMethodError("");
     setPaymentError("");
     setPaymentOpen(true);
   };
 
   const submitPayment = () => {
+    if (!paymentMethod) {
+      setPaymentMethodError("لطفاً روش پرداخت را انتخاب کنید.");
+      return;
+    }
     const amt = Number(paymentAmount);
     if (!paymentAmount.trim() || Number.isNaN(amt) || amt <= 0) {
       setPaymentError("لطفاً یک مبلغ معتبر و مثبت وارد کنید.");
@@ -333,7 +350,7 @@ export function CustomerDetailsForm({
     }
     if (amt > (finance.availableToRecord ?? finance.remainingBalance) + 0.009) {
       setPaymentError(
-        "مبلغ پرداخت نمی‌تواند بیشتر از مبلغ باقی‌مانده قابل ثبت باشد.",
+        "مبلغ پرداخت نمی‌تواند بیشتر از باقی‌مانده پرداخت باشد.",
       );
       return;
     }
@@ -564,6 +581,8 @@ export function CustomerDetailsForm({
           setPaymentOpen(open);
           if (!open) {
             setPaymentAmount("");
+            setPaymentMethod(null);
+            setPaymentMethodError("");
             setPaymentError("");
           }
         }}
@@ -578,7 +597,7 @@ export function CustomerDetailsForm({
 
           <div className="grid grid-cols-2 gap-3 rounded-xl border border-border/50 bg-muted/20 p-3">
             <div className="text-start">
-              <p className="text-[11px] text-muted-foreground">قابل ثبت</p>
+              <p className="text-[11px] text-muted-foreground">باقی‌مانده پرداخت</p>
               <p className="text-sm font-bold tabular-nums text-amber-700 dark:text-amber-400">
                 {formatCurrency(
                   finance.availableToRecord ?? finance.remainingBalance,
@@ -586,7 +605,7 @@ export function CustomerDetailsForm({
               </p>
             </div>
             <div className="text-start">
-              <p className="text-[11px] text-muted-foreground">تاییدشده در مالی</p>
+              <p className="text-[11px] text-muted-foreground">مجموع پرداخت‌شده</p>
               <p className="text-sm font-bold tabular-nums text-brand">
                 {formatCurrency(finance.totalPaid)}
               </p>
@@ -602,6 +621,62 @@ export function CustomerDetailsForm({
               </div>
             ) : null}
           </div>
+
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium text-foreground">
+              روش پرداخت <span className="text-destructive">*</span>
+            </legend>
+            <div
+              role="radiogroup"
+              aria-label="روش پرداخت"
+              aria-invalid={!!paymentMethodError}
+              aria-describedby={
+                paymentMethodError ? "payment-method-error" : undefined
+              }
+              className="grid grid-cols-3 gap-1.5 rounded-xl border border-border/70 bg-muted/30 p-1.5"
+            >
+              {CUSTOMER_PAYMENT_METHODS.map((option) => {
+                const selected = paymentMethod === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={cn(
+                      "relative flex min-h-10 cursor-pointer items-center justify-center rounded-lg px-2 text-sm font-semibold transition-all",
+                      "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background",
+                      selected
+                        ? "bg-card text-brand shadow-sm ring-1 ring-brand/25"
+                        : "text-muted-foreground hover:bg-card/60 hover:text-foreground",
+                      paymentMut.isPending &&
+                        "pointer-events-none opacity-60",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="payment-method"
+                      value={option.value}
+                      checked={selected}
+                      disabled={paymentMut.isPending}
+                      onChange={() => {
+                        setPaymentMethod(option.value);
+                        setPaymentMethodError("");
+                      }}
+                      className="sr-only"
+                    />
+                    {option.label}
+                  </label>
+                );
+              })}
+            </div>
+            {paymentMethodError ? (
+              <p
+                id="payment-method-error"
+                className="text-xs text-destructive"
+                role="alert"
+              >
+                {paymentMethodError}
+              </p>
+            ) : null}
+          </fieldset>
 
           <div className="space-y-2">
             <CrmCurrencyField

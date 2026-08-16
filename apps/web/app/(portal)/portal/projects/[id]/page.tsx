@@ -467,7 +467,6 @@ export default function PortalProjectPage({
               ) : (
                 (data.paymentStatus || data.deliveryStatus) &&
                 (data.cleanFileAccess === "LOCKED_PAYMENT" ||
-                  data.cleanFileAccess === "LOCKED_APPROVAL" ||
                   data.status === "COMPLETED") && (
                   <Badge
                     variant="outline"
@@ -475,11 +474,9 @@ export default function PortalProjectPage({
                   >
                     {data.cleanFileAccess === "LOCKED_PAYMENT"
                       ? "دانلود پس از تسویه پرداخت"
-                      : data.cleanFileAccess === "LOCKED_APPROVAL"
-                        ? "در انتظار تأیید تحویل مدیر"
-                        : data.status === "COMPLETED"
-                          ? "پروژه تکمیل‌شده"
-                          : null}
+                      : data.status === "COMPLETED"
+                        ? "پروژه تکمیل‌شده"
+                        : null}
                   </Badge>
                 )
               )}

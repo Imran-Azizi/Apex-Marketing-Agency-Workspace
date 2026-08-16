@@ -18,13 +18,65 @@ export const STORAGE_PUBLIC_BASE = (
   API_BASE.replace(/\/api\/v1\/?$/, "") + "/files"
 ).replace(/\/$/, "");
 
+function isAbsoluteHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
+/** Extract upload-time CDN URL from asset meta when present. */
+export function storedAssetUrlFromMeta(meta: unknown): string | null {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const root = meta as Record<string, unknown>;
+  const storage =
+    root.storage && typeof root.storage === "object" && !Array.isArray(root.storage)
+      ? (root.storage as Record<string, unknown>)
+      : null;
+  const candidates = [
+    storage?.url,
+    storage?.secureUrl,
+    storage?.secure_url,
+    root.url,
+    root.secureUrl,
+    root.secure_url,
+    root.imageUrl,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && isAbsoluteHttpUrl(value)) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
 export function storagePublicUrl(storageKey: string): string | null {
   if (!storageKey || storageKey.startsWith("ref://")) return null;
+  if (isAbsoluteHttpUrl(storageKey)) return storageKey.trim();
   const encoded = storageKey
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");
   return `${STORAGE_PUBLIC_BASE}/${encoded}`;
+}
+
+/**
+ * Canonical frontend asset src resolver.
+ * Prefer absolute/stored CDN URLs; fall back to /files/<key> redirect shim.
+ */
+export function resolveAssetSrc(input: {
+  url?: string | null;
+  previewUrl?: string | null;
+  imageUrl?: string | null;
+  storageKey?: string | null;
+  meta?: unknown;
+} | null | undefined): string | null {
+  if (!input) return null;
+  for (const value of [input.url, input.previewUrl, input.imageUrl]) {
+    if (typeof value === "string" && isAbsoluteHttpUrl(value)) {
+      return value.trim();
+    }
+  }
+  const fromMeta = storedAssetUrlFromMeta(input.meta);
+  if (fromMeta) return fromMeta;
+  return storagePublicUrl(input.storageKey || "");
 }
 
 export const CSRF_COOKIE = "apex_csrf";
@@ -73,6 +125,7 @@ export function getCsrfToken(): string | null {
 export const api = axios.create({
   baseURL: API_BASE,
   withCredentials: true,
+  timeout: 20 * 60 * 1000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -231,6 +284,20 @@ export async function apiPatch<T>(url: string, body?: unknown): Promise<T> {
 export async function apiDelete<T>(url: string): Promise<T> {
   await ensureCsrf();
   const { data } = await api.delete<ApiEnvelope<T>>(url);
+  if (!data.success) {
+    throw new ApiError(
+      data.error?.message || "درخواست ناموفق بود",
+      400,
+      data.error?.code || "APP_ERROR",
+      data.error?.details
+    );
+  }
+  return data.data as T;
+}
+
+export async function apiPut<T>(url: string, body?: unknown): Promise<T> {
+  await ensureCsrf();
+  const { data } = await api.put<ApiEnvelope<T>>(url, body);
   if (!data.success) {
     throw new ApiError(
       data.error?.message || "درخواست ناموفق بود",

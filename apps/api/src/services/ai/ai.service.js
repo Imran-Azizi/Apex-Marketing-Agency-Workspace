@@ -13,9 +13,14 @@ import {
 } from './models.config.js';
 import { getAgentPrompt } from './prompts/index.js';
 import { getLlmProvider, getActiveProviderInfo } from './provider.factory.js';
+import { openRouterService } from './openrouter.service.js';
 import { extractJson, validateAgentOutput, normalizePipelineOutputs } from './validate.js';
 import { formatAiError, createAiError } from './errors.js';
 import { mockOutput } from './mock.service.js';
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 /**
  * Shrink project input to control tokens / cost before LLM calls.
@@ -62,6 +67,7 @@ export function sanitizeAiInput(input = {}) {
     assets,
     previousVersions,
     managerNotes: input.managerNotes || null,
+    userInstructions: input.userInstructions || null,
     // Keep context compact
     contextSummary:
       typeof input.contextMd === 'string'
@@ -258,6 +264,10 @@ export async function generatePipeline({
   let totalTokens = 0;
   let fallbackError = null;
   let fallbackCode = null;
+  const initialPriorOutputs =
+    input?.priorOutputs && typeof input.priorOutputs === 'object'
+      ? { ...input.priorOutputs }
+      : null;
   let enrichedInput = { ...input };
 
   for (const agentType of CONTENT_AGENTS) {
@@ -305,7 +315,10 @@ export async function generatePipeline({
 
     enrichedInput = {
       ...enrichedInput,
-      priorOutputs: { ...outputs },
+      priorOutputs: {
+        ...(initialPriorOutputs || {}),
+        ...outputs,
+      },
     };
 
     if (result.usedFallback) {
@@ -351,48 +364,318 @@ export const aiProvider = {
   run: runAgent,
   generatePipeline,
   generatePipelineLocal: generatePipeline,
-  async generateImagesFromPrompts(prompts = [], { size = '1024x1024' } = {}) {
-    // Images remain OpenAI-direct optional; OpenRouter path focuses on text content.
-    if (!env.openaiApiKey || env.aiProvider === 'mock') {
+  async generateImagesFromPrompts(
+    prompts = [],
+    { size = '1920x1080', seeds = [], enhance = false } = {},
+  ) {
+    const list = Array.isArray(prompts) ? prompts.map((p) => String(p || '')) : [];
+    if (!list.length) {
+      return { provider: 'none', model: null, images: [] };
+    }
+
+    if (env.aiProvider === 'mock') {
       return {
         provider: 'mock',
-        images: prompts.slice(0, 3).map((p, i) => ({ prompt: p, index: i, url: null })),
-      };
-    }
-    const images = [];
-    for (const [index, prompt] of prompts.slice(0, 4).entries()) {
-      try {
-        const res = await fetch(`${env.openaiBaseUrl}/images/generations`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${env.openaiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: env.openaiImageModel,
-            prompt,
-            size,
-            n: 1,
-          }),
-        });
-        if (!res.ok) {
-          const errText = await res.text();
-          images.push({ index, prompt, error: errText.slice(0, 200), url: null });
-          continue;
-        }
-        const data = await res.json();
-        const item = data.data?.[0] || {};
-        images.push({
+        model: 'mock-image',
+        images: list.map((prompt, index) => ({
           index,
           prompt,
-          url: item.url || null,
-          b64: item.b64_json || null,
-        });
-      } catch (err) {
-        images.push({ index, prompt, error: err.message, url: null });
-      }
+          url: null,
+          b64: null,
+        })),
+      };
     }
-    return { provider: 'openai', model: env.openaiImageModel, images };
+
+    const parseSize = (raw) => {
+      const m = String(raw || '').match(/^(\d+)\s*x\s*(\d+)$/i);
+      if (!m) return { width: 1920, height: 1080 };
+      return {
+        width: Math.min(1920, Math.max(720, Number(m[1]))),
+        height: Math.min(1080, Math.max(405, Number(m[2]))),
+      };
+    };
+
+    async function generateViaOpenAI(promptList) {
+      if (!env.openaiApiKey) return null;
+      const images = [];
+      const batchSize = 4;
+      for (let start = 0; start < promptList.length; start += batchSize) {
+        const batch = promptList.slice(start, start + batchSize);
+        await Promise.all(
+          batch.map(async (prompt, batchIndex) => {
+            const index = start + batchIndex;
+            if (!String(prompt || '').trim()) {
+              images.push({ index, prompt, error: 'Empty image prompt', url: null });
+              return;
+            }
+            try {
+              const res = await fetch(`${env.openaiBaseUrl}/images/generations`, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${env.openaiApiKey}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: env.openaiImageModel,
+                  prompt: String(prompt).slice(0, 3200),
+                  size,
+                  n: 1,
+                }),
+              });
+              if (!res.ok) {
+                const errText = await res.text();
+                images.push({
+                  index,
+                  prompt,
+                  error: errText.slice(0, 240),
+                  url: null,
+                });
+                return;
+              }
+              const data = await res.json();
+              const item = data.data?.[0] || {};
+              images.push({
+                index,
+                prompt,
+                url: item.url || null,
+                b64: item.b64_json || null,
+              });
+            } catch (err) {
+              images.push({ index, prompt, error: err.message, url: null });
+            }
+          }),
+        );
+      }
+      images.sort((a, b) => a.index - b.index);
+      return { provider: 'openai', model: env.openaiImageModel, images };
+    }
+
+    async function generateViaOpenRouter(promptList) {
+      if (!env.openrouterApiKey) return null;
+      const model = env.openrouterImageModel;
+      const images = [];
+      const batchSize = 3;
+      for (let start = 0; start < promptList.length; start += batchSize) {
+        const batch = promptList.slice(start, start + batchSize);
+        await Promise.all(
+          batch.map(async (prompt, batchIndex) => {
+            const index = start + batchIndex;
+            if (!String(prompt || '').trim()) {
+              images.push({ index, prompt, error: 'Empty image prompt', url: null });
+              return;
+            }
+            try {
+              const result = await openRouterService.generateImage({
+                prompt,
+                model,
+                size,
+              });
+              images.push({
+                index,
+                prompt,
+                url: result.url || null,
+                b64: result.b64 || null,
+              });
+            } catch (err) {
+              images.push({
+                index,
+                prompt,
+                error: err.body
+                  ? `${err.message}: ${String(err.body).slice(0, 180)}`
+                  : err.message,
+                url: null,
+              });
+            }
+          }),
+        );
+      }
+      images.sort((a, b) => a.index - b.index);
+      return { provider: 'openrouter', model, images };
+    }
+
+    /** Free Pollinations image API. GET image bytes only — JSON URLs are often a default portrait. */
+    async function generateViaPollinations(promptList) {
+      const { width, height } = parseSize(size);
+      const model =
+        env.pollinationsImageModel && env.pollinationsImageModel !== 'flux'
+          ? env.pollinationsImageModel
+          : 'flux-realism';
+      const images = [];
+
+      async function fetchImageBytes(url, headers) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 120_000);
+        try {
+          const res = await fetch(url, {
+            method: 'GET',
+            headers: {
+              Accept: 'image/jpeg,image/png,image/webp,image/*',
+              Referer: 'https://pollinations.ai/',
+              ...headers,
+            },
+            signal: controller.signal,
+            redirect: 'follow',
+          });
+          const contentType = res.headers.get('content-type') || '';
+          if (!res.ok) {
+            return { error: `Pollinations HTTP ${res.status}` };
+          }
+          if (contentType.includes('application/json') || contentType.includes('text/html')) {
+            return { error: 'Pollinations returned non-image response' };
+          }
+          const buf = Buffer.from(await res.arrayBuffer());
+          if (buf.length < 12000) {
+            return { error: 'Pollinations returned empty or tiny image' };
+          }
+          const magic = buf.slice(0, 3).toString('hex');
+          const isImage =
+            magic === 'ffd8ff' ||
+            magic === '89504e' ||
+            contentType.startsWith('image/');
+          if (!isImage) {
+            return { error: 'Pollinations payload was not an image' };
+          }
+          return {
+            b64: buf.toString('base64'),
+            url: null,
+            contentType: contentType.startsWith('image/') ? contentType : 'image/jpeg',
+          };
+        } catch (err) {
+          return { error: err.message || 'Pollinations unavailable' };
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      for (let index = 0; index < promptList.length; index += 1) {
+        const rawPrompt = String(promptList[index] || '').replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!rawPrompt) {
+          images.push({ index, prompt: rawPrompt, error: 'Empty image prompt', url: null });
+          continue;
+        }
+        if (index > 0) await sleep(2000);
+        const seed = Number.isFinite(seeds[index])
+          ? Math.floor(seeds[index])
+          : Math.floor(Math.random() * 1_000_000_000);
+        const encoded = encodeURIComponent(rawPrompt.slice(0, 720));
+        const params = new URLSearchParams({
+          width: String(Math.min(Math.max(width, 1280), 1920)),
+          height: String(Math.min(Math.max(height, 720), 1080)),
+          model,
+          nologo: 'true',
+          enhance: 'false',
+          private: 'true',
+          seed: String(seed),
+        });
+        const headers = {};
+        if (env.pollinationsApiKey) {
+          headers.Authorization = `Bearer ${env.pollinationsApiKey}`;
+        }
+        const endpoints = [
+          `https://image.pollinations.ai/prompt/${encoded}?${params}`,
+          `https://gen.pollinations.ai/image/${encoded}?${params}`,
+        ];
+        let result = null;
+        for (const url of endpoints) {
+          result = await fetchImageBytes(url, headers);
+          if (result?.b64) break;
+        }
+        if (result?.b64) {
+          images.push({
+            index,
+            prompt: rawPrompt,
+            url: null,
+            b64: result.b64,
+            contentType: result.contentType,
+          });
+        } else {
+          images.push({
+            index,
+            prompt: rawPrompt,
+            error: result?.error || 'Pollinations image failed',
+            url: null,
+          });
+        }
+      }
+
+      return { provider: 'pollinations', model, images };
+    }
+
+    const hasSuccess = (result) =>
+      Boolean(result?.images?.some((img) => img.url || img.b64));
+
+    const mode = env.aiImageProvider || 'auto';
+
+    if (mode === 'free' || mode === 'pollinations') {
+      return (await generateViaPollinations(list)) || {
+        provider: 'pollinations',
+        model: env.pollinationsImageModel,
+        images: list.map((prompt, index) => ({
+          index,
+          prompt,
+          url: null,
+          b64: null,
+        })),
+      };
+    }
+
+    if (mode === 'openai') {
+      return (
+        (await generateViaOpenAI(list)) || {
+          provider: 'mock',
+          model: 'mock-image',
+          images: list.map((prompt, index) => ({
+            index,
+            prompt,
+            url: null,
+            b64: null,
+          })),
+        }
+      );
+    }
+
+    if (mode === 'openrouter') {
+      const orResult = await generateViaOpenRouter(list);
+      if (hasSuccess(orResult)) return orResult;
+      const freeResult = await generateViaPollinations(list);
+      if (hasSuccess(freeResult)) return freeResult;
+      return (
+        orResult || {
+          provider: 'openrouter',
+          model: env.openrouterImageModel,
+          images: list.map((prompt, index) => ({
+            index,
+            prompt,
+            error: 'OpenRouter image failed',
+            url: null,
+          })),
+        }
+      );
+    }
+
+    // auto: OpenRouter → OpenAI → free Pollinations
+    const orResult = await generateViaOpenRouter(list);
+    if (hasSuccess(orResult)) return orResult;
+
+    const openaiResult = await generateViaOpenAI(list);
+    if (hasSuccess(openaiResult)) return openaiResult;
+
+    const freeResult = await generateViaPollinations(list);
+    if (hasSuccess(freeResult)) return freeResult;
+
+    return (
+      orResult ||
+      openaiResult || {
+        provider: 'mock',
+        model: 'mock-image',
+        images: list.map((prompt, index) => ({
+          index,
+          prompt,
+          url: null,
+          b64: null,
+        })),
+      }
+    );
   },
 };
 

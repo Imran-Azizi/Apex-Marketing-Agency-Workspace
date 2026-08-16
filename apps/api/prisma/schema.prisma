@@ -116,6 +116,7 @@ enum PaymentMethod {
   CASH
   BANK_TRANSFER
   HAWALA
+  HESAB_PAY
   CARD
   OTHER
 }
@@ -258,37 +259,45 @@ enum AvailabilityStatus {
 // ─── Auth / RBAC ─────────────────────────────────────────
 
 model User {
-  id            String       @id @default(cuid())
-  email         String       @unique
-  passwordHash  String
-  fullName      String
-  phone         String?
-  profileImage  String?
-  isActive      Boolean      @default(true)
-  lastLoginAt   DateTime?
-  roleId        String
-  role          Role         @relation(fields: [roleId], references: [id])
-  teamProfile   TeamProfile?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  deletedAt     DateTime?
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  fullName     String
+  phone        String?
+  profileImage String?
+  cvStorageKey String?
+  cvFileName   String?
+  cvMimeType   String?
+  cvSizeBytes  Int?
+  cvUploadedAt DateTime?
+  isActive     Boolean      @default(true)
+  lastLoginAt  DateTime?
+  roleId       String
+  role         Role         @relation(fields: [roleId], references: [id])
+  teamProfile  TeamProfile?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
 
-  sessions           Session[]
-  auditLogs          AuditLog[]
-  notifications      Notification[]
-  assignedCustomers  CrmCustomer[]       @relation("SalesOwner")
-  managedProjects    Project[]           @relation("ProjectManager")
-  verifiedPayments   Payment[]           @relation("PaymentVerifier")
-  recordedPayments   Payment[]           @relation("PaymentRecorder")
-  rejectedPayments   Payment[]           @relation("PaymentRejector")
-  aiRuns             AiRun[]
-  projectAssignments ProjectAssignment[]
-  narrationTasksAssigned   NarrationTask[] @relation("NarrationTaskNarrator")
-  narrationTasksCreated    NarrationTask[] @relation("NarrationTaskAssigner")
-  narrationTakesUploaded   NarrationTake[] @relation("NarrationTakeUploader")
-  editingTasksAssigned     EditingTask[]   @relation("EditingTaskEditor")
-  editingTasksCreated      EditingTask[]   @relation("EditingTaskAssigner")
-  editingResources         EditingResource[]
+  sessions                Session[]
+  auditLogs               AuditLog[]
+  notifications           Notification[]
+  assignedCustomers       CrmCustomer[]       @relation("SalesOwner")
+  managedProjects         Project[]           @relation("ProjectManager")
+  verifiedPayments        Payment[]           @relation("PaymentVerifier")
+  recordedPayments        Payment[]           @relation("PaymentRecorder")
+  rejectedPayments        Payment[]           @relation("PaymentRejector")
+  aiRuns                  AiRun[]
+  projectAssignments      ProjectAssignment[]
+  narrationTasksAssigned  NarrationTask[]     @relation("NarrationTaskNarrator")
+  narrationTasksCreated   NarrationTask[]     @relation("NarrationTaskAssigner")
+  narrationTakesUploaded  NarrationTake[]     @relation("NarrationTakeUploader")
+  editingTasksAssigned    EditingTask[]       @relation("EditingTaskEditor")
+  editingTasksCreated     EditingTask[]       @relation("EditingTaskAssigner")
+  editingResources        EditingResource[]
+  systemBackupsCreated    SystemBackup[]      @relation("BackupCreator")
+  userPermissions         UserPermission[]
+  portfolioItemsPublished PortfolioItem[]     @relation("PortfolioPublisher")
 
   @@index([deletedAt])
   @@index([roleId])
@@ -314,6 +323,7 @@ model Permission {
   code        String           @unique
   description String?
   roles       RolePermission[]
+  users       UserPermission[]
   createdAt   DateTime         @default(now())
 
   @@map("permissions")
@@ -327,6 +337,20 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
+}
+
+model UserPermission {
+  userId       String
+  permissionId String
+  granted      Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@index([userId])
+  @@map("user_permissions")
 }
 
 model Session {
@@ -353,28 +377,28 @@ model Session {
 // ─── CRM ─────────────────────────────────────────────────
 
 model CrmCustomer {
-  id                  String           @id @default(cuid())
-  personName          String
-  companyName         String?
-  jobTitle            String?
-  phone               String?
-  whatsappRaw         String
-  normalizedWhatsapp  String           @unique
-  city                String?
-  address             String?
-  email               String?
-  source              String?
-  salesOwnerId        String?
-  salesOwner          User?            @relation("SalesOwner", fields: [salesOwnerId], references: [id])
-  pipelineStage       CrmPipelineStage @default(NEW_LEAD)
-  portalStatus        PortalStatus     @default(NOT_ELIGIBLE)
-  lastContactAt       DateTime?
-  nextFollowUpAt      DateTime?
-  notes               String?
-  lostReason          String?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
-  deletedAt           DateTime?
+  id                 String           @id @default(cuid())
+  personName         String
+  companyName        String?
+  jobTitle           String?
+  phone              String?
+  whatsappRaw        String
+  normalizedWhatsapp String           @unique
+  city               String?
+  address            String?
+  email              String?
+  source             String?
+  salesOwnerId       String?
+  salesOwner         User?            @relation("SalesOwner", fields: [salesOwnerId], references: [id])
+  pipelineStage      CrmPipelineStage @default(NEW_LEAD)
+  portalStatus       PortalStatus     @default(NOT_ELIGIBLE)
+  lastContactAt      DateTime?
+  nextFollowUpAt     DateTime?
+  notes              String?
+  lostReason         String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
 
   opportunities Opportunity[]
   portalAccount PortalAccount?
@@ -392,28 +416,30 @@ model CrmCustomer {
 }
 
 model Opportunity {
-  id            String           @id @default(cuid())
-  crmCustomerId String
-  crmCustomer   CrmCustomer      @relation(fields: [crmCustomerId], references: [id])
-  title         String
-  pipelineStage CrmPipelineStage @default(NEW_LEAD)
-  proposedPrice Decimal?         @db.Decimal(14, 2)
-  agreedPrice   Decimal?         @db.Decimal(14, 2)
-  advancePayment Decimal?        @db.Decimal(14, 2)
-  agreedTerms   String?
-  /** Once true, agreedPrice + agreedTerms cannot change without admin unlock. */
-  contractLocked   Boolean   @default(false)
-  contractLockedAt DateTime?
+  id                 String           @id @default(cuid())
+  crmCustomerId      String
+  crmCustomer        CrmCustomer      @relation(fields: [crmCustomerId], references: [id])
+  title              String
+  pipelineStage      CrmPipelineStage @default(NEW_LEAD)
+  proposedPrice      Decimal?         @db.Decimal(14, 2)
+  agreedPrice        Decimal?         @db.Decimal(14, 2)
+  advancePayment     Decimal?         @db.Decimal(14, 2)
+  agreedTerms        String?
+  /**
+   * Once true, agreedPrice + agreedTerms cannot change without admin unlock.
+   */
+  contractLocked     Boolean          @default(false)
+  contractLockedAt   DateTime?
   contractLockedById String?
-  currency      String           @default("AFN")
-  serviceId     String?
-  service       Service?         @relation(fields: [serviceId], references: [id])
-  lostReason    String?
-  projectId     String?          @unique
-  project       Project?         @relation(fields: [projectId], references: [id])
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  deletedAt     DateTime?
+  currency           String           @default("AFN")
+  serviceId          String?
+  service            Service?         @relation(fields: [serviceId], references: [id])
+  lostReason         String?
+  projectId          String?          @unique
+  project            Project?         @relation(fields: [projectId], references: [id])
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
 
   invoices      Invoice[]
   portalInvites PortalInvite[]
@@ -515,19 +541,22 @@ model Service {
   name            String
   slug            String    @unique
   description     String?
+  imageKey        String?
   startingPrice   Decimal?  @db.Decimal(14, 2)
   durationOptions Json?
   outputs         Json?
   revisionCount   Int       @default(2)
   isPublished     Boolean   @default(true)
   sortOrder       Int       @default(0)
+  ctaLabel        String?
+  ctaHref         String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
 
-  styles              Style[]
-  opportunities       Opportunity[]
-  projects            Project[]
+  styles        Style[]
+  opportunities Opportunity[]
+  projects      Project[]
 
   @@map("services")
 }
@@ -556,7 +585,7 @@ model Format {
   ratio     String   @unique
   createdAt DateTime @default(now())
 
-  projects       Project[]
+  projects Project[]
 
   @@map("formats")
 }
@@ -628,33 +657,33 @@ model AudioSample {
 // ─── Projects ────────────────────────────────────────────
 
 model Project {
-  id                   String               @id @default(cuid())
-  code                 String               @unique
+  id                   String                  @id @default(cuid())
+  code                 String                  @unique
   title                String
-  status               ProjectStatus        @default(NEW_MANAGER_REVIEW)
-  customerFacingStatus CustomerFacingStatus @default(INFO_RECEIVED)
+  status               ProjectStatus           @default(NEW_MANAGER_REVIEW)
+  customerFacingStatus CustomerFacingStatus    @default(INFO_RECEIVED)
   crmCustomerId        String
-  crmCustomer          CrmCustomer          @relation(fields: [crmCustomerId], references: [id])
+  crmCustomer          CrmCustomer             @relation(fields: [crmCustomerId], references: [id])
   portalAccountId      String?
-  portalAccount        PortalAccount?       @relation(fields: [portalAccountId], references: [id])
+  portalAccount        PortalAccount?          @relation(fields: [portalAccountId], references: [id])
   managerId            String
-  manager              User                 @relation("ProjectManager", fields: [managerId], references: [id])
+  manager              User                    @relation("ProjectManager", fields: [managerId], references: [id])
   serviceId            String?
-  service              Service?             @relation(fields: [serviceId], references: [id])
+  service              Service?                @relation(fields: [serviceId], references: [id])
   formatId             String?
-  format               Format?              @relation(fields: [formatId], references: [id])
+  format               Format?                 @relation(fields: [formatId], references: [id])
   durationSec          Int?
   language             String?
   tone                 String?
   platforms            Json?
   brief                Json?
   deadlineAt           DateTime?
-  contentRevisionUsed  Int                  @default(0)
-  contentRevisionMax   Int                  @default(2)
-  videoRevisionUsed    Int                  @default(0)
-  videoRevisionMax     Int                  @default(2)
-  extraContentRevision Boolean              @default(false)
-  extraVideoRevision   Boolean              @default(false)
+  contentRevisionUsed  Int                     @default(0)
+  contentRevisionMax   Int                     @default(2)
+  videoRevisionUsed    Int                     @default(0)
+  videoRevisionMax     Int                     @default(2)
+  extraContentRevision Boolean                 @default(false)
+  extraVideoRevision   Boolean                 @default(false)
   holdReason           String?
   /// Denormalized settlement: UNPAID | PARTIAL | PAID | OVERRIDE
   paymentStatus        PaymentSettlementStatus @default(UNPAID)
@@ -663,8 +692,8 @@ model Project {
   /// Customer-visible clean file access state
   cleanFileAccess      CleanFileAccessStatus   @default(HIDDEN)
   completedAt          DateTime?
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
   deletedAt            DateTime?
 
   opportunity        Opportunity?
@@ -688,6 +717,7 @@ model Project {
   narrationTasks     NarrationTask[]
   editingTasks       EditingTask[]
   editingResources   EditingResource[]
+  portfolioItems     PortfolioItem[]
 
   @@index([status])
   @@index([crmCustomerId])
@@ -756,37 +786,63 @@ model ProjectFile {
 
   narrationTasksAsCurrent NarrationTask[] @relation("NarrationTaskCurrentAudio")
   narrationTakes          NarrationTake[]
-  editingWatermarkedFor   EditingTask[]    @relation("EditingWatermarkedFile")
-  editingCleanFor         EditingTask[]    @relation("EditingCleanFile")
+  editingWatermarkedFor   EditingTask[]   @relation("EditingWatermarkedFile")
+  editingCleanFor         EditingTask[]   @relation("EditingCleanFile")
+  portfolioItems          PortfolioItem[]
 
   @@index([projectId, kind])
   @@map("project_files")
 }
 
+/// Public showcase entries curated by Manager/Admin from completed projects
+model PortfolioItem {
+  id            String          @id @default(cuid())
+  projectId     String
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  videoFileId   String
+  videoFile     ProjectFile     @relation(fields: [videoFileId], references: [id], onDelete: Restrict)
+  title         String
+  description   String
+  slug          String          @unique
+  status        PortfolioStatus @default(PUBLISHED)
+  publishedAt   DateTime?
+  publishedById String?
+  publishedBy   User?           @relation("PortfolioPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  deletedAt     DateTime?
+
+  @@index([status, publishedAt])
+  @@index([projectId])
+  @@index([videoFileId])
+  @@index([deletedAt])
+  @@map("portfolio_items")
+}
+
 /// Stage 11 — narration recording workflow after content approval
 model NarrationTask {
-  id                      String             @id @default(cuid())
+  id                      String              @id @default(cuid())
   projectId               String
-  project                 Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project                 Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
   contentVersionId        String?
-  contentVersion          ContentVersion?    @relation(fields: [contentVersionId], references: [id])
+  contentVersion          ContentVersion?     @relation(fields: [contentVersionId], references: [id])
   narratorUserId          String?
-  narratorUser            User?              @relation("NarrationTaskNarrator", fields: [narratorUserId], references: [id])
+  narratorUser            User?               @relation("NarrationTaskNarrator", fields: [narratorUserId], references: [id])
   narratorTeamProfileId   String?
-  narratorTeamProfile     TeamProfile?       @relation(fields: [narratorTeamProfileId], references: [id])
+  narratorTeamProfile     TeamProfile?        @relation(fields: [narratorTeamProfileId], references: [id])
   assignedById            String?
-  assignedBy              User?              @relation("NarrationTaskAssigner", fields: [assignedById], references: [id])
+  assignedBy              User?               @relation("NarrationTaskAssigner", fields: [assignedById], references: [id])
   status                  NarrationTaskStatus @default(PENDING_NARRATION)
   deadline                DateTime?
-  assignedAmount          Decimal?           @db.Decimal(14, 2)
+  assignedAmount          Decimal?            @db.Decimal(14, 2)
   narrationScriptSnapshot Json?
   audioFileId             String?
-  audioFile               ProjectFile?       @relation("NarrationTaskCurrentAudio", fields: [audioFileId], references: [id])
+  audioFile               ProjectFile?        @relation("NarrationTaskCurrentAudio", fields: [audioFileId], references: [id])
   revisionNotes           String?
   submittedAt             DateTime?
   approvedAt              DateTime?
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 
   takes NarrationTake[]
 
@@ -797,16 +853,16 @@ model NarrationTask {
 }
 
 model NarrationTake {
-  id            String       @id @default(cuid())
+  id            String        @id @default(cuid())
   taskId        String
   task          NarrationTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   projectFileId String
-  projectFile   ProjectFile  @relation(fields: [projectFileId], references: [id])
+  projectFile   ProjectFile   @relation(fields: [projectFileId], references: [id])
   version       Int
   notes         String?
   uploadedById  String?
-  uploadedBy    User?        @relation("NarrationTakeUploader", fields: [uploadedById], references: [id])
-  createdAt     DateTime     @default(now())
+  uploadedBy    User?         @relation("NarrationTakeUploader", fields: [uploadedById], references: [id])
+  createdAt     DateTime      @default(now())
 
   @@index([taskId, version])
   @@map("narration_takes")
@@ -814,29 +870,29 @@ model NarrationTake {
 
 /// Video production / editing workflow after narration approval
 model EditingTask {
-  id                    String            @id @default(cuid())
-  projectId             String
-  project               Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  editorUserId          String?
-  editorUser            User?             @relation("EditingTaskEditor", fields: [editorUserId], references: [id])
-  editorTeamProfileId   String?
-  editorTeamProfile     TeamProfile?      @relation(fields: [editorTeamProfileId], references: [id])
-  assignedById          String?
-  assignedBy            User?             @relation("EditingTaskAssigner", fields: [assignedById], references: [id])
-  status                EditingTaskStatus @default(ASSIGNED)
-  deadline              DateTime?
-  assignedAmount        Decimal?          @db.Decimal(14, 2)
-  instructions          String?
-  revisionNotes         String?
-  version               Int               @default(1)
-  watermarkedFileId     String?
-  watermarkedFile       ProjectFile?      @relation("EditingWatermarkedFile", fields: [watermarkedFileId], references: [id])
-  cleanFileId           String?
-  cleanFile             ProjectFile?      @relation("EditingCleanFile", fields: [cleanFileId], references: [id])
-  submittedAt           DateTime?
-  completedAt           DateTime?
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+  id                  String            @id @default(cuid())
+  projectId           String
+  project             Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  editorUserId        String?
+  editorUser          User?             @relation("EditingTaskEditor", fields: [editorUserId], references: [id])
+  editorTeamProfileId String?
+  editorTeamProfile   TeamProfile?      @relation(fields: [editorTeamProfileId], references: [id])
+  assignedById        String?
+  assignedBy          User?             @relation("EditingTaskAssigner", fields: [assignedById], references: [id])
+  status              EditingTaskStatus @default(ASSIGNED)
+  deadline            DateTime?
+  assignedAmount      Decimal?          @db.Decimal(14, 2)
+  instructions        String?
+  revisionNotes       String?
+  version             Int               @default(1)
+  watermarkedFileId   String?
+  watermarkedFile     ProjectFile?      @relation("EditingWatermarkedFile", fields: [watermarkedFileId], references: [id])
+  cleanFileId         String?
+  cleanFile           ProjectFile?      @relation("EditingCleanFile", fields: [cleanFileId], references: [id])
+  submittedAt         DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   resources EditingResource[]
 
@@ -917,8 +973,8 @@ model ContentVersion {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  approvals Approval[]
-  feedback  ClientFeedback[]
+  approvals      Approval[]
+  feedback       ClientFeedback[]
   narrationTasks NarrationTask[]
 
   @@unique([projectId, kind, versionNumber])
@@ -960,19 +1016,19 @@ model ClientFeedback {
 }
 
 model AiAgent {
-  id              String        @id @default(cuid())
-  code            AiAgentType   @unique
-  name            String
-  nameFa          String?
-  description     String?
-  descriptionFa   String?
-  status          AiAgentStatus @default(ACTIVE)
-  promptTemplate  String?       @db.Text
-  promptVersion   String        @default("v1")
-  config          Json?
-  sortOrder       Int           @default(0)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  code           AiAgentType   @unique
+  name           String
+  nameFa         String?
+  description    String?
+  descriptionFa  String?
+  status         AiAgentStatus @default(ACTIVE)
+  promptTemplate String?       @db.Text
+  promptVersion  String        @default("v1")
+  config         Json?
+  sortOrder      Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   @@map("ai_agents")
 }
@@ -1000,11 +1056,11 @@ model AiWorkflowExecution {
 }
 
 model AiRun {
-  id            String                 @id @default(cuid())
+  id            String               @id @default(cuid())
   projectId     String?
-  project       Project?               @relation(fields: [projectId], references: [id])
+  project       Project?             @relation(fields: [projectId], references: [id])
   workflowId    String?
-  workflow      AiWorkflowExecution?   @relation(fields: [workflowId], references: [id])
+  workflow      AiWorkflowExecution? @relation(fields: [workflowId], references: [id])
   agentType     AiAgentType
   promptVersion String
   model         String
@@ -1013,14 +1069,14 @@ model AiRun {
   /// { promptTokens, completionTokens, totalTokens }
   tokenUsage    Json?
   durationMs    Int?
-  status        AiRunStatus            @default(PENDING)
+  status        AiRunStatus          @default(PENDING)
   error         String?
   startedAt     DateTime?
   finishedAt    DateTime?
   userId        String?
-  user          User?                  @relation(fields: [userId], references: [id])
-  createdAt     DateTime               @default(now())
-  updatedAt     DateTime               @updatedAt
+  user          User?                @relation(fields: [userId], references: [id])
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
 
   @@index([projectId, createdAt])
   @@index([workflowId])
@@ -1028,16 +1084,16 @@ model AiRun {
 }
 
 model AiActivityLog {
-  id        String   @id @default(cuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  userId    String?
-  action    String
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId     String?
+  action     String
   entityType String?
-  entityId  String?
-  message   String?
-  meta      Json?
-  createdAt DateTime @default(now())
+  entityId   String?
+  message    String?
+  meta       Json?
+  createdAt  DateTime @default(now())
 
   @@index([projectId, createdAt])
   @@map("ai_activity_logs")
@@ -1119,31 +1175,31 @@ model InvoiceItem {
 }
 
 model Payment {
-  id            String             @id @default(cuid())
-  crmCustomerId String
-  crmCustomer   CrmCustomer        @relation(fields: [crmCustomerId], references: [id])
-  invoiceId     String?
-  invoice       Invoice?           @relation(fields: [invoiceId], references: [id])
-  amount        Decimal            @db.Decimal(14, 2)
-  paidAt        DateTime           @default(now())
-  method        PaymentMethod      @default(BANK_TRANSFER)
-  reference     String?
-  attachmentKey String?
+  id              String             @id @default(cuid())
+  crmCustomerId   String
+  crmCustomer     CrmCustomer        @relation(fields: [crmCustomerId], references: [id])
+  invoiceId       String?
+  invoice         Invoice?           @relation(fields: [invoiceId], references: [id])
+  amount          Decimal            @db.Decimal(14, 2)
+  paidAt          DateTime           @default(now())
+  method          PaymentMethod
+  reference       String?
+  attachmentKey   String?
   /// Approval workflow: PENDING → VERIFIED (approved) | REJECTED
   /// Only VERIFIED payments affect financial calculations.
-  verification  VerificationStatus @default(PENDING)
-  verifiedAt    DateTime?
-  verifiedById  String?
-  verifiedBy    User?              @relation("PaymentVerifier", fields: [verifiedById], references: [id])
-  rejectedAt    DateTime?
-  rejectedById  String?
-  rejectedBy    User?              @relation("PaymentRejector", fields: [rejectedById], references: [id])
+  verification    VerificationStatus @default(PENDING)
+  verifiedAt      DateTime?
+  verifiedById    String?
+  verifiedBy      User?              @relation("PaymentVerifier", fields: [verifiedById], references: [id])
+  rejectedAt      DateTime?
+  rejectedById    String?
+  rejectedBy      User?              @relation("PaymentRejector", fields: [rejectedById], references: [id])
   rejectionReason String?
-  recordedById  String?
-  recordedBy    User?              @relation("PaymentRecorder", fields: [recordedById], references: [id])
-  notes         String?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  recordedById    String?
+  recordedBy      User?              @relation("PaymentRecorder", fields: [recordedById], references: [id])
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([invoiceId])
   @@index([verification])
@@ -1282,4 +1338,44 @@ model Setting {
   createdAt DateTime @default(now())
 
   @@map("settings")
+}
+
+enum PortfolioStatus {
+  PUBLISHED
+  UNPUBLISHED
+}
+
+enum BackupType {
+  MANUAL
+  AUTOMATIC
+}
+
+enum BackupStatus {
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+model SystemBackup {
+  id           String       @id @default(cuid())
+  type         BackupType   @default(MANUAL)
+  status       BackupStatus @default(PROCESSING)
+  fileName     String?
+  storageKey   String?
+  sizeBytes    Int          @default(0)
+  checksum     String?
+  tableCount   Int          @default(0)
+  recordCount  Int          @default(0)
+  errorMessage String?
+  emailTo      String?
+  emailSentAt  DateTime?
+  createdById  String?
+  createdBy    User?        @relation("BackupCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([type])
+  @@map("system_backups")
 }

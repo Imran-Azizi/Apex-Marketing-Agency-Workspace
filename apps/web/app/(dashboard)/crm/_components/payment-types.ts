@@ -14,7 +14,8 @@ export type CustomerPayment = {
   createdAt: string;
   paidAt?: string;
   reference?: string | null;
-  method?: string;
+  method?: string | null;
+  methodLabel?: string | null;
   notes?: string | null;
   rejectionReason?: string | null;
   rejectedAt?: string | null;
@@ -48,7 +49,8 @@ export type PaymentReceipt = {
     amount: number;
     paidAt: string;
     createdAt: string;
-    method: string;
+    method: string | null;
+    methodLabel?: string | null;
     verification: string;
     invoiceNumber: string | null;
     recordedByName: string | null;

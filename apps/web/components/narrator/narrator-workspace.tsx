@@ -5,9 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "@/lib/api";
 import {
-  formatFileSize,
   uploadFileWithProgress,
-  filePreviewUrl,
 } from "@/lib/upload";
 import { UPLOAD_PURPOSE } from "@/lib/media-manager";
 import { cn, formatDate } from "@/lib/utils";
@@ -15,12 +13,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  NarrationAudioVersions,
+  type NarrationTakeRecord,
+} from "@/components/narration/narration-audio-versions";
+import {
   AlertTriangle,
   ArrowRight,
   CalendarClock,
   CheckCircle2,
   Clock3,
-  Download,
   Loader2,
   Mic2,
   Upload,
@@ -54,6 +55,7 @@ type NarratorWorkspace = {
     sizeBytes?: number | null;
     createdAt: string;
   } | null;
+  takes?: NarrationTakeRecord[];
 };
 
 const STATUS_LABEL: Record<NarrationStatus, string> = {
@@ -148,6 +150,21 @@ export function NarratorWorkspace({ projectId }: { projectId: string }) {
       ].includes(data.status),
     [data],
   );
+
+  const audioVersions = useMemo((): NarrationTakeRecord[] => {
+    if (!data) return [];
+    if (data.takes?.length) return data.takes;
+    if (!data.audioFile) return [];
+    return [
+      {
+        id: data.audioFile.id,
+        version: 1,
+        createdAt: data.audioFile.createdAt,
+        isCurrent: true,
+        audioFile: data.audioFile,
+      },
+    ];
+  }, [data]);
 
   if (workspaceQ.isLoading) {
     return (
@@ -300,7 +317,11 @@ export function NarratorWorkspace({ projectId }: { projectId: string }) {
       </section>
 
       <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-4 sm:p-5">
-        <p className="text-sm font-semibold">فایل صوتی ارسالی</p>
+        <p className="text-sm font-semibold">
+          {audioVersions.length > 1
+            ? `نسخه‌های فایل صوتی (${audioVersions.length.toLocaleString("fa-AF", { numberingSystem: "latn" })})`
+            : "فایل صوتی ارسالی"}
+        </p>
 
         {uploadPct != null && (
           <div className="space-y-1.5">
@@ -320,53 +341,16 @@ export function NarratorWorkspace({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        {data.audioFile ? (
-          <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-medium">{data.audioFile.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {data.submittedAt
-                    ? formatDate(data.submittedAt)
-                    : formatDate(data.audioFile.createdAt)}
-                  {data.audioFile.sizeBytes != null && (
-                    <>
-                      {" · "}
-                      {formatFileSize(data.audioFile.sizeBytes)}
-                    </>
-                  )}
-                </p>
-              </div>
-              {filePreviewUrl(data.audioFile.storageKey) && (
-                <Button variant="ghost" size="sm" asChild>
-                  <a
-                    href={filePreviewUrl(data.audioFile.storageKey)!}
-                    download={data.audioFile.name}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </a>
-                </Button>
-              )}
-            </div>
-            <audio
-              controls
-              className="w-full"
-              src={filePreviewUrl(data.audioFile.storageKey) || undefined}
-            >
-              مرورگر شما از پخش صوت پشتیبانی نمی‌کند.
-            </audio>
-            {data.status === "NARRATION_SUBMITTED" && (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <CheckCircle2 className={cn("h-3.5 w-3.5", SUCCESS_ICON)} />
-                فایل ارسال شد و در انتظار بررسی مدیر است.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 rounded-xl border border-dashed border-border/70 px-4 py-10 text-sm text-muted-foreground">
-            <Mic2 className="h-4 w-4" />
-            هنوز فایل صوتی آپلود نشده است
-          </div>
+        <NarrationAudioVersions
+          takes={audioVersions}
+          currentFileId={data.audioFile?.id}
+        />
+
+        {data.status === "NARRATION_SUBMITTED" && audioVersions.length > 0 && (
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CheckCircle2 className={cn("h-3.5 w-3.5", SUCCESS_ICON)} />
+            فایل ارسال شد و در انتظار بررسی مدیر است.
+          </p>
         )}
       </section>
     </div>

@@ -405,9 +405,17 @@ export function buildEditingAssignedNotification({
   projectCode,
   deadline,
   assignedAt = new Date(),
+  narrationVersionCount = 0,
+  approvedNarrationVersion = null,
 }) {
   const when = formatFaDateTime(assignedAt);
   const deadlineLabel = deadline ? formatFaDateTime(deadline) : null;
+  const narrationLine =
+    narrationVersionCount > 0
+      ? approvedNarrationVersion
+        ? `فایل صوتی نریشن تأییدشده (نسخه ${approvedNarrationVersion}${narrationVersionCount > 1 ? ` از ${narrationVersionCount}` : ""}) در جزئیات پروژه موجود است`
+        : `فایل صوتی نریشن (${narrationVersionCount} نسخه) در جزئیات پروژه موجود است`
+      : null;
   return {
     eventKey: `editing.assigned:${projectId}:${assignedAt.toISOString()}`,
     title: 'پروژه جدید توسط مدیر برای شما ارسال شد',
@@ -415,6 +423,7 @@ export function buildEditingAssignedNotification({
       `پروژه جدید برای ادیت ارجاع شد: ${projectTitle}`,
       projectCode ? `شناسه: ${projectCode}` : null,
       deadlineLabel ? `مهلت: ${deadlineLabel}` : null,
+      narrationLine,
       `تاریخ ارجاع: ${when}`,
     ]
       .filter(Boolean)
@@ -542,6 +551,77 @@ export function buildFinalVideoUploadConfirmedNotification({
       videoTypeLabel: videoTypeLabel || null,
       actionType: 'FINAL_VIDEO_UPLOAD_CONFIRMED',
       createdAt: uploadedAt.toISOString(),
+    },
+  };
+}
+
+export function buildFinalVideoApprovedNotification({
+  projectId,
+  projectTitle,
+  projectCode,
+  fileId,
+  videoTypeLabel,
+  version,
+  approvedAt = new Date(),
+}) {
+  const when = formatFaDateTime(approvedAt);
+  return {
+    eventKey: `final.approved:${fileId}`,
+    title: 'ویدیوی نهایی تأیید شد',
+    body: [
+      `مدیر ${videoTypeLabel || 'ویدیوی نهایی'} پروژه «${projectTitle}» را تأیید کرد.`,
+      projectCode ? `شناسه: ${projectCode}` : null,
+      version ? `نسخه: ${version}` : null,
+      `تاریخ: ${when}`,
+    ].filter(Boolean).join('\n'),
+    link: `/editor/tasks/${projectId}?workspace=final`,
+    meta: {
+      type: 'FINAL_VIDEO_APPROVED',
+      actionType: 'FINAL_VIDEO_APPROVED',
+      projectId,
+      projectName: projectTitle,
+      projectCode,
+      fileId,
+      videoTypeLabel: videoTypeLabel || null,
+      version: version || null,
+      createdAt: approvedAt.toISOString(),
+    },
+  };
+}
+
+export function buildFinalVideoRevisionRequestedNotification({
+  projectId,
+  projectTitle,
+  projectCode,
+  fileId,
+  videoTypeLabel,
+  version,
+  notes,
+  requestedAt = new Date(),
+}) {
+  const when = formatFaDateTime(requestedAt);
+  const feedback = String(notes || '').trim();
+  return {
+    eventKey: `final.revision:${fileId}:${requestedAt.toISOString()}`,
+    title: 'اصلاح ویدیوی نهایی درخواست شد',
+    body: [
+      `مدیر برای ${videoTypeLabel || 'ویدیوی نهایی'} پروژه «${projectTitle}» درخواست اصلاح ثبت کرد.`,
+      projectCode ? `شناسه: ${projectCode}` : null,
+      version ? `نسخه: ${version}` : null,
+      feedback ? `توضیحات: ${feedback.length > 160 ? `${feedback.slice(0, 160)}…` : feedback}` : null,
+      `تاریخ: ${when}`,
+    ].filter(Boolean).join('\n'),
+    link: `/editor/tasks/${projectId}?workspace=final`,
+    meta: {
+      type: 'FINAL_VIDEO_REVISION_REQUESTED',
+      actionType: 'FINAL_VIDEO_REVISION_REQUESTED',
+      projectId,
+      projectName: projectTitle,
+      projectCode,
+      fileId,
+      videoTypeLabel: videoTypeLabel || null,
+      version: version || null,
+      createdAt: requestedAt.toISOString(),
     },
   };
 }

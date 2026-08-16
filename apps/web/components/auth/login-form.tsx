@@ -5,17 +5,23 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
-import { Label } from "@/components/ui/label";
+import { Lock, Mail } from "lucide-react";
 import { loginInternal } from "@/lib/auth";
 import { getHomePath } from "@/lib/rbac";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import {
+  AuthFormError,
+  AuthInput,
+  AuthPasswordField,
+  AuthSubmitButton,
+} from "@/components/auth/auth-field";
 
 const schema = z.object({
-  email: z.string().email("ایمیل معتبر وارد کنید"),
+  email: z
+    .string()
+    .min(1, "ایمیل الزامی است")
+    .email("ایمیل معتبر وارد کنید"),
   password: z.string().min(1, "رمز عبور الزامی است"),
 });
 
@@ -25,6 +31,8 @@ export function LoginForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   const {
     register,
@@ -32,9 +40,14 @@ export function LoginForm() {
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
+    mode: "onBlur",
+    reValidateMode: "onChange",
   });
 
   async function onSubmit(data: FormData) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setFormError(null);
     setLoading(true);
     try {
       const result = await loginInternal(data);
@@ -46,43 +59,57 @@ export function LoginForm() {
       router.push(home);
       router.refresh();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "اطلاعات ورود نادرست است"
-      );
-    } finally {
+      const message =
+        err instanceof Error ? err.message : "اطلاعات ورود نادرست است";
+      setFormError(message);
+      toast.error(message);
+      submittingRef.current = false;
       setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="email">ایمیل</Label>
-        <Input
-          id="email"
-          type="email"
-          autoComplete="email"
-          dir="ltr"
-          {...register("email")}
-        />
-        {errors.email && (
-          <p className="text-sm text-destructive">{errors.email.message}</p>
-        )}
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="password">رمز عبور</Label>
-        <PasswordInput
-          id="password"
-          autoComplete="current-password"
-          {...register("password")}
-        />
-        {errors.password && (
-          <p className="text-sm text-destructive">{errors.password.message}</p>
-        )}
-      </div>
-      <Button type="submit" className="w-full" variant="brand" disabled={loading}>
-        {loading ? "در حال ورود..." : "ورود"}
-      </Button>
+    <form
+      onSubmit={handleSubmit(onSubmit)}
+      className="space-y-4"
+      noValidate
+      aria-busy={loading || undefined}
+    >
+      {formError ? <AuthFormError message={formError} /> : null}
+
+      <AuthInput
+        id="email"
+        label="ایمیل"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        dir="ltr"
+        icon={Mail}
+        required
+        disabled={loading}
+        error={errors.email?.message}
+        autoFocus
+        {...register("email")}
+      />
+
+      <AuthPasswordField
+        id="password"
+        label="رمز عبور"
+        autoComplete="current-password"
+        dir="ltr"
+        icon={Lock}
+        required
+        disabled={loading}
+        error={errors.password?.message}
+        {...register("password")}
+      />
+
+      <AuthSubmitButton loading={loading} loadingText="در حال ورود...">
+        ورود به فضای کاری
+      </AuthSubmitButton>
     </form>
   );
 }

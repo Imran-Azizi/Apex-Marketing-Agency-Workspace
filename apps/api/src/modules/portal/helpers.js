@@ -3,6 +3,8 @@ import {
   buildProjectProgress,
   attachProjectProgress,
 } from '../../services/projectProgress.js';
+import { formatFaDateTime, formatFaTime } from '../../utils/datetime.js';
+import { storedAssetUrl } from '../../services/storage/asset-url.js';
 
 export function customerProjectWhere(auth) {
   return { crmCustomerId: auth.customerId, deletedAt: null };
@@ -26,15 +28,7 @@ export function computeProjectProgress(statusOrProject) {
   }).percent;
 }
 
-export function formatFaDateTime(date) {
-  return new Intl.DateTimeFormat('fa-AF', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(date));
-}
+export { formatFaDateTime, formatFaTime };
 
 export function pickThumbnail(project) {
   const refs = project.assetRefs || project.assetReferences || [];
@@ -45,10 +39,27 @@ export function pickThumbnail(project) {
       ['LOGO', 'PRODUCT_IMAGE'].includes(asset.kind)
       || asset.mimeType?.startsWith('image/')
     ) {
-      return asset.storageKey;
+      return {
+        storageKey: asset.storageKey,
+        url: storedAssetUrl(asset.meta),
+      };
     }
   }
   return null;
+}
+
+export function serializePortalAsset(asset) {
+  if (!asset || asset.deletedAt) return null;
+  return {
+    id: asset.id,
+    name: asset.name,
+    kind: asset.kind,
+    mimeType: asset.mimeType,
+    sizeBytes: asset.sizeBytes,
+    storageKey: asset.storageKey,
+    url: storedAssetUrl(asset.meta),
+    meta: asset.meta,
+  };
 }
 
 export function serializePortalProjectSummary(project) {
@@ -58,6 +69,7 @@ export function serializePortalProjectSummary(project) {
     customerFacingStatus: project.customerFacingStatus,
     audience: 'portal',
   });
+  const thumb = pickThumbnail(project);
   return {
     id: project.id,
     code: project.code,
@@ -68,7 +80,8 @@ export function serializePortalProjectSummary(project) {
     updatedAt: project.updatedAt,
     deadlineAt: project.deadlineAt,
     budget,
-    thumbnailStorageKey: pickThumbnail(project),
+    thumbnailStorageKey: thumb?.storageKey || null,
+    thumbnailUrl: thumb?.url || null,
   };
 }
 

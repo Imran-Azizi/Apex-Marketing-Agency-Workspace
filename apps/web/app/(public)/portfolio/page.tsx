@@ -3,15 +3,15 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-/** Legacy route → home section (bookmark-safe). */
-export default function StylesRedirectPage() {
+/** Bookmark-safe: section lives on the home page. */
+export default function PortfolioRedirectPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/#styles");
+    router.replace("/#portfolio");
   }, [router]);
   return (
     <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-      در حال انتقال به بخش سبک‌های ویدیو…
+      در حال انتقال به بخش نمونه‌کارها…
     </div>
   );
 }

@@ -53,7 +53,7 @@ export default function DashboardLayout({
       return;
     }
 
-    if (!canAccessPath(me.role, pathname)) {
+    if (!canAccessPath(me.role, pathname, me.permissions)) {
       router.replace(getHomePath(me.role));
     }
   }, [isLoading, isFetching, isError, me, pathname, router]);
@@ -85,11 +85,11 @@ export default function DashboardLayout({
     return null;
   }
 
-  if (pathname !== "/dashboard" && pathname !== "/dashboard/" && !canAccessPath(me.role, pathname)) {
+  if (pathname !== "/dashboard" && pathname !== "/dashboard/" && !canAccessPath(me.role, pathname, me.permissions)) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
         <EmptyState
-          title="دسترسی مجاز نیست"
+          title="دسترسی ندارید"
           description="شما اجازه مشاهده این بخش را ندارید."
           action={
             <Button asChild variant="brand">
@@ -104,12 +104,13 @@ export default function DashboardLayout({
   return (
     <div className="flex min-h-screen">
       <SessionKeepAlive />
-      <DashboardSidebar role={me.role} />
+      <DashboardSidebar role={me.role} permissions={me.permissions} />
       <div className="flex min-w-0 flex-1 flex-col">
         <DashboardTopbar
           userName={getDisplayName(me)}
           role={me.role}
           profileImage={me.profileImage}
+          permissions={me.permissions}
         />
         <main className="min-w-0 flex-1 overflow-auto p-3 sm:p-4 lg:p-6">{children}</main>
       </div>

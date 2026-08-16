@@ -42,8 +42,27 @@ function serializeAudioFile(file) {
     storageKey: file.storageKey,
     mimeType: file.mimeType ?? null,
     sizeBytes: file.sizeBytes ?? null,
+    version: file.version ?? null,
     createdAt: file.createdAt,
   };
+}
+
+function serializeTake(take, currentFileId) {
+  const file = take.projectFile ?? null;
+  return {
+    id: take.id,
+    version: take.version,
+    createdAt: take.createdAt,
+    isCurrent: Boolean(file?.id && file.id === currentFileId),
+    audioFile: serializeAudioFile(file),
+  };
+}
+
+export function serializeNarrationTakes(task) {
+  const currentFileId = task.audioFileId ?? task.audioFile?.id ?? null;
+  const takes = Array.isArray(task.takes) ? [...task.takes] : [];
+  takes.sort((a, b) => a.version - b.version);
+  return takes.map((take) => serializeTake(take, currentFileId));
 }
 
 const OPEN_STATUSES = new Set([
@@ -130,6 +149,7 @@ export function serializeNarratorWorkspace(task, assignment) {
     submittedAt: task.submittedAt ?? null,
     approvedAt: task.approvedAt ?? null,
     audioFile: serializeAudioFile(task.audioFile),
+    takes: serializeNarrationTakes(task),
   };
 }
 

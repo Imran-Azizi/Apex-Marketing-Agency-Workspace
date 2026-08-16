@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
-import { requireInternal, requirePermission, denyRoles } from '../../middleware/rbac.js';
+import { requireInternal, requirePermission } from '../../middleware/rbac.js';
 import { requireCsrf } from '../../middleware/csrf.js';
 import { aiLimiter } from '../../middleware/rateLimit.js';
 import { ok, created, AppError } from '../../utils/response.js';
@@ -9,9 +9,9 @@ import { prisma } from '../../db/prisma.js';
 
 const router = Router();
 
-router.use(requireAuth, requireInternal, denyRoles('NARRATOR'));
+router.use(requireAuth, requireInternal);
 
-router.get('/:projectId/overview', requirePermission('project:read'), async (req, res, next) => {
+router.get('/:projectId/overview', requirePermission('content.view'), async (req, res, next) => {
   try {
     ok(res, await aiService.getOverview(req.params.projectId));
   } catch (e) {
@@ -19,7 +19,7 @@ router.get('/:projectId/overview', requirePermission('project:read'), async (req
   }
 });
 
-router.get('/:projectId/workflows', requirePermission('project:read'), async (req, res, next) => {
+router.get('/:projectId/workflows', requirePermission('content.view'), async (req, res, next) => {
   try {
     ok(res, await aiService.listWorkflows(req.params.projectId));
   } catch (e) {
@@ -27,7 +27,7 @@ router.get('/:projectId/workflows', requirePermission('project:read'), async (re
   }
 });
 
-router.get('/workflows/:id', requirePermission('project:read'), async (req, res, next) => {
+router.get('/workflows/:id', requirePermission('content.view'), async (req, res, next) => {
   try {
     ok(res, await aiService.getWorkflow(req.params.id));
   } catch (e) {
@@ -35,7 +35,7 @@ router.get('/workflows/:id', requirePermission('project:read'), async (req, res,
   }
 });
 
-router.get('/:projectId/versions', requirePermission('project:read'), async (req, res, next) => {
+router.get('/:projectId/versions', requirePermission('content.view'), async (req, res, next) => {
   try {
     ok(res, await aiService.listVersions(req.params.projectId));
   } catch (e) {
@@ -43,7 +43,7 @@ router.get('/:projectId/versions', requirePermission('project:read'), async (req
   }
 });
 
-router.get('/:projectId/versions/compare', requirePermission('project:read'), async (req, res, next) => {
+router.get('/:projectId/versions/compare', requirePermission('content.view'), async (req, res, next) => {
   try {
     const { left, right } = req.query;
     if (!left || !right) throw new AppError('left و right الزامی است', 400, 'VALIDATION');
@@ -53,7 +53,7 @@ router.get('/:projectId/versions/compare', requirePermission('project:read'), as
   }
 });
 
-router.get('/:projectId/versions/:versionId', requirePermission('project:read'), async (req, res, next) => {
+router.get('/:projectId/versions/:versionId', requirePermission('content.view'), async (req, res, next) => {
   try {
     ok(res, await aiService.getVersion(req.params.projectId, req.params.versionId));
   } catch (e) {
@@ -65,12 +65,14 @@ router.post(
   '/:projectId/generate',
   requireCsrf,
   aiLimiter,
-  requirePermission('content:generate'),
+  requirePermission('content.generate'),
   async (req, res, next) => {
     try {
       const result = await aiService.generateContent(req.params.projectId, req.auth, req, {
         changeNotes: req.body?.changeNotes,
         sync: req.body?.sync === true,
+        userPrompt: req.body?.userPrompt,
+        baseVersionId: req.body?.baseVersionId,
       });
       created(res, result);
     } catch (e) {
@@ -83,12 +85,14 @@ router.post(
   '/:projectId/regenerate',
   requireCsrf,
   aiLimiter,
-  requirePermission('content:generate'),
+  requirePermission('content.generate'),
   async (req, res, next) => {
     try {
       const result = await aiService.generateContent(req.params.projectId, req.auth, req, {
         changeNotes: req.body?.changeNotes || 'بازتولید محتوا',
         sync: req.body?.sync === true,
+        userPrompt: req.body?.userPrompt,
+        baseVersionId: req.body?.baseVersionId,
       });
       created(res, result);
     } catch (e) {
@@ -100,7 +104,7 @@ router.post(
 router.patch(
   '/:projectId/versions/:versionId',
   requireCsrf,
-  requirePermission('content:generate'),
+  requirePermission('content.edit'),
   async (req, res, next) => {
     try {
       ok(
@@ -122,7 +126,7 @@ router.patch(
 router.delete(
   '/:projectId/versions/:versionId',
   requireCsrf,
-  requirePermission('content:generate'),
+  requirePermission('content.delete'),
   async (req, res, next) => {
     try {
       ok(
@@ -143,7 +147,7 @@ router.delete(
 router.post(
   '/:projectId/versions/:versionId/send-for-approval',
   requireCsrf,
-  requirePermission('content:approve_internal'),
+  requirePermission('content.approve'),
   async (req, res, next) => {
     try {
       ok(
@@ -161,7 +165,7 @@ router.post(
   },
 );
 
-router.get('/:projectId/runs', requirePermission('project:read'), async (req, res, next) => {
+router.get('/:projectId/runs', requirePermission('content.view'), async (req, res, next) => {
   try {
     ok(res, await aiService.listRuns(req.params.projectId));
   } catch (e) {
@@ -169,7 +173,7 @@ router.get('/:projectId/runs', requirePermission('project:read'), async (req, re
   }
 });
 
-router.get('/runs/:id', requirePermission('project:read'), async (req, res, next) => {
+router.get('/runs/:id', requirePermission('content.view'), async (req, res, next) => {
   try {
     const run = await prisma.aiRun.findUnique({
       where: { id: req.params.id },

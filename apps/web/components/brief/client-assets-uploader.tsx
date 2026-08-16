@@ -54,6 +54,7 @@ export type ClientAssetItem = {
   mimeType?: string | null;
   sizeBytes?: number | null;
   storageKey?: string;
+  url?: string | null;
   meta?: Record<string, unknown> | null;
 };
 
@@ -200,7 +201,7 @@ function AssetThumb({
 }) {
   const isImage =
     asset.mimeType?.startsWith("image/") ||
-    /\.(png|jpe?g|gif|webp|svg)$/i.test(asset.name);
+    /\.(png|jpe?g|jfif|jpe|jif|gif|webp|svg)$/i.test(asset.name);
   const isVideo =
     asset.mimeType?.startsWith("video/") || asset.kind === "VIDEO";
   const isAudio =
@@ -211,8 +212,11 @@ function AssetThumb({
   const url =
     localUrl ||
     (asset.storageKey && !asset.storageKey.startsWith("ref://")
-      ? filePreviewUrl(asset.storageKey)
-      : null);
+      ? filePreviewUrl(asset.storageKey, asset.meta) ||
+        (typeof asset.url === "string" ? asset.url : null)
+      : typeof asset.url === "string"
+        ? asset.url
+        : null);
 
   if (asset.kind === "REFERENCE") {
     const metaUrl =
@@ -232,6 +236,12 @@ function AssetThumb({
         src={url}
         alt={asset.name}
         className="h-14 w-14 rounded-md object-cover"
+        onError={(e) => {
+          e.currentTarget.style.display = "none";
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[client-asset] image failed:", url);
+          }
+        }}
       />
     );
   }

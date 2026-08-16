@@ -1,4 +1,5 @@
 import { AppError } from "../utils/response.js";
+import { env } from "../config/env.js";
 
 export function errorHandler(err, req, res, next) {
   if (res.headersSent) return next(err);
@@ -25,9 +26,13 @@ export function errorHandler(err, req, res, next) {
   }
 
   console.error("[API Error]", err);
+  const message =
+    env.nodeEnv === "production"
+      ? "Internal server error"
+      : err?.message || "Internal server error";
   return res.status(500).json({
     success: false,
-    error: { code: "INTERNAL_ERROR", message: "Internal server error" },
+    error: { code: "INTERNAL_ERROR", message },
   });
 }
 

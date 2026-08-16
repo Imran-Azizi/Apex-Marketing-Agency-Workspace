@@ -32,15 +32,13 @@ test('AC-18 helper: customer facing status mapping', () => {
 });
 
 test('AC-20/21 download gate logic', () => {
-  function canDownloadClean({ balance, allowed, overrideBalance }) {
+  function canDownloadClean({ balance, overrideBalance }) {
     if (balance > 0 && !overrideBalance) return { ok: false, code: 'BALANCE_OUTSTANDING' };
-    if (!allowed) return { ok: false, code: 'DOWNLOAD_LOCKED' };
     return { ok: true };
   }
-  assert.equal(canDownloadClean({ balance: 100, allowed: true, overrideBalance: false }).code, 'BALANCE_OUTSTANDING');
-  assert.equal(canDownloadClean({ balance: 0, allowed: false, overrideBalance: false }).code, 'DOWNLOAD_LOCKED');
-  assert.equal(canDownloadClean({ balance: 0, allowed: true, overrideBalance: false }).ok, true);
-  assert.equal(canDownloadClean({ balance: 50, allowed: true, overrideBalance: true }).ok, true);
+  assert.equal(canDownloadClean({ balance: 100, overrideBalance: false }).code, 'BALANCE_OUTSTANDING');
+  assert.equal(canDownloadClean({ balance: 0, overrideBalance: false }).ok, true);
+  assert.equal(canDownloadClean({ balance: 50, overrideBalance: true }).ok, true);
 });
 
 test('AC-13 revision limit logic', () => {

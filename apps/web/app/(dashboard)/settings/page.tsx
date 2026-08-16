@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, MessageCircle, Pencil } from "lucide-react";
+import { Loader2, MessageCircle, Pencil, Shield } from "lucide-react";
 import { api, apiGet, ensureCsrf } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
@@ -21,7 +21,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { useHasPermission } from "@/lib/permissions";
+import { PermissionsPanel } from "./_components/permissions-panel";
 
 type SettingRecord = {
   id: string;
@@ -61,7 +64,10 @@ function findSetting(list: SettingRecord[] | undefined, key: string) {
 }
 
 export default function SettingsPage() {
+  const canManagePermissions = useHasPermission("settings.permissions");
+  const canEditSettings = useHasPermission("settings.edit");
   const qc = useQueryClient();
+  const [tab, setTab] = useState("whatsapp");
   const [editOpen, setEditOpen] = useState(false);
   const [draft, setDraft] = useState<WhatsAppDraft>({ number: "", message: "" });
   const [formError, setFormError] = useState<string | null>(null);
@@ -121,6 +127,10 @@ export default function SettingsPage() {
     draft.message.trim() !== baseline.message.trim();
 
   useEffect(() => {
+    if (canManagePermissions) setTab("permissions");
+  }, [canManagePermissions]);
+
+  useEffect(() => {
     if (editOpen) {
       setDraft({ number, message });
       setFormError(null);
@@ -156,12 +166,38 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6" dir="rtl">
+    <div className="mx-auto w-full max-w-6xl space-y-6" dir="rtl">
       <PageHeader
         title="تنظیمات"
-        subtitle="پیکربندی ارتباط واتساپ با مشتریان"
+        subtitle="پیکربندی سیستم و مدیریت دسترسی کارمندان"
         className="mb-2 sm:mb-4"
       />
+
+      <Tabs dir="rtl" value={tab} onValueChange={setTab}>
+        <TabsList
+          variant="line"
+          className="mb-4 w-full justify-start"
+          aria-label="بخش‌های تنظیمات"
+        >
+          {canManagePermissions ? (
+            <TabsTrigger value="permissions" className="gap-1.5">
+              <Shield className="h-3.5 w-3.5" />
+              دسترسی‌ها
+            </TabsTrigger>
+          ) : null}
+          <TabsTrigger value="whatsapp" className="gap-1.5">
+            <MessageCircle className="h-3.5 w-3.5" />
+            واتساپ
+          </TabsTrigger>
+        </TabsList>
+
+        {canManagePermissions ? (
+          <TabsContent value="permissions">
+            <PermissionsPanel />
+          </TabsContent>
+        ) : null}
+
+        <TabsContent value="whatsapp">
 
       {isLoading ? (
         <Skeleton className="h-64 w-full rounded-2xl" />
@@ -208,6 +244,7 @@ export default function SettingsPage() {
               variant="outline"
               className="h-9 gap-1.5"
               onClick={openEditor}
+              disabled={!canEditSettings}
             >
               <Pencil className="h-3.5 w-3.5" />
               ویرایش
@@ -246,6 +283,8 @@ export default function SettingsPage() {
           </div>
         </section>
       ) : null}
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={editOpen} onOpenChange={handleClose}>
         <DialogContent

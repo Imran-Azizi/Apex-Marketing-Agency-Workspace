@@ -13,6 +13,7 @@ import {
   customerProjectWhere,
   countPendingBriefs,
   pickThumbnail,
+  serializePortalAsset,
   serializePortalProjectSummary,
   buildProjectProgress,
 } from "./helpers.js";
@@ -495,17 +496,13 @@ export const portalService = {
         ? "AVAILABLE"
         : unlocked
           ? "AVAILABLE"
-          : snap.cleanFileAccess === "LOCKED_APPROVAL"
-            ? "LOCKED_APPROVAL"
-            : "LOCKED_PAYMENT";
+          : "LOCKED_PAYMENT";
       const accessMessage = !isClean
         ? null
         : unlocked
           ? null
           : snap.deliveryMessage ||
-            (accessStatus === "LOCKED_APPROVAL"
-              ? "پرداخت تکمیل شده است. پس از تأیید تحویل توسط مدیر، پخش و دانلود نسخه پاک فعال می‌شود."
-              : "تا تسویه کامل مبلغ پروژه، نسخه بدون واترمارک قفل است. می‌توانید نسخه دارای واترمارک را مشاهده کنید.");
+            "تا تسویه کامل مبلغ پروژه، نسخه بدون واترمارک قفل است. می‌توانید نسخه دارای واترمارک را مشاهده کنید.";
 
       return {
         id: serialized.id,
@@ -561,7 +558,13 @@ export const portalService = {
       service: project.service,
       brief,
       customAspectRatio: brief.customAspectRatio || null,
-      thumbnailStorageKey: pickThumbnail(project),
+      ...(() => {
+        const thumb = pickThumbnail(project);
+        return {
+          thumbnailStorageKey: thumb?.storageKey || null,
+          thumbnailUrl: thumb?.url || null,
+        };
+      })(),
       contentRevisionUsed: project.contentRevisionUsed,
       contentRevisionMax:
         project.contentRevisionMax + (project.extraContentRevision ? 1 : 0),
@@ -574,15 +577,8 @@ export const portalService = {
       finalVideos: [...watermarkedVisible, ...cleanVisible].map(mapPortalFinal),
       assets: assetRefs
         .filter((ref) => ref.clientAsset && !ref.clientAsset.deletedAt)
-        .map((ref) => ({
-          id: ref.clientAsset.id,
-          name: ref.clientAsset.name,
-          kind: ref.clientAsset.kind,
-          mimeType: ref.clientAsset.mimeType,
-          sizeBytes: ref.clientAsset.sizeBytes,
-          storageKey: ref.clientAsset.storageKey,
-          meta: ref.clientAsset.meta,
-        })),
+        .map((ref) => serializePortalAsset(ref.clientAsset))
+        .filter(Boolean),
       timeline: project.timeline.map((e) => ({
         id: e.id,
         type: e.type,
@@ -1463,21 +1459,14 @@ export const portalService = {
       hasCleanFile: project.files.length > 0,
     });
 
-    if (evalResult.cleanFileAccess === "LOCKED_PAYMENT") {
+    if (
+      evalResult.cleanFileAccess === "LOCKED_PAYMENT" ||
+      !evalResult.cleanDownloadAllowed
+    ) {
       throw new AppError(
         evalResult.message || "تا تسویه کامل، فایل پاک در دسترس نیست",
         403,
         "BALANCE_OUTSTANDING",
-      );
-    }
-    if (
-      evalResult.cleanFileAccess === "LOCKED_APPROVAL" ||
-      !evalResult.cleanDownloadAllowed
-    ) {
-      throw new AppError(
-        evalResult.message || "دانلود هنوز توسط مدیر فعال نشده",
-        403,
-        "DOWNLOAD_LOCKED",
       );
     }
 
@@ -1612,7 +1601,7 @@ export const portalService = {
   ) {
     if (!storageKey || !name)
       throw new AppError("نام و مسیر فایل الزامی است", 400, "VALIDATION");
-    return prisma.clientAsset.create({
+    const created = await prisma.clientAsset.create({
       data: {
         crmCustomerId: auth.customerId,
         kind: kind || "OTHER",
@@ -1623,13 +1612,15 @@ export const portalService = {
         meta: meta || undefined,
       },
     });
+    return serializePortalAsset(created);
   },
 
   async listClientAssets(auth) {
-    return prisma.clientAsset.findMany({
+    const rows = await prisma.clientAsset.findMany({
       where: { crmCustomerId: auth.customerId, deletedAt: null },
       orderBy: { createdAt: "desc" },
     });
+    return rows.map((row) => serializePortalAsset(row)).filter(Boolean);
   },
 
   async softDeleteClientAsset(auth, id) {

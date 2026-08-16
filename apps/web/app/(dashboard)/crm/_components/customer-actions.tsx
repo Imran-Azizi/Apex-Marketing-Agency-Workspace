@@ -17,12 +17,16 @@ interface CustomerActionsProps {
   customer: CrmCustomer;
   onEdit: (customer: CrmCustomer) => void;
   onDelete: (customer: CrmCustomer) => void;
+  canEdit?: boolean;
+  canDelete?: boolean;
 }
 
 export function CustomerActions({
   customer,
   onEdit,
   onDelete,
+  canEdit = true,
+  canDelete = true,
 }: CustomerActionsProps) {
   const router = useRouter();
 
@@ -49,21 +53,27 @@ export function CustomerActions({
           <Eye className="me-2 h-4 w-4" />
           مشاهده جزئیات
         </DropdownMenuItem>
-        <DropdownMenuItem
-          className="cursor-pointer"
-          onClick={() => onEdit(customer)}
-        >
-          <Pencil className="me-2 h-4 w-4" />
-          ویرایش
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="cursor-pointer text-destructive focus:text-destructive"
-          onClick={() => onDelete(customer)}
-        >
-          <Trash2 className="me-2 h-4 w-4" />
-          حذف
-        </DropdownMenuItem>
+        {canEdit ? (
+          <DropdownMenuItem
+            className="cursor-pointer"
+            onClick={() => onEdit(customer)}
+          >
+            <Pencil className="me-2 h-4 w-4" />
+            ویرایش
+          </DropdownMenuItem>
+        ) : null}
+        {canDelete ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="cursor-pointer text-destructive focus:text-destructive"
+              onClick={() => onDelete(customer)}
+            >
+              <Trash2 className="me-2 h-4 w-4" />
+              حذف
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

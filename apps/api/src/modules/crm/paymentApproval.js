@@ -5,6 +5,7 @@
  */
 
 import { AppError } from '../../utils/response.js';
+import { formatPaymentMethod } from './paymentMethods.js';
 import { formatFaDateTime } from '../portal/helpers.js';
 
 export const PAYMENT_APPROVAL_STATUS = Object.freeze({
@@ -42,6 +43,7 @@ export function formatPaymentAmountLabel(amount) {
 export function buildPaymentPendingApprovalNotification({
   paymentId,
   amount,
+  method,
   creatorName,
   customerName,
   projectTitle,
@@ -60,6 +62,7 @@ export function buildPaymentPendingApprovalNotification({
       customerName ? `مشتری: ${customerName}` : null,
       projectTitle ? `پروژه: ${projectTitle}` : null,
       `مبلغ: ${amountLabel}`,
+      `روش پرداخت: ${formatPaymentMethod(method)}`,
       `تاریخ: ${when}`,
     ]
       .filter(Boolean)
@@ -73,6 +76,7 @@ export function buildPaymentPendingApprovalNotification({
       type: 'PAYMENT_PENDING_APPROVAL',
       paymentId,
       amount: Number(amount),
+      method: method || null,
       creatorName: creatorName || null,
       customerName: customerName || null,
       projectId: projectId || null,
@@ -86,6 +90,7 @@ export function buildPaymentPendingApprovalNotification({
 export function buildPaymentApprovedNotification({
   paymentId,
   amount,
+  method,
   projectTitle,
   projectId,
   crmCustomerId,
@@ -100,6 +105,7 @@ export function buildPaymentApprovedNotification({
       'مدیر پرداخت شما را تایید کرد',
       projectTitle ? `پروژه: ${projectTitle}` : null,
       `مبلغ تاییدشده: ${amountLabel}`,
+      `روش پرداخت: ${formatPaymentMethod(method)}`,
       `تاریخ تایید: ${when}`,
     ]
       .filter(Boolean)
@@ -109,6 +115,7 @@ export function buildPaymentApprovedNotification({
       type: 'PAYMENT_APPROVED',
       paymentId,
       amount: Number(amount),
+      method: method || null,
       projectId: projectId || null,
       projectName: projectTitle || null,
       crmCustomerId: crmCustomerId || null,
@@ -120,6 +127,7 @@ export function buildPaymentApprovedNotification({
 export function buildPaymentRejectedNotification({
   paymentId,
   amount,
+  method,
   projectTitle,
   projectId,
   crmCustomerId,
@@ -135,6 +143,7 @@ export function buildPaymentRejectedNotification({
       'مدیر پرداخت شما را رد کرد',
       projectTitle ? `پروژه: ${projectTitle}` : null,
       `مبلغ: ${amountLabel}`,
+      `روش پرداخت: ${formatPaymentMethod(method)}`,
       rejectionReason ? `دلیل رد: ${rejectionReason}` : null,
       `تاریخ: ${when}`,
     ]
@@ -145,6 +154,7 @@ export function buildPaymentRejectedNotification({
       type: 'PAYMENT_REJECTED',
       paymentId,
       amount: Number(amount),
+      method: method || null,
       projectId: projectId || null,
       projectName: projectTitle || null,
       crmCustomerId: crmCustomerId || null,

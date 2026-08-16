@@ -19,7 +19,6 @@ import {
 import { UPLOAD_PURPOSE } from "@/lib/media-manager";
 import {
   ACCEPTED_VIDEO_TYPES,
-  MAX_FINAL_VIDEO_BYTES,
   validateFinalVideoFile,
   VIDEO_TYPE_LABELS,
   type FinalVideoItem,
@@ -42,10 +41,12 @@ import {
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock3,
   Droplets,
   Eye,
   Film,
   Loader2,
+  MessageSquareWarning,
   RefreshCw,
   Replace,
   Send,
@@ -334,9 +335,6 @@ function PremiumUploadCard({
               <Badge variant="outline" className="font-normal">
                 MP4 · MOV · MKV · WebM
               </Badge>
-              <Badge variant="outline" className="font-normal">
-                حداکثر {formatFileSize(MAX_FINAL_VIDEO_BYTES)}
-              </Badge>
             </div>
           </div>
         ) : null}
@@ -449,7 +447,15 @@ function PremiumUploadCard({
                 <Badge variant={isWatermarked ? "brand" : "secondary"}>
                   {label}
                 </Badge>
-                <Badge variant="outline">
+                <Badge
+                  variant={
+                    state.saved!.status === "APPROVED"
+                      ? "success"
+                      : state.saved!.status === "REVISION_REQUESTED"
+                        ? "warning"
+                        : "outline"
+                  }
+                >
                   {state.saved!.statusLabel || "آپلود شده"}
                 </Badge>
                 {state.saved!.version != null ? (
@@ -473,6 +479,19 @@ function PremiumUploadCard({
                 ) : null}
               </div>
             </div>
+
+            {state.saved!.status === "REVISION_REQUESTED" &&
+            state.saved!.revisionNotes ? (
+              <div className="rounded-xl border border-warning/30 bg-warning/5 px-3 py-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-medium">
+                  <MessageSquareWarning className="h-3.5 w-3.5 text-warning" />
+                  اصلاحات درخواستی مدیر
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
+                  {state.saved!.revisionNotes}
+                </p>
+              </div>
+            ) : null}
 
             {(state.phase === "success" || state.phase === "saved") && (
               <div className="flex items-start gap-2 rounded-xl border border-brand/25 bg-brand/5 px-3 py-2.5 text-xs text-brand">
@@ -509,7 +528,7 @@ function PremiumUploadCard({
                 onClick={() => inputRef.current?.click()}
               >
                 <Replace className="h-3.5 w-3.5" />
-                جایگزینی
+                آپلود نسخه جدید
               </Button>
               <Button
                 type="button"
@@ -551,6 +570,78 @@ function latestByType(
   if (!ofType.length) return null;
   return ofType.reduce((best, cur) =>
     (cur.version || 0) > (best.version || 0) ? cur : best,
+  );
+}
+
+function EditorVersionHistory({ items }: { items?: FinalVideoItem[] }) {
+  if (!items?.length) return null;
+
+  return (
+    <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
+      <div>
+        <h4 className="text-sm font-semibold">تاریخچه نسخه‌های محصول نهایی</h4>
+        <p className="mt-1 text-xs text-muted-foreground">
+          همه نسخه‌ها بدون حذف یا جایگزینی نگهداری می‌شوند.
+        </p>
+      </div>
+      <div className="space-y-3">
+        {items.map((item, index) => (
+          <article
+            key={item.id}
+            className="overflow-hidden rounded-xl border border-border/60 bg-muted/10"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3 px-3.5 py-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge
+                    variant={
+                      item.status === "APPROVED"
+                        ? "success"
+                        : item.status === "REVISION_REQUESTED"
+                          ? "warning"
+                          : "outline"
+                    }
+                  >
+                    {item.statusLabel || item.status}
+                  </Badge>
+                  <Badge variant="secondary">
+                    {item.videoTypeLabel || item.videoType}
+                  </Badge>
+                  <Badge variant="outline">نسخه {item.version}</Badge>
+                  {index === 0 ? <Badge variant="brand">جدیدترین</Badge> : null}
+                </div>
+                <p className="mt-2 truncate text-sm font-medium" title={item.name}>
+                  {item.name}
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    <Clock3 className="h-3 w-3" />
+                    {formatDate(item.createdAt)}
+                  </span>
+                  {item.sizeBytes != null ? (
+                    <span>{formatFileSize(item.sizeBytes)}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+            {item.status === "REVISION_REQUESTED" && item.revisionNotes ? (
+              <div className="border-t border-warning/30 bg-warning/5 px-3.5 py-3">
+                <div className="flex items-center gap-1.5 text-xs font-medium">
+                  <MessageSquareWarning className="h-3.5 w-3.5 text-warning" />
+                  بازخورد مدیر
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
+                  {item.revisionNotes}
+                </p>
+              </div>
+            ) : null}
+            <div className="border-t border-border/50 p-3">
+              <VideoPlayer src={mediaStreamUrl(item.id)} title={item.name} />
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -696,8 +787,8 @@ export function FinalVideoUploader({
           kind: type === "CLEAN" ? "CLEAN_FINAL" : "WATERMARKED_FINAL",
           videoType: type,
           videoTypeLabel: VIDEO_TYPE_LABELS[type],
-          status: "UPLOADED",
-          statusLabel: "آپلود شده",
+          status: "PENDING_REVIEW",
+          statusLabel: "در انتظار بررسی",
           version: 1,
           mimeType: uploaded.mimeType || file.type,
           sizeBytes: uploaded.sizeBytes || file.size,
@@ -798,7 +889,7 @@ export function FinalVideoUploader({
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-[11px] leading-5 text-muted-foreground">
-            MP4، MOV، MKV، WebM — حداکثر {formatFileSize(MAX_FINAL_VIDEO_BYTES)}
+            MP4، MOV، MKV، WebM
           </p>
           <Button
             variant="brand"
@@ -815,6 +906,8 @@ export function FinalVideoUploader({
           </Button>
         </div>
       </div>
+
+      <EditorVersionHistory items={existingItems} />
 
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
         <DialogContent className="max-w-3xl text-start sm:max-w-3xl" dir="rtl">

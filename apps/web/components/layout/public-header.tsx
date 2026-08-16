@@ -7,34 +7,42 @@ import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { Logo } from "@/components/brand/logo";
 import {
   PUBLIC_SECTION_IDS,
   scrollToSection,
   useActiveSection,
+  type PublicSectionId,
 } from "@/components/public/use-active-section";
 import { cn } from "@/lib/utils";
 
-const navItems = [
+const navItems: Array<{ id: PublicSectionId; label: string }> = [
   { id: "home", label: "خانه" },
   { id: "services", label: "خدمات" },
-  { id: "styles", label: "سبک‌های ویدیو" },
+  { id: "portfolio", label: "نمونه‌کارها" },
   { id: "narrators", label: "نمونه صدا" },
-] as const;
+];
 
 export function PublicHeader() {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const onHome = pathname === "/";
-  const activeSection = useActiveSection(PUBLIC_SECTION_IDS);
+  const activeSection = useActiveSection(onHome ? PUBLIC_SECTION_IDS : []);
 
-  function goToSection(id: string) {
+  function goToItem(id: PublicSectionId) {
     setOpen(false);
     if (onHome) {
-      scrollToSection(id);
+      // Let the mobile sheet finish closing before scrolling
+      window.setTimeout(() => scrollToSection(id), open ? 120 : 0);
       return;
     }
     router.push(`/#${id}`);
+  }
+
+  function isActive(id: PublicSectionId) {
+    if (!onHome) return false;
+    return activeSection === id;
   }
 
   return (
@@ -42,16 +50,15 @@ export function PublicHeader() {
       <div className="mx-auto flex h-[4.25rem] max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
         <button
           type="button"
-          onClick={() => goToSection("home")}
+          onClick={() => goToItem("home")}
           className="group flex items-center gap-2.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="اپیکس — بازگشت به بالا"
         >
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand text-sm font-bold text-brand-foreground shadow-sm shadow-brand/25 transition-transform group-hover:scale-105">
-            ا
-          </div>
-          <span className="text-lg font-bold tracking-tight text-foreground">
-            اپیکس
-          </span>
+          <Logo
+            size="lg"
+            className="transition-transform group-hover:scale-[1.02]"
+            wordmarkClassName="text-foreground"
+          />
         </button>
 
         <nav
@@ -59,12 +66,15 @@ export function PublicHeader() {
           aria-label="ناوبری صفحه"
         >
           {navItems.map((item) => {
-            const active = onHome && activeSection === item.id;
+            const active = isActive(item.id);
             return (
-              <button
+              <a
                 key={item.id}
-                type="button"
-                onClick={() => goToSection(item.id)}
+                href={`/#${item.id}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  goToItem(item.id);
+                }}
                 className={cn(
                   "rounded-full px-3.5 py-1.5 text-sm font-medium transition-all",
                   active
@@ -73,7 +83,7 @@ export function PublicHeader() {
                 )}
               >
                 {item.label}
-              </button>
+              </a>
             );
           })}
         </nav>
@@ -108,46 +118,57 @@ export function PublicHeader() {
                 <Menu className="h-5 w-5" />
               </Button>
             </SheetTrigger>
-            <SheetContent side="right" className="w-[min(100%,20rem)]">
-              <div className="mb-5 flex items-center justify-between border-b border-border/60 pb-4">
+            <SheetContent
+              side="right"
+              className="flex w-[min(100%,20rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+            >
+              <div className="flex h-14 shrink-0 items-center border-b border-border/60 px-4 pe-12">
                 <span className="text-sm font-semibold">منو</span>
-                <ThemeToggle />
               </div>
-              <nav className="flex flex-col gap-1" aria-label="ناوبری موبایل">
+              <nav
+                className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-4"
+                aria-label="ناوبری موبایل"
+              >
                 {navItems.map((item) => {
-                  const active = onHome && activeSection === item.id;
+                  const active = isActive(item.id);
                   return (
-                    <button
+                    <a
                       key={item.id}
-                      type="button"
-                      onClick={() => goToSection(item.id)}
+                      href={`/#${item.id}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        goToItem(item.id);
+                      }}
                       className={cn(
-                        "rounded-xl px-3 py-2.5 text-start text-sm font-medium transition-colors",
+                        "block w-full rounded-xl px-3 py-2.5 text-start text-sm font-medium transition-colors",
                         active
                           ? "bg-brand/10 text-brand"
                           : "hover:bg-accent",
                       )}
                     >
                       {item.label}
-                    </button>
+                    </a>
                   );
                 })}
                 <div className="my-3 h-px bg-border/60" />
                 <Link
                   href="/login"
                   onClick={() => setOpen(false)}
-                  className="rounded-xl px-3 py-2.5 text-sm font-medium hover:bg-accent"
+                  className="block rounded-xl px-3 py-2.5 text-sm font-medium hover:bg-accent"
                 >
                   ورود تیم
                 </Link>
                 <Link
                   href="/portal/login"
                   onClick={() => setOpen(false)}
-                  className="rounded-xl bg-brand px-3 py-2.5 text-center text-sm font-medium text-brand-foreground"
+                  className="mt-1 block rounded-xl bg-brand px-3 py-2.5 text-center text-sm font-medium text-brand-foreground"
                 >
                   پورتال مشتری
                 </Link>
               </nav>
+              <div className="shrink-0 border-t border-border/60 bg-background p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+                <ThemeToggle variant="tabs" surface="default" />
+              </div>
             </SheetContent>
           </Sheet>
         </div>

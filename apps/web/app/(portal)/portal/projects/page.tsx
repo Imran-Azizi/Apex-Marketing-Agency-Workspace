@@ -15,6 +15,7 @@ import { apiGet } from "@/lib/api";
 import { type PortalProjectsList, PORTAL_STATUS_LABELS } from "@/lib/portal";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -254,8 +255,8 @@ export default function PortalProjectsPage() {
 
       {!isLoading && data && data.items.length > 0 && (
         <>
-          <div className="hidden overflow-hidden rounded-xl border shadow-sm md:block">
-            <Table>
+          <HorizontalScroll className="hidden rounded-xl shadow-sm md:block">
+            <Table className="min-w-[48rem]">
               <TableHeader>
                 <TableRow className="bg-muted/40 hover:bg-muted/40">
                   <TableHead className="text-start">نام پروژه</TableHead>
@@ -319,7 +320,7 @@ export default function PortalProjectsPage() {
                 ))}
               </TableBody>
             </Table>
-          </div>
+          </HorizontalScroll>
 
           <div className="grid gap-4 md:hidden">
             {data.items.map((p) => (

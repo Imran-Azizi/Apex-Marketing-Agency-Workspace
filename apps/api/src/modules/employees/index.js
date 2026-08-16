@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.js';
-import { requireInternal, requirePermission, requireRoles } from '../../middleware/rbac.js';
+import { requireInternal, requirePermission } from '../../middleware/rbac.js';
 import { requireCsrf } from '../../middleware/csrf.js';
 import { validate } from '../../middleware/validate.js';
 import { ok, created } from '../../utils/response.js';
@@ -13,9 +13,9 @@ import {
 } from './service.js';
 
 const router = Router();
-router.use(requireAuth, requireInternal, requireRoles('MANAGER', 'ADMIN'));
+router.use(requireAuth, requireInternal);
 
-router.get('/', requirePermission('team:manage'), async (req, res, next) => {
+router.get('/', requirePermission('employees.view'), async (req, res, next) => {
   try {
     ok(
       res,
@@ -33,7 +33,7 @@ router.get('/', requirePermission('team:manage'), async (req, res, next) => {
   }
 });
 
-router.get('/:id', requirePermission('team:manage'), async (req, res, next) => {
+router.get('/:id', requirePermission('employees.view'), async (req, res, next) => {
   try {
     ok(res, await employeesService.getById(req.params.id));
   } catch (e) {
@@ -44,7 +44,7 @@ router.get('/:id', requirePermission('team:manage'), async (req, res, next) => {
 router.post(
   '/',
   requireCsrf,
-  requirePermission('team:manage'),
+  requirePermission('employees.create'),
   validate(createEmployeeSchema),
   async (req, res, next) => {
     try {
@@ -58,7 +58,7 @@ router.post(
 router.patch(
   '/:id',
   requireCsrf,
-  requirePermission('team:manage'),
+  requirePermission('employees.edit'),
   validate(updateEmployeeSchema),
   async (req, res, next) => {
     try {
@@ -72,7 +72,7 @@ router.patch(
 router.patch(
   '/:id/status',
   requireCsrf,
-  requirePermission('team:manage'),
+  requirePermission('employees.disable'),
   validate(z.object({ isActive: z.boolean() })),
   async (req, res, next) => {
     try {
@@ -86,7 +86,7 @@ router.patch(
 router.post(
   '/:id/reset-password',
   requireCsrf,
-  requirePermission('team:manage'),
+  requirePermission('employees.edit'),
   validate(resetPasswordSchema),
   async (req, res, next) => {
     try {
@@ -97,7 +97,7 @@ router.post(
   },
 );
 
-router.delete('/:id', requireCsrf, requirePermission('team:manage'), async (req, res, next) => {
+router.delete('/:id', requireCsrf, requirePermission('employees.delete'), async (req, res, next) => {
   try {
     ok(res, await employeesService.softDelete(req.params.id, req.auth, req));
   } catch (e) {

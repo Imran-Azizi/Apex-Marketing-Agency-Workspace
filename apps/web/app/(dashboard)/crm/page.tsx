@@ -9,10 +9,12 @@ import {
 import { apiGet } from "@/lib/api";
 import { formatDate, formatPhoneDisplay } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -20,6 +22,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Table,
   TableBody,
@@ -33,8 +43,10 @@ import {
   ChevronRight,
   Plus,
   Search,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
+import { useHasPermission } from "@/lib/permissions";
 import { CustomerFormDialog } from "./_components/customer-form-dialog";
 import { DeleteCustomerDialog } from "./_components/delete-customer-dialog";
 import { CustomerActions } from "./_components/customer-actions";
@@ -46,11 +58,15 @@ const ALL = "ALL";
 
 export default function CrmPage() {
   const router = useRouter();
+  const canCreate = useHasPermission("crm.create");
+  const canEdit = useHasPermission("crm.edit");
+  const canDelete = useHasPermission("crm.delete");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [source, setSource] = useState(ALL);
   const [salesOwnerId, setSalesOwnerId] = useState(ALL);
   const [page, setPage] = useState(1);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CrmCustomer | null>(
@@ -91,6 +107,8 @@ export default function CrmPage() {
     placeholderData: keepPreviousData,
   });
 
+  const activeDropdownFilters =
+    (source !== ALL ? 1 : 0) + (salesOwnerId !== ALL ? 1 : 0);
   const hasFilters =
     search !== "" ||
     source !== ALL ||
@@ -120,16 +138,102 @@ export default function CrmPage() {
     setPage(1);
   };
 
+  const clearDropdownFilters = () => {
+    setSource(ALL);
+    setSalesOwnerId(ALL);
+    setPage(1);
+  };
+
+  function renderSourceSelect(triggerClassName?: string) {
+    return (
+      <Select
+        value={source}
+        onValueChange={(value) => {
+          setSource(value);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={triggerClassName ?? "w-full sm:w-44"}>
+          <SelectValue placeholder="منبع ورود" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>همه منابع</SelectItem>
+          {(formOptions?.leadSources ?? []).map((item) => (
+            <SelectItem key={item.code} value={item.code}>
+              {item.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  function renderSalesOwnerSelect(triggerClassName?: string) {
+    return (
+      <Select
+        value={salesOwnerId}
+        onValueChange={(value) => {
+          setSalesOwnerId(value);
+          setPage(1);
+        }}
+      >
+        <SelectTrigger className={triggerClassName ?? "w-full sm:w-44"}>
+          <SelectValue placeholder="مسئول فروش" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>همه مسئولین</SelectItem>
+          {(formOptions?.salesReps ?? []).map((rep) => (
+            <SelectItem key={rep.id} value={rep.id}>
+              {rep.fullName}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  function renderSearchField(className?: string) {
+    return (
+      <div className={`relative min-w-0 flex-1 ${className ?? "sm:max-w-sm"}`}>
+        <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="جستجو بر اساس نام، شرکت یا واتساپ..."
+          className="ps-9"
+        />
+        {searchInput && (
+          <button
+            type="button"
+            onClick={() => setSearchInput("")}
+            className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            title="پاک کردن جستجو"
+            aria-label="پاک کردن جستجو"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <div className="min-w-0">
       <PageHeader
+        inline
         title="مدیریت مشتری"
         subtitle="لیست مشتریان و سرنخ‌های فروش"
         actions={
-          <Button variant="brand" onClick={openCreate}>
+          canCreate ? (
+          <Button
+            variant="brand"
+            onClick={openCreate}
+            className="h-9 shrink-0 gap-1.5 px-3 text-sm sm:h-10 sm:px-4"
+          >
             <Plus className="h-4 w-4" />
-            مشتری جدید
+            <span className="whitespace-nowrap">مشتری جدید</span>
           </Button>
+          ) : undefined
         }
       />
 
@@ -144,66 +248,89 @@ export default function CrmPage() {
         customer={deletingCustomer}
       />
 
-      <div className="space-y-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative flex-1 sm:max-w-sm">
-            <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="جستجو بر اساس نام، شرکت یا واتساپ..."
-              className="ps-9"
-            />
-            {searchInput && (
-              <button
-                type="button"
-                onClick={() => setSearchInput("")}
-                className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                title="پاک کردن جستجو"
-                aria-label="پاک کردن جستجو"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+      <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <SheetContent
+          side="bottom"
+          className="max-h-[85vh] rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2"
+        >
+          <SheetHeader className="text-start">
+            <SheetTitle>فیلترها</SheetTitle>
+            <SheetDescription>
+              منبع ورود و مسئول فروش را انتخاب کنید. فیلترها بلافاصله اعمال می‌شوند.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-5 space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">منبع ورود</p>
+              {renderSourceSelect("w-full")}
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">مسئول فروش</p>
+              {renderSalesOwnerSelect("w-full")}
+            </div>
           </div>
-          <Select
-            value={source}
-            onValueChange={(value) => {
-              setSource(value);
-              setPage(1);
-            }}
+
+          <SheetFooter className="mt-6 flex-row gap-2 sm:space-x-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={clearDropdownFilters}
+              disabled={activeDropdownFilters === 0}
+            >
+              <X className="h-4 w-4" />
+              حذف فیلترها
+            </Button>
+            <Button
+              type="button"
+              variant="brand"
+              className="flex-1"
+              onClick={() => setFiltersOpen(false)}
+            >
+              مشاهده نتایج
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      <div className="space-y-4">
+        {/* Mobile: search + filters button */}
+        <div className="flex items-center gap-2 md:hidden">
+          {renderSearchField("")}
+          <Button
+            type="button"
+            variant={activeDropdownFilters > 0 ? "secondary" : "outline"}
+            className="relative h-10 shrink-0 gap-1.5 px-3"
+            onClick={() => setFiltersOpen(true)}
+            aria-label="باز کردن فیلترها"
           >
-            <SelectTrigger className="sm:w-44">
-              <SelectValue placeholder="منبع ورود" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>همه منابع</SelectItem>
-              {(formOptions?.leadSources ?? []).map((item) => (
-                <SelectItem key={item.code} value={item.code}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={salesOwnerId}
-            onValueChange={(value) => {
-              setSalesOwnerId(value);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="sm:w-44">
-              <SelectValue placeholder="مسئول فروش" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>همه مسئولین</SelectItem>
-              {(formOptions?.salesReps ?? []).map((rep) => (
-                <SelectItem key={rep.id} value={rep.id}>
-                  {rep.fullName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <SlidersHorizontal className="h-4 w-4" />
+            <span>فیلترها</span>
+            {activeDropdownFilters > 0 && (
+              <Badge
+                variant="brand"
+                className="h-5 min-w-5 justify-center rounded-full px-1.5 text-[10px] leading-none"
+              >
+                {activeDropdownFilters.toLocaleString("fa-AF", {
+                  numberingSystem: "latn",
+                })}
+              </Badge>
+            )}
+          </Button>
+        </div>
+
+        {data && (
+          <p className="text-sm text-muted-foreground md:hidden">
+            {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })} مشتری
+          </p>
+        )}
+
+        {/* Desktop / tablet: inline filters */}
+        <div className="hidden items-center gap-2 md:flex">
+          {renderSearchField()}
+          {renderSourceSelect()}
+          {renderSalesOwnerSelect()}
           {hasFilters && (
             <Button
               variant="ghost"
@@ -216,7 +343,7 @@ export default function CrmPage() {
             </Button>
           )}
           {data && (
-            <p className="text-sm text-muted-foreground sm:ms-auto">
+            <p className="text-sm text-muted-foreground ms-auto">
               {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })} مشتری
             </p>
           )}
@@ -245,182 +372,118 @@ export default function CrmPage() {
                   <X className="h-4 w-4" />
                   حذف فیلترها
                 </Button>
-              ) : (
+              ) : canCreate ? (
                 <Button variant="brand" onClick={openCreate}>
                   <Plus className="h-4 w-4" />
                   مشتری جدید
                 </Button>
-              )
+              ) : undefined
             }
           />
         )}
 
         {data && data.items.length > 0 && (
           <>
-            {/* Desktop / tablet table */}
-            <div
-              className={`hidden overflow-x-auto rounded-lg border md:block ${
-                isFetching ? "opacity-70 transition-opacity" : ""
-              }`}
+            <HorizontalScroll
+              className={
+                isFetching ? "opacity-70 transition-opacity" : undefined
+              }
             >
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40 hover:bg-muted/40">
-                    <TableHead>مشتری</TableHead>
-                    <TableHead>تماس</TableHead>
-                    <TableHead className="hidden lg:table-cell">منبع ورود</TableHead>
-                    <TableHead className="hidden lg:table-cell">
-                      مسئول فروش
-                    </TableHead>
-                    <TableHead className="hidden xl:table-cell">
-                      تاریخ ایجاد
-                    </TableHead>
-                    <TableHead className="w-14 text-center">عملیات</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.items.map((customer) => (
-                    <TableRow
-                      key={customer.id}
-                      role="link"
-                      tabIndex={0}
-                      className="cursor-pointer"
-                      onClick={() => router.push(`/crm/${customer.id}`)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          router.push(`/crm/${customer.id}`);
-                        }
-                      }}
-                    >
-                      <TableCell>
-                        <div className="font-medium">
-                          {customer.personName}
-                          {customer.companyName && (
-                            <span className="block text-xs font-normal text-muted-foreground">
-                              {customer.companyName}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-0.5">
-                          <span
-                            dir="ltr"
-                            className="block text-right text-sm font-medium tabular-nums tracking-wide text-foreground"
-                            title={customer.whatsappRaw}
-                          >
-                            {formatPhoneDisplay(customer.whatsappRaw)}
-                          </span>
-                          {customer.email && (
+              <Table className="min-w-[40rem]">
+                  <TableHeader>
+                    <TableRow className="bg-muted/40 hover:bg-muted/40">
+                      <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        مشتری
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        تماس
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        منبع ورود
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        مسئول فروش
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        تاریخ ایجاد
+                      </TableHead>
+                      <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        عملیات
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.items.map((customer) => (
+                      <TableRow
+                        key={customer.id}
+                        role="link"
+                        tabIndex={0}
+                        className="cursor-pointer"
+                        onClick={() => router.push(`/crm/${customer.id}`)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            router.push(`/crm/${customer.id}`);
+                          }
+                        }}
+                      >
+                        <TableCell>
+                          <div className="min-w-[8rem] font-medium">
+                            {customer.personName}
+                            {customer.companyName && (
+                              <span className="block text-xs font-normal text-muted-foreground">
+                                {customer.companyName}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="min-w-[9rem] space-y-0.5">
                             <span
                               dir="ltr"
-                              className="block max-w-[200px] truncate text-right text-xs text-muted-foreground"
-                              title={customer.email}
+                              className="block text-right text-sm font-medium tabular-nums tracking-wide text-foreground"
+                              title={customer.whatsappRaw}
                             >
-                              {customer.email}
+                              {formatPhoneDisplay(customer.whatsappRaw)}
                             </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden text-sm lg:table-cell">
-                        {formatLeadSource(customer.source)}
-                      </TableCell>
-                      <TableCell className="hidden text-sm lg:table-cell">
-                        {customer.salesOwner?.fullName || "—"}
-                      </TableCell>
-                      <TableCell className="hidden text-sm text-muted-foreground xl:table-cell">
-                        {formatDate(customer.createdAt)}
-                      </TableCell>
-                      <TableCell
-                        className="text-center"
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => e.stopPropagation()}
-                      >
-                        <CustomerActions
-                          customer={customer}
-                          onEdit={openEdit}
-                          onDelete={openDelete}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Mobile cards */}
-            <div
-              className={`space-y-3 md:hidden ${
-                isFetching ? "opacity-70 transition-opacity" : ""
-              }`}
-            >
-              {data.items.map((customer) => (
-                <div
-                  key={customer.id}
-                  role="link"
-                  tabIndex={0}
-                  className="cursor-pointer rounded-lg border bg-background p-4 shadow-sm transition-colors hover:border-brand/40 hover:bg-muted/20"
-                  onClick={() => router.push(`/crm/${customer.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      router.push(`/crm/${customer.id}`);
-                    }
-                  }}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 font-medium">
-                      {customer.personName}
-                      {customer.companyName && (
-                        <span className="block truncate text-xs font-normal text-muted-foreground">
-                          {customer.companyName}
-                        </span>
-                      )}
-                    </div>
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <CustomerActions
-                        customer={customer}
-                        onEdit={openEdit}
-                        onDelete={openDelete}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <span
-                      dir="ltr"
-                      className="text-sm font-medium tabular-nums tracking-wide text-foreground"
-                      title={customer.whatsappRaw}
-                    >
-                      {formatPhoneDisplay(customer.whatsappRaw)}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                    <p>
-                      منبع:{" "}
-                      <span className="text-foreground">
-                        {formatLeadSource(customer.source)}
-                      </span>
-                    </p>
-                    <p>
-                      مسئول فروش:{" "}
-                      <span className="text-foreground">
-                        {customer.salesOwner?.fullName || "—"}
-                      </span>
-                    </p>
-                    <p className="col-span-2">
-                      تاریخ ایجاد:{" "}
-                      <span className="text-foreground">
-                        {formatDate(customer.createdAt)}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                            {customer.email && (
+                              <span
+                                dir="ltr"
+                                className="block max-w-[200px] truncate text-right text-xs text-muted-foreground"
+                                title={customer.email}
+                              >
+                                {customer.email}
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {formatLeadSource(customer.source)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {customer.salesOwner?.fullName || "—"}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                          {formatDate(customer.createdAt)}
+                        </TableCell>
+                        <TableCell
+                          className="text-center"
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <CustomerActions
+                            customer={customer}
+                            onEdit={openEdit}
+                            onDelete={openDelete}
+                            canEdit={canEdit}
+                            canDelete={canDelete}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+            </HorizontalScroll>
 
             {totalPages > 1 && (
               <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">

@@ -33,6 +33,10 @@ import {
   resolvePaymentContext,
   shouldAutoApprovePayment,
 } from './paymentApproval.js';
+import {
+  CUSTOMER_PAYMENT_METHODS,
+  formatPaymentMethod,
+} from './paymentMethods.js';
 
 const optionalId = z.string().min(1).optional().or(z.literal('')).transform((v) => v || undefined);
 const patchId = z.union([z.string().min(1), z.literal(''), z.null()]).optional();
@@ -80,7 +84,10 @@ export const recordPaymentSchema = z.object({
   invoiceId: z.string().min(1).optional(),
   opportunityId: z.string().min(1).optional(),
   amount: z.coerce.number().positive(),
-  method: z.string().optional(),
+  method: z.enum(CUSTOMER_PAYMENT_METHODS, {
+    required_error: 'روش پرداخت الزامی است',
+    invalid_type_error: 'روش پرداخت معتبر نیست',
+  }),
   reference: z.string().optional(),
   attachmentKey: z.string().optional(),
   allowOverpayment: z.boolean().optional(),
@@ -88,6 +95,11 @@ export const recordPaymentSchema = z.object({
 
 export const updatePaymentSchema = z.object({
   amount: z.coerce.number().positive().optional(),
+  method: z
+    .enum(CUSTOMER_PAYMENT_METHODS, {
+      invalid_type_error: 'روش پرداخت معتبر نیست',
+    })
+    .optional(),
   notes: z.string().optional().nullable(),
   allowOverpayment: z.boolean().optional(),
 });
@@ -152,6 +164,10 @@ export const crmService = {
       leadSources: LEAD_SOURCE_CODES.map((code) => ({
         code,
         label: LEAD_SOURCE_LABELS[code],
+      })),
+      paymentMethods: CUSTOMER_PAYMENT_METHODS.map((code) => ({
+        code,
+        label: formatPaymentMethod(code),
       })),
       salesReps: salesReps.map((u) => ({
         id: u.id,
@@ -264,6 +280,7 @@ export const crmService = {
 
     const payments = customer.payments.map((p) => ({
       ...p,
+      methodLabel: formatPaymentMethod(p.method),
       recordedBy: p.recordedById ? recorderById[p.recordedById] || null : null,
     }));
 
@@ -687,7 +704,7 @@ export const crmService = {
           invoiceId: resolvedInvoiceId,
           amount: amt,
           paidAt,
-          method: method || 'BANK_TRANSFER',
+          method,
           reference: paymentNumber,
           attachmentKey,
           verification: initialVerification,
@@ -774,6 +791,7 @@ export const crmService = {
           buildPaymentPendingApprovalNotification({
             paymentId: created.id,
             amount: amt,
+            method,
             creatorName: recordedBy?.fullName,
             customerName: ctx.customerName,
             projectTitle: ctx.projectTitle,
@@ -799,6 +817,7 @@ export const crmService = {
         opportunityId: resolvedOpportunityId || null,
         paymentNumber,
         paidAt,
+        method,
         verification: initialVerification,
         awaitingApproval: !autoApprove,
         isFirstPayment,
@@ -811,6 +830,7 @@ export const crmService = {
 
     return {
       ...payment,
+      methodLabel: formatPaymentMethod(payment.method),
       paymentNumber,
       isFirstPayment,
       portalInviteUnlocked: isFirstPayment,
@@ -824,7 +844,12 @@ export const crmService = {
   /**
    * Update payment amount / notes and recalculate contract finance.
    */
-  async updatePayment(paymentId, { amount, notes, allowOverpayment }, auth, req) {
+  async updatePayment(
+    paymentId,
+    { amount, method, notes, allowOverpayment },
+    auth,
+    req,
+  ) {
     const existing = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: { invoice: { select: { opportunityId: true } } },
@@ -865,6 +890,7 @@ export const crmService = {
         where: { id: paymentId },
         data: {
           ...(amount !== undefined && { amount: nextAmount }),
+          ...(method !== undefined && { method }),
           ...(notes !== undefined && { notes }),
         },
       });
@@ -883,12 +909,20 @@ export const crmService = {
       action: 'PAYMENT_UPDATE',
       entityType: 'Payment',
       entityId: paymentId,
-      before: { amount: Number(existing.amount) },
-      after: { amount: nextAmount, finance: result.finance },
+      before: { amount: Number(existing.amount), method: existing.method },
+      after: {
+        amount: nextAmount,
+        method: method ?? existing.method,
+        finance: result.finance,
+      },
       req,
     });
 
-    return { ...result.payment, finance: result.finance };
+    return {
+      ...result.payment,
+      methodLabel: formatPaymentMethod(result.payment.method),
+      finance: result.finance,
+    };
   },
 
   /**
@@ -922,6 +956,7 @@ export const crmService = {
       entityId: paymentId,
       before: {
         amount: Number(existing.amount),
+        method: existing.method,
         verification: existing.verification,
       },
       after: { deleted: true, finance: result },
@@ -996,6 +1031,7 @@ export const crmService = {
             ...buildPaymentRejectedNotification({
               paymentId,
               amount: existing.amount,
+              method: existing.method,
               projectTitle: ctx.projectTitle,
               projectId: ctx.projectId,
               crmCustomerId: existing.crmCustomerId,
@@ -1017,6 +1053,7 @@ export const crmService = {
       entityId: paymentId,
       after: {
         verification: 'REJECTED',
+        method: existing.method,
         rejectionReason: reason,
         finance: result.finance,
       },
@@ -1025,6 +1062,7 @@ export const crmService = {
 
     return {
       ...result.payment,
+      methodLabel: formatPaymentMethod(result.payment.method),
       finance: result.finance,
       approvalStatus: 'REJECTED',
     };
@@ -1115,6 +1153,7 @@ export const crmService = {
         paidAt: payment.paidAt,
         createdAt: payment.createdAt,
         method: payment.method,
+        methodLabel: formatPaymentMethod(payment.method),
         verification: payment.verification,
         invoiceNumber: payment.invoice?.invoiceNumber || null,
         recordedByName: recordedBy?.fullName || null,
@@ -1207,6 +1246,7 @@ export const crmService = {
             ...buildPaymentApprovedNotification({
               paymentId,
               amount: payment.amount,
+              method: payment.method,
               projectTitle: ctx.projectTitle,
               projectId: ctx.projectId,
               crmCustomerId: payment.crmCustomerId,
@@ -1225,12 +1265,17 @@ export const crmService = {
       action: 'PAYMENT_VERIFY',
       entityType: 'Payment',
       entityId: paymentId,
-      after: { verification: 'VERIFIED', finance: result.finance },
+      after: {
+        verification: 'VERIFIED',
+        method: payment.method,
+        finance: result.finance,
+      },
       req,
     });
 
     return {
       ...result.payment,
+      methodLabel: formatPaymentMethod(result.payment.method),
       finance: result.finance,
       approvalStatus: 'APPROVED',
     };

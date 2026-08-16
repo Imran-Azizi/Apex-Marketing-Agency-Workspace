@@ -21,7 +21,9 @@ export function PortalProjectCard({
   project,
   variant = "card",
 }: PortalProjectCardProps) {
-  const thumb = projectThumbnailUrl(project.thumbnailStorageKey);
+  const thumb = projectThumbnailUrl(project.thumbnailStorageKey, {
+    url: project.thumbnailUrl,
+  });
 
   if (variant === "row") {
     return (

@@ -53,6 +53,11 @@ export function getModelConfig() {
         maxTokens: 4096,
         model: env.aiModelStoryboard || null,
       },
+      PORTFOLIO: {
+        temperature: 0.55,
+        maxTokens: 1024,
+        model: env.aiModelPortfolio || null,
+      },
     },
   };
 }

@@ -14,6 +14,8 @@ import { logout } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui-store";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { Logo } from "@/components/brand/logo";
 import {
   PORTAL_NAV_ENTRIES,
   isPortalNavActive,
@@ -66,22 +68,14 @@ export function CustomerSidebar({
           href="/portal"
           onClick={onNavigate}
           className={cn(
-            "flex min-w-0 items-center gap-2.5",
+            "flex min-w-0 items-center",
             collapsed && !mobile && "justify-center",
           )}
         >
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sidebar-accent text-sm font-bold text-white shadow-sm shadow-black/20">
-            ا
-          </div>
-          {(!collapsed || mobile) && (
-            <div className="min-w-0 text-start">
-              <span className="block truncate text-base font-bold leading-tight">
-                اپیکس
-              </span>
-              <span className="text-[11px] text-sidebar-foreground/60">
-                پورتال مشتری
-              </span>
-            </div>
+          {collapsed && !mobile ? (
+            <Logo variant="mark" size="lg" onDark />
+          ) : (
+            <Logo size="lg" onDark subtitle="پورتال مشتری" />
           )}
         </Link>
 
@@ -106,7 +100,7 @@ export function CustomerSidebar({
         )}
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto p-2.5">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-2.5">
         {PORTAL_NAV_ENTRIES.map((item) => {
           const Icon = item.icon;
           const active = isPortalNavActive(pathname, item);
@@ -121,7 +115,7 @@ export function CustomerSidebar({
                 "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
                 collapsed && !mobile && "justify-center px-2",
                 active
-                  ? "bg-sidebar-accent text-white shadow-sm shadow-black/10"
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm shadow-black/10"
                   : "text-sidebar-foreground/75 hover:bg-sidebar-border hover:text-sidebar-foreground",
               )}
             >
@@ -139,7 +133,13 @@ export function CustomerSidebar({
         })}
       </nav>
 
-      <div className="border-t border-sidebar-border p-2.5">
+      <div
+        className={cn(
+          "shrink-0 space-y-2.5 border-t border-sidebar-border bg-sidebar p-2.5",
+          mobile && "pb-[max(0.625rem,env(safe-area-inset-bottom))]",
+        )}
+      >
+        {mobile && <ThemeToggle variant="tabs" />}
         <Button
           variant="ghost"
           className={cn(

@@ -1,3 +1,5 @@
+import { formatPaymentMethod } from './paymentMethods.js';
+
 /**
  * Shared receipt display helpers (view formatting only — does not change stored values).
  * Print target: A6 portrait (105 × 148 mm).
@@ -24,16 +26,15 @@ export function splitReceiptDateTime(value) {
     day: 'numeric',
   }).format(date);
 
-  let hours = date.getHours();
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  if (hours === 0) hours = 12;
+  // 12-hour clock with localized day period (ق.ظ. / ب.ظ.)
+  const timePart = new Intl.DateTimeFormat('fa-AF', {
+    numberingSystem: 'latn',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(date);
 
-  return {
-    datePart,
-    timePart: `${hours}:${minutes} ${ampm}`,
-  };
+  return { datePart, timePart };
 }
 
 /** Safe combined string with Unicode isolates for plain-text contexts. */
@@ -56,10 +57,22 @@ const ICONS = {
   card: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/><path d="M7 15h3"/></svg>`,
   calendar: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><circle cx="16.2" cy="15.2" r="2.8"/><path d="M16.2 14v1.4l.9.6"/></svg>`,
   penUser: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85"><path d="M12 12a3.5 3.5 0 1 0-3.5-3.5A3.5 3.5 0 0 0 12 12z"/><path d="M5 20a7 7 0 0 1 10.2-6.1"/><path d="M15 16.6 16.3 20l3.2-1.2-1.3-3.4z"/><path d="m16.4 19.8 1.4 1.4"/></svg>`,
+  badge: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85"><path d="M12 3 14.5 8.5 20.5 9.3 16 13.5 17.2 19.5 12 16.7 6.8 19.5 8 13.5 3.5 9.3 9.5 8.5 12 3z"/></svg>`,
+  folder: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9z"/></svg>`,
+  wallet: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><path d="M16 14.5h2"/></svg>`,
   receipt: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3h6l4 4v14H8V3z"/><path d="M14 3v4h4"/><path d="m10 13 1.6 1.6L15.5 11"/></svg>`,
   globe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>`,
   phone: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4h3l1.5 4-2 1.5a12 12 0 0 0 6 6L16 14l4 1.5V19a2 2 0 0 1-2 2A15 15 0 0 1 4 6a2 2 0 0 1 2-2z"/></svg>`,
 };
+
+export function formatPaymentVerification(status) {
+  const map = {
+    VERIFIED: 'تایید شده',
+    PENDING: 'در انتظار تأیید',
+    REJECTED: 'رد شده',
+  };
+  return map[String(status || '').toUpperCase()] || String(status || '—');
+}
 
 /**
  * A6 professional RTL payment receipt HTML (no QR, no thank-you / validity cards).
@@ -71,6 +84,9 @@ export function buildPaymentReceiptHtml(receipt) {
   const customerName = (receipt.customer.personName || '').trim() || '—';
   const paymentNo = (receipt.payment.paymentNumber || receipt.payment.reference || '').trim();
   const amountText = formatReceiptAmount(receipt.payment.amount);
+  const statusText = formatPaymentVerification(receipt.payment.verification);
+  const methodText =
+    receipt.payment.methodLabel || formatPaymentMethod(receipt.payment.method);
   const { datePart, timePart } = splitReceiptDateTime(paidAt);
   const esc = escapeHtml;
 
@@ -78,12 +94,38 @@ export function buildPaymentReceiptHtml(receipt) {
     ? `<span class="dt">${esc(datePart)}</span><span class="sep"> - </span><span class="tm" dir="ltr">${esc(timePart)}</span>`
     : `<span class="dt">${esc(datePart)}</span>`;
 
-  const rows = [
-    { label: 'نام مشتری', valueHtml: esc(customerName), icon: 'user', amount: false },
+  /** @type {Array<{ label: string, valueHtml: string, icon: string, amount?: boolean }>} */
+  const rowDefs = [
+    { label: 'نام مشتری', valueHtml: esc(customerName), icon: 'user' },
     { label: 'مبلغ پرداخت', valueHtml: esc(amountText), icon: 'card', amount: true },
-    { label: 'تاریخ و زمان', valueHtml: dateTimeHtml, icon: 'calendar', amount: false },
-    { label: 'ثبت‌کننده', valueHtml: esc(recorderName), icon: 'penUser', amount: false },
-  ]
+    { label: 'روش پرداخت', valueHtml: esc(methodText), icon: 'wallet' },
+    { label: 'تاریخ و زمان', valueHtml: dateTimeHtml, icon: 'calendar' },
+    { label: 'وضعیت', valueHtml: esc(statusText), icon: 'badge' },
+    { label: 'ثبت‌کننده', valueHtml: esc(recorderName), icon: 'penUser' },
+  ];
+
+  if (receipt.contract?.title) {
+    rowDefs.push({
+      label: 'قرارداد / پروژه',
+      valueHtml: esc(String(receipt.contract.title).trim() || '—'),
+      icon: 'folder',
+    });
+  }
+  if (
+    receipt.contract &&
+    receipt.contract.remainingBalance != null &&
+    Number.isFinite(Number(receipt.contract.remainingBalance))
+  ) {
+    rowDefs.push({
+      label: 'مانده حساب',
+      valueHtml: esc(formatReceiptAmount(receipt.contract.remainingBalance)),
+      icon: 'wallet',
+      amount: true,
+    });
+  }
+
+  const compact = rowDefs.length > 5;
+  const rows = rowDefs
     .map(
       (row) => `
       <div class="row">
@@ -100,24 +142,29 @@ export function buildPaymentReceiptHtml(receipt) {
     ? `<p class="ref" dir="ltr">${esc(paymentNo)}</p>`
     : '';
 
+  const title = paymentNo
+    ? `رسید پرداخت — ${paymentNo}`
+    : 'رسید پرداخت — A6';
+
   return `<!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>رسید پرداخت — A6</title>
+  <title>${esc(title)}</title>
   <style>
     @page {
       size: A6 portrait;
       margin: 0;
     }
     :root {
-      --brand: #0f766e;
-      --brand-deep: #115e59;
-      --ink: #1e293b;
-      --muted: #94a3b8;
-      --line: #e2e8f0;
-      --soft: #eef2f6;
+      --brand: #d4af37;
+      --brand-deep: #1f2937;
+      --brand-soft: #b8962e;
+      --ink: #1f2937;
+      --muted: #9ca3af;
+      --line: #e5e7eb;
+      --soft: #f3f4f6;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -148,9 +195,19 @@ export function buildPaymentReceiptHtml(receipt) {
       flex-direction: column;
       box-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.18);
     }
+    .sheet.compact .header { padding-top: 10px; }
+    .sheet.compact .title-block { margin-top: 8px; padding: 7px 0; }
+    .sheet.compact .body { padding-top: 8px; }
+    .sheet.compact .row { min-height: 36px; padding: 7px 10px; }
+    .sheet.compact .icon { width: 24px; height: 24px; border-radius: 6px; }
+    .sheet.compact .icon svg { width: 12px; height: 12px; }
+    .sheet.compact .label { font-size: 9.5px; }
+    .sheet.compact .value { font-size: 11px; }
+    .sheet.compact .value.amount { font-size: 11.5px; }
+    .sheet.compact .note { padding: 6px 4px 6px; font-size: 7px; }
     .accent {
       height: 3px;
-      background: linear-gradient(90deg, #14b8a6, #0f766e 55%, #115e59);
+      background: linear-gradient(90deg, #e8c547, #d4af37 55%, #1f2937);
       flex-shrink: 0;
     }
     .header {
@@ -171,21 +228,14 @@ export function buildPaymentReceiptHtml(receipt) {
     .mark {
       width: 18px;
       height: 18px;
-      position: relative;
       flex-shrink: 0;
+      display: block;
     }
-    .mark i {
-      position: absolute;
-      width: 7px;
-      height: 7px;
-      background: var(--brand-deep);
-      transform: rotate(45deg);
-      border-radius: 0.5px;
+    .mark svg {
+      width: 18px;
+      height: 18px;
+      display: block;
     }
-    .mark i:nth-child(1) { top: 0; left: 5.5px; }
-    .mark i:nth-child(2) { top: 5.5px; left: 0; opacity: .7; }
-    .mark i:nth-child(3) { top: 5.5px; right: 0; opacity: .7; }
-    .mark i:nth-child(4) { bottom: 0; left: 5.5px; opacity: .45; }
     .brand-name {
       font-size: 15px;
       font-weight: 900;
@@ -204,9 +254,9 @@ export function buildPaymentReceiptHtml(receipt) {
       width: 28px;
       height: 28px;
       border-radius: 6px;
-      border: 1px solid rgba(15,118,110,.12);
-      background: #f0fdfa;
-      color: var(--brand);
+      border: 1px solid rgba(212,175,55,.25);
+      background: rgba(212,175,55,.1);
+      color: var(--brand-soft);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -270,13 +320,13 @@ export function buildPaymentReceiptHtml(receipt) {
       width: 28px;
       height: 28px;
       border-radius: 8px;
-      background: #f0fdfa;
-      color: var(--brand);
+      background: rgba(212,175,55,.1);
+      color: var(--brand-soft);
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      border: 1px solid rgba(15,118,110,.1);
+      border: 1px solid rgba(212,175,55,.2);
     }
     .icon svg { width: 14px; height: 14px; }
     .label {
@@ -306,7 +356,7 @@ export function buildPaymentReceiptHtml(receipt) {
       text-align: center;
     }
     .value.amount {
-      color: var(--brand);
+      color: var(--brand-soft);
       font-size: 13px;
       font-variant-numeric: tabular-nums;
     }
@@ -370,14 +420,13 @@ export function buildPaymentReceiptHtml(receipt) {
 </head>
 <body>
   <div class="page">
-    <div class="sheet">
+    <div class="sheet${compact ? ' compact' : ''}" data-payment-id="${esc(receipt.payment.id || '')}" data-payment-number="${esc(paymentNo)}">
       <div class="accent" aria-hidden="true"></div>
       <header class="header">
         <div class="header-top">
           <div>
             <div class="brand-row">
-              <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-              <div class="brand-name">APEX</div>
+              <div class="brand-name">APEX SMART</div>
             </div>
             <div class="brand-sub">سیستم مدیریت مشتریان و پروژه‌ها</div>
           </div>
@@ -409,7 +458,15 @@ export function buildPaymentReceiptHtml(receipt) {
   <script>
     const params = new URLSearchParams(location.search);
     if (params.get('autoprint') === '1') {
-      window.onload = () => window.print();
+      const runPrint = () => {
+        try { window.focus(); } catch (_) {}
+        window.print();
+      };
+      if (document.readyState === 'complete') {
+        setTimeout(runPrint, 120);
+      } else {
+        window.addEventListener('load', () => setTimeout(runPrint, 120));
+      }
     }
   </script>
 </body>

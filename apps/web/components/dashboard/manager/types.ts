@@ -67,9 +67,6 @@ export interface KpiMetric {
   description?: string;
   href?: string;
   tone?: "default" | "brand" | "success" | "warning" | "danger" | "info";
-  progress?: number;
-  trendPct?: number | null;
-  sparkline?: number[];
   format?: "number" | "percent" | "currency" | "days";
 }
 

@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { apiPost } from "@/lib/api";
-import { getMe } from "@/lib/auth";
-import { isFullAccessRole } from "@/lib/rbac";
+import { paymentMethodLabel } from "@/lib/payment-methods";
+import { useMeQuery } from "@/lib/permissions";
+import { hasPermission } from "@/lib/rbac";
 import { formatCurrency, formatDate, formatTime } from "@/lib/utils";
 import { toast } from "sonner";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -71,12 +73,12 @@ export function PaymentHistoryPanel({
   const [rejectTarget, setRejectTarget] = useState<CustomerPayment | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  const me = useQuery({
-    queryKey: ["auth", "me"],
-    queryFn: getMe,
-    staleTime: 60_000,
-  });
-  const canApprove = isFullAccessRole(me.data?.role);
+  const me = useMeQuery();
+  const canApprove = hasPermission(
+    me.data?.permissions,
+    "finance.approve",
+    me.data?.role,
+  );
 
   useEffect(() => {
     if (!initialReceiptPaymentId) return;
@@ -176,7 +178,7 @@ export function PaymentHistoryPanel({
               </Badge>
             )}
             <Badge variant="success" className="rounded-full font-normal">
-              تاییدشده در مالی: {formatCurrency(approvedTotal)}
+              مجموع پرداخت‌شده: {formatCurrency(approvedTotal)}
             </Badge>
           </div>
         }
@@ -197,14 +199,15 @@ export function PaymentHistoryPanel({
           </div>
         ) : (
           <>
-            <div className="hidden overflow-x-auto lg:block">
-              <Table>
+            <HorizontalScroll bordered={false} className="hidden lg:block">
+              <Table className="min-w-[54rem]">
                 <TableHeader>
                   <TableRow className="bg-muted/20 hover:bg-muted/20">
                     <TableHead className="text-start">شماره پرداخت</TableHead>
                     <TableHead className="text-start">مبلغ پرداختی</TableHead>
                     <TableHead className="text-start">تاریخ پرداخت</TableHead>
                     <TableHead className="text-start">زمان پرداخت</TableHead>
+                    <TableHead className="text-start">روش پرداخت</TableHead>
                     <TableHead className="text-start">ثبت‌کننده</TableHead>
                     <TableHead className="text-start">وضعیت</TableHead>
                     <TableHead className="min-w-[220px] text-start">
@@ -244,6 +247,14 @@ export function PaymentHistoryPanel({
                         </TableCell>
                         <TableCell className="text-start text-sm text-muted-foreground tabular-nums">
                           {formatTime(paidAt)}
+                        </TableCell>
+                        <TableCell className="text-start">
+                          <Badge
+                            variant="outline"
+                            className="rounded-full font-normal"
+                          >
+                            {p.methodLabel || paymentMethodLabel(p.method)}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-start text-sm">
                           {p.recordedBy?.fullName || "—"}
@@ -300,7 +311,7 @@ export function PaymentHistoryPanel({
                   })}
                 </TableBody>
               </Table>
-            </div>
+            </HorizontalScroll>
 
             <div className="space-y-3 p-3 lg:hidden">
               {sortedPayments.map((p) => {
@@ -346,6 +357,12 @@ export function PaymentHistoryPanel({
                         زمان:{" "}
                         <span className="text-foreground tabular-nums">
                           {formatTime(paidAt)}
+                        </span>
+                      </p>
+                      <p className="col-span-2">
+                        روش پرداخت:{" "}
+                        <span className="font-medium text-foreground">
+                          {p.methodLabel || paymentMethodLabel(p.method)}
                         </span>
                       </p>
                       <p className="col-span-2">

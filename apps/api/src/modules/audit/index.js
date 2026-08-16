@@ -5,7 +5,7 @@ import { ok } from '../../utils/response.js';
 import { prisma } from '../../db/prisma.js';
 
 const router = Router();
-router.use(requireAuth, requireInternal, requirePermission('audit:read'));
+router.use(requireAuth, requireInternal, requirePermission('audit.view'));
 
 router.get('/', async (req, res, next) => {
   try {

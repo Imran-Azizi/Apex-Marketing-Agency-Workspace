@@ -3,6 +3,8 @@
 export const FINAL_VIDEO_STATUSES = [
   'DRAFT',
   'UPLOADED',
+  'PENDING_REVIEW',
+  'REVISION_REQUESTED',
   'APPROVED',
   'SENT_TO_CUSTOMER',
   'VIEWED_BY_CUSTOMER',
@@ -16,7 +18,9 @@ export const VIDEO_TYPE_LABELS = {
 
 export const STATUS_LABELS = {
   DRAFT: 'پیش‌نویس',
-  UPLOADED: 'آپلود شده',
+  UPLOADED: 'در انتظار بررسی',
+  PENDING_REVIEW: 'در انتظار بررسی',
+  REVISION_REQUESTED: 'نیازمند اصلاح',
   APPROVED: 'تأیید شده',
   SENT_TO_CUSTOMER: 'ارسال‌شده برای مشتری',
   VIEWED_BY_CUSTOMER: 'مشاهده‌شده توسط مشتری',
@@ -109,6 +113,9 @@ export function serializeFinalVideo(file, { projectStatus, uploaderName, custome
     sentAt: meta.sentAt || null,
     allowDownload: meta.allowDownload === true,
     approvedAt: meta.approvedAt || null,
+    revisionNotes: meta.revisionNotes || null,
+    revisionRequestedAt: meta.revisionRequestedAt || null,
+    reviewedBy: meta.reviewedBy || null,
     viewedAt: meta.viewedAt || null,
     customerApprovedAt: meta.customerApprovedAt || null,
     meta,
@@ -150,6 +157,22 @@ export function markApprovedMeta(meta, approvedAt = new Date()) {
     ...current,
     status: current.sentToCustomer ? 'SENT_TO_CUSTOMER' : 'APPROVED',
     approvedAt: approvedAt.toISOString(),
+    revisionNotes: null,
+    revisionRequestedAt: null,
+  };
+}
+
+export function markRevisionRequestedMeta(
+  meta,
+  { notes, requestedAt = new Date(), reviewedBy = null } = {},
+) {
+  return {
+    ...asMeta(meta),
+    status: 'REVISION_REQUESTED',
+    revisionNotes: String(notes || '').trim(),
+    revisionRequestedAt: requestedAt.toISOString(),
+    reviewedBy,
+    approvedAt: null,
   };
 }
 

@@ -15,6 +15,7 @@ import {
 } from "@/lib/content-version";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -56,6 +57,23 @@ import {
   ScenarioFinalView,
   StoryboardFinalView,
 } from "@/components/projects/ai-content-views";
+import {
+  ContentEditForm,
+  buildNarrationPayload,
+  buildScenarioPayload,
+  buildStoryboardPayload,
+  emptyNarrationForm,
+  emptyScenarioForm,
+  emptyStoryboardScenes,
+  loadNarrationForm,
+  loadScenarioForm,
+  loadStoryboardScenes,
+  validateContentEditForm,
+  type EditContentTab,
+  type NarrationFormState,
+  type ScenarioFormState,
+  type StoryboardSceneFormState,
+} from "@/components/projects/content-edit-form";
 import {
   CustomerFeedbackPanel,
   type ApprovalTimelineItem,
@@ -125,6 +143,14 @@ const STATUS_LABEL: Record<string, string> = {
   PARTIAL: "ناقص",
 };
 
+const USER_PROMPT_MAX = 4000;
+
+function normalizePrompt(value: string): string | undefined {
+  const text = value.trim();
+  if (!text) return undefined;
+  return text.slice(0, USER_PROMPT_MAX);
+}
+
 function statusBadgeVariant(
   status: string,
 ): "brand" | "success" | "warning" | "destructive" | "secondary" {
@@ -181,14 +207,6 @@ function prettyJson(value: unknown): string {
     return JSON.stringify(value, null, 2);
   } catch {
     return String(value);
-  }
-}
-
-function tryParseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
   }
 }
 
@@ -261,8 +279,16 @@ function ContentBlocks({
     return <ScenarioFinalView value={value} dir={dir} />;
   }
 
-  if (Array.isArray(raw.storyboard) || Array.isArray(obj.storyboard)) {
-    return <StoryboardFinalView value={value} />;
+  if (
+    Array.isArray(raw.storyboard) ||
+    Array.isArray(obj.storyboard) ||
+    Array.isArray(raw.scenes)
+  ) {
+    return (
+      <StoryboardFinalView
+        value={value}
+      />
+    );
   }
 
   const entries = Object.entries(obj).filter(
@@ -331,9 +357,23 @@ export function ProjectAiAssistant({
   const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ContentVersion | null>(null);
   const [sendConfirmOpen, setSendConfirmOpen] = useState(false);
-  const [editScenario, setEditScenario] = useState("");
-  const [editNarration, setEditNarration] = useState("");
-  const [editStoryboard, setEditStoryboard] = useState("");
+  const [editScenarioForm, setEditScenarioForm] =
+    useState<ScenarioFormState>(emptyScenarioForm);
+  const [editNarrationForm, setEditNarrationForm] =
+    useState<NarrationFormState>(emptyNarrationForm);
+  const [editStoryboardScenes, setEditStoryboardScenes] = useState<
+    StoryboardSceneFormState[]
+  >(emptyStoryboardScenes);
+  const [editOriginalScenario, setEditOriginalScenario] = useState<unknown>(null);
+  const [editOriginalNarration, setEditOriginalNarration] =
+    useState<unknown>(null);
+  const [editOriginalStoryboard, setEditOriginalStoryboard] =
+    useState<unknown>(null);
+  const [editContentTab, setEditContentTab] =
+    useState<EditContentTab>("scenario");
+  const [generationPrompt, setGenerationPrompt] = useState("");
+  const [generatePromptOpen, setGeneratePromptOpen] = useState(false);
+  const [editPrompt, setEditPrompt] = useState("");
   const [contentTab, setContentTab] = useState<
     "scenario" | "narration" | "storyboard"
   >("scenario");
@@ -398,21 +438,31 @@ export function ProjectAiAssistant({
     mutationFn: () =>
       apiPost<{ version?: ContentVersion; async?: boolean }>(
         `/ai/${projectId}/generate`,
-        {},
+        {
+          userPrompt: normalizePrompt(generationPrompt),
+        },
       ),
     onSuccess: (data) => {
       toast.success(data?.async ? "تولید در پس‌زمینه شروع شد" : "محتوا تولید شد");
       if (data?.version?.id) setSelectedVersionId(data.version.id);
+      setGeneratePromptOpen(false);
       invalidateAll();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا در تولید"),
   });
 
   const regenerateMut = useMutation({
-    mutationFn: () =>
+    mutationFn: (opts?: { baseVersionId?: string; userPrompt?: string; changeNotes?: string }) =>
       apiPost<{ version?: ContentVersion; async?: boolean }>(
         `/ai/${projectId}/regenerate`,
-        { changeNotes: "تولید مجدد نتیجه توسط مدیر" },
+        {
+          changeNotes: opts?.changeNotes || "تولید مجدد نتیجه توسط مدیر",
+          userPrompt:
+            opts?.userPrompt !== undefined
+              ? normalizePrompt(opts.userPrompt)
+              : normalizePrompt(generationPrompt),
+          baseVersionId: opts?.baseVersionId,
+        },
       ),
     onSuccess: (data) => {
       toast.success(data?.async ? "تولید مجدد شروع شد" : "نتیجه جدید تولید شد");
@@ -422,22 +472,90 @@ export function ProjectAiAssistant({
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
   });
 
+  const loadEditFormsFromVersion = (version: ContentVersion) => {
+    setEditOriginalScenario(version.scenario ?? null);
+    setEditOriginalNarration(version.narration ?? null);
+    setEditOriginalStoryboard(version.storyboard ?? null);
+    setEditScenarioForm(loadScenarioForm(version.scenario));
+    setEditNarrationForm(loadNarrationForm(version.narration));
+    setEditStoryboardScenes(loadStoryboardScenes(version.storyboard));
+    setEditContentTab("scenario");
+  };
+
   const saveMut = useMutation({
     mutationFn: () => {
       if (!selected) throw new Error("نسخه‌ای انتخاب نشده");
+      const validationError = validateContentEditForm({
+        scenario: editScenarioForm,
+        narration: editNarrationForm,
+        scenes: editStoryboardScenes,
+      });
+      if (validationError) throw new Error(validationError);
+
+      const prompt = normalizePrompt(editPrompt);
       return apiPatch(`/ai/${projectId}/versions/${selected.id}`, {
-        scenario: tryParseJson(editScenario),
-        narration: tryParseJson(editNarration),
-        storyboard: tryParseJson(editStoryboard),
-        changeNotes: "ویرایش دستی مدیر",
+        scenario: buildScenarioPayload(editScenarioForm, editOriginalScenario),
+        narration: buildNarrationPayload(
+          editNarrationForm,
+          editOriginalNarration,
+        ),
+        storyboard: buildStoryboardPayload(
+          editStoryboardScenes.filter((s) => s.visualDescription.trim()),
+          editOriginalStoryboard,
+        ),
+        changeNotes: prompt
+          ? `ویرایش دستی با دستور: ${prompt.slice(0, 120)}`
+          : "ویرایش دستی مدیر",
+        editPrompt: prompt,
       });
     },
     onSuccess: () => {
       toast.success("ذخیره شد");
       setEditOpen(false);
+      setEditPrompt("");
       invalidateAll();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
+  });
+
+  const aiEditMut = useMutation({
+    mutationFn: () => {
+      if (!selected) throw new Error("نسخه‌ای انتخاب نشده");
+      const prompt = normalizePrompt(editPrompt);
+      if (!prompt) throw new Error("دستورات ویرایش را وارد کنید");
+      return apiPost<{ version?: ContentVersion; async?: boolean }>(
+        `/ai/${projectId}/regenerate`,
+        {
+          changeNotes: `ویرایش با هوش مصنوعی: ${prompt.slice(0, 120)}`,
+          userPrompt: prompt,
+          baseVersionId: selected.id,
+          sync: true,
+        },
+      );
+    },
+    onSuccess: (data) => {
+      if (data?.version) {
+        setSelectedVersionId(data.version.id);
+        loadEditFormsFromVersion(data.version);
+        setEditOriginalScenario(data.version.scenario ?? null);
+        setEditOriginalNarration(data.version.narration ?? null);
+        setEditOriginalStoryboard(data.version.storyboard ?? null);
+        toast.success(
+          "نتیجه هوش مصنوعی در فرم بارگذاری شد. پس از بررسی، ذخیره کنید.",
+        );
+        invalidateAll();
+        return;
+      }
+      toast.success(
+        data?.async
+          ? "ویرایش با هوش مصنوعی شروع شد"
+          : "نسخه ویرایش‌شده تولید شد",
+      );
+      setEditOpen(false);
+      setEditPrompt("");
+      invalidateAll();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "خطا در ویرایش AI"),
   });
 
   const deleteMut = useMutation({
@@ -487,6 +605,7 @@ export function ProjectAiAssistant({
   const isBusy =
     generateMut.isPending ||
     regenerateMut.isPending ||
+    aiEditMut.isPending ||
     overviewQ.data?.processingStatus === "RUNNING" ||
     overviewQ.data?.processingStatus === "PENDING";
 
@@ -630,7 +749,9 @@ export function ProjectAiAssistant({
               بازخورد مشتری
               {feedbackCount > 0 && (
                 <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
-                  {feedbackCount.toLocaleString("fa-AF", { numberingSystem: "latn" })}
+                  {feedbackCount.toLocaleString("fa-AF", {
+                    numberingSystem: "latn",
+                  })}
                 </span>
               )}
             </button>
@@ -640,7 +761,7 @@ export function ProjectAiAssistant({
             size="lg"
             className="h-11 shrink-0 gap-2 px-6"
             disabled={isBusy}
-            onClick={() => generateMut.mutate()}
+            onClick={() => setGeneratePromptOpen(true)}
           >
             {isBusy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -691,7 +812,7 @@ export function ProjectAiAssistant({
                 size="sm"
                 className="mt-1 gap-1.5"
                 disabled={isBusy}
-                onClick={() => regenerateMut.mutate()}
+                onClick={() => regenerateMut.mutate(undefined)}
               >
                 {isBusy ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -916,20 +1037,20 @@ export function ProjectAiAssistant({
 
         <section className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card">
           {!selected ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-20 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
                 <Sparkles className="h-6 w-6" />
               </div>
               <p className="text-base font-medium">آماده تولید محتوا</p>
               <p className="max-w-sm text-sm leading-6 text-muted-foreground">
-                با یک کلیک، سناریو، نریشن و استوری‌بورد حرفه‌ای از بریف پروژه ساخته
-                می‌شود. قبل از ارسال به مشتری، خروجی را بازبینی و ویرایش کنید.
+                روی «تولید محتوا» بزنید، دستورات دلخواه را وارد کنید، سپس تولید
+                سناریو، نریشن و استوری‌بورد را شروع کنید.
               </p>
               <Button
                 variant="brand"
                 className="mt-1 gap-2"
                 disabled={isBusy}
-                onClick={() => generateMut.mutate()}
+                onClick={() => setGeneratePromptOpen(true)}
               >
                 <Sparkles className="h-4 w-4" />
                 شروع تولید
@@ -955,9 +1076,8 @@ export function ProjectAiAssistant({
                     className="gap-1.5"
                     disabled={!canEdit}
                     onClick={() => {
-                      setEditScenario(prettyJson(selected.scenario));
-                      setEditNarration(prettyJson(selected.narration));
-                      setEditStoryboard(prettyJson(selected.storyboard));
+                      loadEditFormsFromVersion(selected);
+                      setEditPrompt("");
                       setEditOpen(true);
                     }}
                   >
@@ -969,7 +1089,7 @@ export function ProjectAiAssistant({
                     size="sm"
                     className="gap-1.5"
                     disabled={isBusy}
-                    onClick={() => regenerateMut.mutate()}
+                    onClick={() => regenerateMut.mutate(undefined)}
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                     تولید مجدد
@@ -1109,9 +1229,7 @@ export function ProjectAiAssistant({
                     dir={
                       contentTab === "narration"
                         ? narrationDir
-                        : contentTab === "storyboard"
-                          ? "ltr"
-                          : "rtl"
+                        : "rtl"
                     }
                   />
                 )}
@@ -1121,6 +1239,86 @@ export function ProjectAiAssistant({
         </section>
       </div>
       )}
+
+      <Dialog
+        open={generatePromptOpen}
+        onOpenChange={(open) => {
+          if (generateMut.isPending) return;
+          setGeneratePromptOpen(open);
+        }}
+      >
+        <DialogContent className="w-[calc(100%-1.5rem)] gap-0 overflow-hidden p-0 sm:max-w-xl">
+          <div className="border-b border-brand/15 bg-gradient-to-l from-brand/[0.08] via-brand/[0.03] to-transparent px-5 pb-4 pt-5 sm:px-6">
+            <DialogHeader className="pe-6 text-start">
+              <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-brand-foreground shadow-sm shadow-brand/20">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                دستور تولید محتوا
+              </DialogTitle>
+            </DialogHeader>
+          </div>
+
+          <div className="space-y-3 px-5 py-4 sm:px-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label
+                htmlFor="ai-generation-prompt-modal"
+                className="text-sm font-semibold"
+              >
+                پرامپت تولید
+                <span className="ms-1.5 font-normal text-muted-foreground">
+                  (اختیاری)
+                </span>
+              </Label>
+              <span className="text-[11px] tabular-nums text-muted-foreground">
+                {generationPrompt.length.toLocaleString("fa-AF", {
+                  numberingSystem: "latn",
+                })}
+                /
+                {USER_PROMPT_MAX.toLocaleString("fa-AF", {
+                  numberingSystem: "latn",
+                })}
+              </span>
+            </div>
+            <Textarea
+              id="ai-generation-prompt-modal"
+              autoFocus
+              value={generationPrompt}
+              onChange={(e) =>
+                setGenerationPrompt(e.target.value.slice(0, USER_PROMPT_MAX))
+              }
+              disabled={generateMut.isPending}
+              rows={7}
+              maxLength={USER_PROMPT_MAX}
+              placeholder="پرامپت یا رهنمایی خود را بنویسید ..."
+              className="min-h-[160px] resize-y border-brand/20 bg-background text-sm leading-6 focus-visible:ring-brand/40"
+            />
+          </div>
+
+          <DialogFooter className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-4 sm:gap-2 sm:px-6">
+            <Button
+              variant="outline"
+              disabled={generateMut.isPending}
+              onClick={() => setGeneratePromptOpen(false)}
+            >
+              انصراف
+            </Button>
+            <Button
+              variant="brand"
+              className="gap-2"
+              disabled={generateMut.isPending || isBusy}
+              onClick={() => generateMut.mutate()}
+            >
+              {generateMut.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              {generateMut.isPending ? "در حال شروع…" : "شروع تولید"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={sendConfirmOpen}
@@ -1206,35 +1404,102 @@ export function ProjectAiAssistant({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[90vh] w-[calc(100%-1.5rem)] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>ویرایش محتوا</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {[
-              ["سناریو", editScenario, setEditScenario],
-              ["نریشن", editNarration, setEditNarration],
-              ["استوری‌بورد", editStoryboard, setEditStoryboard],
-            ].map(([label, value, setter]) => (
-              <div key={label as string} className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">
-                  {label as string} (JSON)
-                </p>
-                <Textarea
-                  className="min-h-[100px] font-mono text-xs"
-                  dir="ltr"
-                  value={value as string}
-                  onChange={(e) =>
-                    (setter as (v: string) => void)(e.target.value)
-                  }
-                />
+      <Dialog
+        open={editOpen}
+        onOpenChange={(open) => {
+          if (saveMut.isPending || aiEditMut.isPending) return;
+          setEditOpen(open);
+          if (!open) setEditPrompt("");
+        }}
+      >
+        <DialogContent className="flex max-h-[92vh] w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+          <div className="border-b border-border/60 bg-gradient-to-l from-brand/[0.07] via-transparent to-transparent px-5 pb-4 pt-5 sm:px-6">
+            <DialogHeader className="pe-6 text-start">
+              <DialogTitle className="text-base sm:text-lg">
+                ویرایش محتوا
+              </DialogTitle>
+            </DialogHeader>
+          </div>
+
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
+            <div className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-3.5 sm:p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label
+                  htmlFor="ai-edit-prompt"
+                  className="text-sm font-semibold"
+                >
+                  دستورات ویرایش با هوش مصنوعی
+                </Label>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                  {editPrompt.length.toLocaleString("fa-AF", {
+                    numberingSystem: "latn",
+                  })}
+                  /
+                  {USER_PROMPT_MAX.toLocaleString("fa-AF", {
+                    numberingSystem: "latn",
+                  })}
+                </span>
               </div>
-            ))}
+              <Textarea
+                id="ai-edit-prompt"
+                value={editPrompt}
+                onChange={(e) =>
+                  setEditPrompt(e.target.value.slice(0, USER_PROMPT_MAX))
+                }
+                disabled={saveMut.isPending || aiEditMut.isPending || isBusy}
+                rows={3}
+                maxLength={USER_PROMPT_MAX}
+                placeholder="مثال: هوک قوی‌تر شود، CTA واضح‌تر، لحن صمیمی‌تر، صحنه ۳ کوتاه‌تر…"
+                className="min-h-[88px] resize-y bg-background"
+              />
+              <Button
+                variant="brand"
+                className="w-full gap-2 sm:w-auto"
+                disabled={
+                  !normalizePrompt(editPrompt) ||
+                  aiEditMut.isPending ||
+                  saveMut.isPending ||
+                  isBusy ||
+                  !selected
+                }
+                onClick={() => aiEditMut.mutate()}
+              >
+                {aiEditMut.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {aiEditMut.isPending
+                  ? "در حال بازنویسی…"
+                  : "اعمال دستورات با هوش مصنوعی"}
+              </Button>
+            </div>
+
+            <ContentEditForm
+              tab={editContentTab}
+              onTabChange={setEditContentTab}
+              scenario={editScenarioForm}
+              onScenarioChange={setEditScenarioForm}
+              narration={editNarrationForm}
+              onNarrationChange={setEditNarrationForm}
+              scenes={editStoryboardScenes}
+              onScenesChange={setEditStoryboardScenes}
+              disabled={saveMut.isPending || aiEditMut.isPending}
+            />
+          </div>
+
+          <DialogFooter className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-4 sm:px-6">
+            <Button
+              variant="outline"
+              disabled={saveMut.isPending || aiEditMut.isPending}
+              onClick={() => setEditOpen(false)}
+            >
+              انصراف
+            </Button>
             <Button
               variant="brand"
-              className="w-full gap-2"
-              disabled={saveMut.isPending}
+              className="gap-2"
+              disabled={saveMut.isPending || aiEditMut.isPending}
               onClick={() => saveMut.mutate()}
             >
               {saveMut.isPending ? (
@@ -1244,7 +1509,7 @@ export function ProjectAiAssistant({
               )}
               ذخیره پیش‌نویس
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

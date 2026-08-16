@@ -35,23 +35,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { cn, formatDate } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { NotificationListSkeleton } from "@/components/loading/skeletons";
 import { ErrorState } from "@/components/loading/error-state";
-
-function formatDateTime(value: string) {
-  try {
-    return new Intl.DateTimeFormat("fa-AF", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return formatDate(value);
-  }
-}
 
 export type NotificationMeta = {
   type: string | null;
@@ -137,6 +123,8 @@ function NotificationIcon({ type }: { type: string | null }) {
     type === "EDITING_SUBMITTED" ||
     type === "FINAL_VIDEO_UPLOADED" ||
     type === "FINAL_VIDEO_UPLOAD_CONFIRMED" ||
+    type === "FINAL_VIDEO_APPROVED" ||
+    type === "FINAL_VIDEO_REVISION_REQUESTED" ||
     type === "EDITING_READY_FOR_CUSTOMER"
   ) {
     return <Clapperboard className="h-4 w-4" />;

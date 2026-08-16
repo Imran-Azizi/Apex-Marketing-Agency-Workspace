@@ -2,22 +2,28 @@
 
 import { useEffect, useState } from "react";
 
+/** Landing sections used by public header internal navigation. */
 export const PUBLIC_SECTION_IDS = [
   "home",
   "services",
-  "styles",
+  "portfolio",
   "narrators",
 ] as const;
 
 export type PublicSectionId = (typeof PUBLIC_SECTION_IDS)[number];
 
+const HEADER_OFFSET_PX = 72;
+
 export function scrollToSection(id: PublicSectionId | string) {
   const el = document.getElementById(id);
   if (!el) return;
-  const headerOffset = 72;
-  const top = el.getBoundingClientRect().top + window.scrollY - headerOffset;
-  window.scrollTo({ top, behavior: "smooth" });
-  history.replaceState(null, "", `#${id}`);
+  const top = el.getBoundingClientRect().top + window.scrollY - HEADER_OFFSET_PX;
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  if (id === "home") {
+    history.replaceState(null, "", window.location.pathname);
+  } else {
+    history.replaceState(null, "", `#${id}`);
+  }
 }
 
 /** Tracks which landing section is in view for active nav state. */
@@ -25,6 +31,8 @@ export function useActiveSection(ids: readonly string[] = PUBLIC_SECTION_IDS) {
   const [active, setActive] = useState(ids[0] || "home");
 
   useEffect(() => {
+    if (!ids.length) return;
+
     const elements = ids
       .map((id) => document.getElementById(id))
       .filter((el): el is HTMLElement => !!el);
@@ -51,10 +59,12 @@ export function useActiveSection(ids: readonly string[] = PUBLIC_SECTION_IDS) {
   }, [ids]);
 
   useEffect(() => {
+    if (!ids.length) return;
     const hash = window.location.hash.replace("#", "");
     if (hash && ids.includes(hash)) {
-      // Defer so layout is ready
-      requestAnimationFrame(() => scrollToSection(hash));
+      // Defer so section layout is ready after navigation/redirect
+      const t = window.setTimeout(() => scrollToSection(hash), 50);
+      return () => window.clearTimeout(t);
     }
   }, [ids]);
 

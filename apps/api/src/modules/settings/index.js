@@ -8,39 +8,43 @@ import { prisma } from '../../db/prisma.js';
 const router = Router();
 router.use(requireAuth, requireInternal);
 
-router.get('/catalog/services', requirePermission('settings:manage'), async (req, res, next) => {
+router.get('/catalog/services', requirePermission('settings.view'), async (req, res, next) => {
   try { ok(res, await prisma.service.findMany({ where: { deletedAt: null } })); } catch (e) { next(e); }
 });
 
-router.post('/catalog/services', requireCsrf, requirePermission('settings:manage'), async (req, res, next) => {
+router.post('/catalog/services', requireCsrf, requirePermission('settings.edit'), async (req, res, next) => {
   try {
     created(res, await prisma.service.create({
       data: {
         name: req.body.name,
         slug: req.body.slug,
         description: req.body.description,
+        imageKey: req.body.imageKey || null,
         startingPrice: req.body.startingPrice,
         revisionCount: req.body.revisionCount || 2,
         durationOptions: req.body.durationOptions,
         outputs: req.body.outputs,
         isPublished: req.body.isPublished ?? true,
+        sortOrder: req.body.sortOrder ?? 0,
+        ctaLabel: req.body.ctaLabel || null,
+        ctaHref: req.body.ctaHref || null,
       },
     }));
   } catch (e) { next(e); }
 });
 
-router.get('/', requirePermission('settings:manage'), async (req, res, next) => {
+router.get('/', requirePermission('settings.view'), async (req, res, next) => {
   try { ok(res, await prisma.setting.findMany()); } catch (e) { next(e); }
 });
 
-router.get('/:key', async (req, res, next) => {
+router.get('/:key', requirePermission('settings.view'), async (req, res, next) => {
   try {
     const setting = await prisma.setting.findUnique({ where: { key: req.params.key } });
     ok(res, setting);
   } catch (e) { next(e); }
 });
 
-router.put('/:key', requireCsrf, requirePermission('settings:manage'), async (req, res, next) => {
+router.put('/:key', requireCsrf, requirePermission('settings.edit'), async (req, res, next) => {
   try {
     const setting = await prisma.setting.upsert({
       where: { key: req.params.key },

@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import {
   Building2,
   Clapperboard,
+  ShieldCheck,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -92,6 +93,107 @@ function asString(value: unknown): string {
 function asStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => asString(item)).filter(Boolean);
+}
+
+const KNOWN_BRIEF_KEYS = new Set([
+  "personName",
+  "jobTitle",
+  "companyName",
+  "phone",
+  "email",
+  "website",
+  "address",
+  "city",
+  "productName",
+  "productDescription",
+  "features",
+  "audience",
+  "goal",
+  "mainMessage",
+  "cta",
+  "tone",
+  "language",
+  "durationSec",
+  "aspectRatio",
+  "customAspectRatio",
+  "platforms",
+  "allowedClaims",
+  "mandatoryTexts",
+  "brandLimits",
+  "notes",
+  "narratorProfileId",
+  "formatId",
+  "serviceId",
+]);
+
+const BRIEF_KEY_LABELS: Record<string, string> = {
+  personName: "نام",
+  jobTitle: "سمت",
+  companyName: "شرکت / سازمان",
+  phone: "تلفن",
+  email: "ایمیل",
+  website: "وب‌سایت",
+  address: "آدرس",
+  city: "شهر",
+  productName: "نام محصول / خدمت",
+  productDescription: "توضیح کوتاه",
+  features: "ویژگی‌ها و مزایا",
+  audience: "مخاطب هدف",
+  goal: "هدف تبلیغ",
+  mainMessage: "پیام اصلی",
+  cta: "CTA",
+  tone: "لحن برند",
+  language: "زبان",
+  durationSec: "مدت ویدیو",
+  aspectRatio: "نسبت تصویر",
+  customAspectRatio: "نسبت تصویر سفارشی",
+  platforms: "پلتفرم‌ها",
+  allowedClaims: "ادعاهای مجاز",
+  mandatoryTexts: "متون اجباری",
+  brandLimits: "محدودیت‌های برند",
+  notes: "یادداشت‌ها",
+};
+
+function humanizeBriefKey(key: string): string {
+  return BRIEF_KEY_LABELS[key] || key;
+}
+
+function formatBriefExtraValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return asString(value);
+  }
+  if (Array.isArray(value)) {
+    return asStringList(value).join("، ");
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function collectExtraBriefFields(brief: Record<string, unknown>) {
+  return Object.entries(brief)
+    .filter(([key, value]) => {
+      if (KNOWN_BRIEF_KEYS.has(key)) return false;
+      if (key.endsWith("Id") || key.endsWith("Ids")) return false;
+      if (value == null) return false;
+      if (typeof value === "string" && !value.trim()) return false;
+      if (Array.isArray(value) && value.length === 0) return false;
+      return true;
+    })
+    .map(([key, value]) => ({
+      key,
+      label: humanizeBriefKey(key),
+      value: formatBriefExtraValue(value),
+      ltr: key.toLowerCase().includes("url") || key.toLowerCase().includes("email") || key.toLowerCase().includes("phone") || key.toLowerCase().includes("website"),
+      wide: true,
+    }))
+    .filter((item) => item.value);
 }
 
 function MixedValue({
@@ -269,6 +371,10 @@ export function ProjectInfoTabContent({
       "";
     const whatsapp = whatsappRaw ? formatPhoneDisplay(whatsappRaw) : "";
     const email = asString(brief.email) || project.crmCustomer.email || "";
+    const website = asString(brief.website);
+    const address =
+      asString(brief.address) || project.crmCustomer.address || "";
+    const city = asString(brief.city) || project.crmCustomer.city || "";
 
     return (
       <SectionCard
@@ -282,6 +388,9 @@ export function ProjectInfoTabContent({
         <FieldTile label="تلفن" value={phoneDisplay} ltr />
         <FieldTile label="واتساپ" value={whatsapp} ltr />
         <FieldTile label="ایمیل" value={email} ltr wide />
+        <FieldTile label="وب‌سایت" value={website} ltr wide />
+        <FieldTile label="آدرس" value={address} wide />
+        <FieldTile label="شهر" value={city} />
       </SectionCard>
     );
   }
@@ -301,6 +410,14 @@ export function ProjectInfoTabContent({
       : asString(brief.durationSec)
         ? `${asString(brief.durationSec)} ثانیه`
         : "";
+    const brandClaims = asString(brief.allowedClaims);
+    const mandatoryTexts = asString(brief.mandatoryTexts);
+    const brandLimits = asString(brief.brandLimits);
+    const briefNotes = asString(brief.notes) || project.crmCustomer.notes || "";
+    const hasBrandSection = Boolean(
+      brandClaims || mandatoryTexts || brandLimits,
+    );
+    const extraFields = collectExtraBriefFields(brief);
 
     return (
       <div className="space-y-4">
@@ -312,6 +429,10 @@ export function ProjectInfoTabContent({
           <FieldTile
             label="نام محصول / خدمت"
             value={asString(brief.productName)}
+          />
+          <FieldTile
+            label="خدمت"
+            value={project.service?.name || ""}
           />
           <FieldTile
             label="توضیح کوتاه"
@@ -344,7 +465,14 @@ export function ProjectInfoTabContent({
             value={aspectValue}
             ltr={Boolean(customAspectRatio || aspectValue)}
           />
-          <FieldTile label="فرمت" value={project.format?.name} />
+          <FieldTile
+            label="فرمت"
+            value={
+              project.format
+                ? `${project.format.name}${project.format.ratio ? ` (${project.format.ratio})` : ""}`
+                : ""
+            }
+          />
           <FieldTile
             label="زبان"
             value={
@@ -363,6 +491,46 @@ export function ProjectInfoTabContent({
           <FieldTile label="گوینده پیشنهادی" value={proposedNarrator} />
           <TagList label="پلتفرم‌ها" items={platforms} />
         </SectionCard>
+
+        {hasBrandSection ? (
+          <SectionCard
+            icon={ShieldCheck}
+            title="الزامات برند"
+            description="محدودیت‌ها، ادعاها و متون اجباری اعلام‌شده توسط مشتری"
+          >
+            <FieldTile label="ادعاهای مجاز" value={brandClaims} wide />
+            <FieldTile label="متون اجباری" value={mandatoryTexts} wide />
+            <FieldTile label="محدودیت‌های برند" value={brandLimits} wide />
+          </SectionCard>
+        ) : null}
+
+        {briefNotes ? (
+          <SectionCard
+            icon={Building2}
+            title="یادداشت‌های مشتری"
+            description="توضیحات تکمیلی ثبت‌شده هنگام ایجاد پروژه"
+          >
+            <FieldTile label="یادداشت" value={briefNotes} wide />
+          </SectionCard>
+        ) : null}
+
+        {extraFields.length > 0 ? (
+          <SectionCard
+            icon={Building2}
+            title="سایر اطلاعات ثبت‌شده"
+            description="فیلدهای تکمیلی ارسال‌شده توسط مشتری"
+          >
+            {extraFields.map((field) => (
+              <FieldTile
+                key={field.key}
+                label={field.label}
+                value={field.value}
+                ltr={field.ltr}
+                wide={field.wide}
+              />
+            ))}
+          </SectionCard>
+        ) : null}
       </div>
     );
   }

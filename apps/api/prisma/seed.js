@@ -1,6 +1,11 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import {
+  getAllSeedPermissionCodes,
+  getRoleSeedPermissions,
+  ROLE_DEFAULT_PERMISSIONS,
+} from '../src/services/permissions/catalog.js';
 
 /**
  * Railway public proxies can drop the first TCP attempt from local networks.
@@ -50,50 +55,14 @@ async function connectWithRetry(attempts = 6) {
   throw lastError;
 }
 
-const PERMISSIONS = [
-  'dashboard:view',
-  'crm:read', 'crm:write', 'crm:merge',
-  'opportunity:manage',
-  'portal_invite:create',
-  'project:read', 'project:write', 'project:start',
-  'content:generate', 'content:approve_internal', 'content:approve_client',
-  'narration:assign', 'voice:upload',
-  'production:upload', 'production:submit',
-  'finance:read', 'finance:write',
-  'download:allow', 'download:clean',
-  'settings:manage',
-  'team:manage',
-  'audit:read',
-  'ai:run',
-  'notification:read',
-];
+const PERMISSIONS = getAllSeedPermissionCodes();
 
-const ROLE_PERMS = {
-  MANAGER: PERMISSIONS,
-  ADMIN: PERMISSIONS,
-  SALES: [
-    'dashboard:view', 'crm:read', 'crm:write', 'crm:merge', 'opportunity:manage',
-    'portal_invite:create', 'project:read', 'finance:read', 'finance:write',
-    'notification:read',
-  ],
-  EDITOR: [
-    'dashboard:view', 'project:read', 'project:write', 'production:upload',
-    'production:submit', 'notification:read',
-  ],
-  NARRATOR: [
-    'dashboard:view', 'voice:upload', 'notification:read',
-  ],
-  FINANCE: [
-    'dashboard:view', 'crm:read', 'project:read', 'finance:read', 'finance:write',
-    'download:allow', 'audit:read', 'notification:read',
-  ],
-  CUSTOMER: [
-    'dashboard:view', 'content:approve_client', 'finance:read', 'download:clean', 'notification:read',
-  ],
-  AI_SERVICE: [
-    'project:read', 'ai:run',
-  ],
-};
+const ROLE_PERMS = Object.fromEntries(
+  Object.keys(ROLE_DEFAULT_PERMISSIONS).map((code) => [
+    code,
+    getRoleSeedPermissions(code),
+  ]),
+);
 
 async function main() {
   console.log('Seeding APEX Workspace...');

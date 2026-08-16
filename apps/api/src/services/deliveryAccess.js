@@ -1,6 +1,7 @@
 /**
- * Payment + manager-approval gates for clean-file delivery.
+ * Payment gate for clean-file delivery.
  * Keeps Project.paymentStatus / deliveryStatus / cleanFileAccess in sync.
+ * Manager download-permission is only used for unpaid balance override.
  */
 
 export function computeBalance(finance) {
@@ -52,7 +53,7 @@ export function evaluateDeliveryAccess({
 
   if (projectStatus === 'COMPLETED') {
     deliveryStatus = 'COMPLETED';
-    cleanFileAccess = paymentSettled && managerApproved ? 'AVAILABLE' : (paymentSettled ? 'LOCKED_APPROVAL' : 'LOCKED_PAYMENT');
+    cleanFileAccess = paymentSettled ? 'AVAILABLE' : 'LOCKED_PAYMENT';
   } else if (!inDeliveryPhase || !hasCleanFile) {
     deliveryStatus = 'NOT_READY';
     cleanFileAccess = 'HIDDEN';
@@ -60,10 +61,6 @@ export function evaluateDeliveryAccess({
     deliveryStatus = 'AWAITING_PAYMENT';
     cleanFileAccess = 'LOCKED_PAYMENT';
     message = 'تا تسویه کامل مبلغ پروژه، نسخه پاک در دسترس نیست. می‌توانید نسخه پیش‌نمایش (لوگودار) را مشاهده کنید.';
-  } else if (!managerApproved) {
-    deliveryStatus = 'AWAITING_MANAGER_APPROVAL';
-    cleanFileAccess = 'LOCKED_APPROVAL';
-    message = 'پرداخت تکمیل شده است. پس از تأیید تحویل توسط مدیر، دانلود نسخه پاک فعال می‌شود.';
   } else {
     deliveryStatus = 'READY_FOR_DOWNLOAD';
     cleanFileAccess = 'AVAILABLE';

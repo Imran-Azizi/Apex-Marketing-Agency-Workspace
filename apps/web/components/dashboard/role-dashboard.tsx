@@ -15,11 +15,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  flattenNavLinks,
   getNavItems,
   getRoleLabel,
+  hasPermission,
   isFullAccessRole,
   type InternalRole,
 } from "@/lib/rbac";
+import { useMeQuery } from "@/lib/permissions";
 import { PROJECT_STATUS_LABELS } from "@/lib/project-status";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import type { ProjectProgress } from "@/lib/project-progress";
@@ -80,21 +83,24 @@ export function RoleDashboard({
   title: string;
   subtitle: string;
 }) {
+  const { data: me } = useMeQuery();
   const isManagerLike = isFullAccessRole(role);
-  const nav = getNavItems(role).filter(
+  const nav = flattenNavLinks(getNavItems(role, me?.permissions)).filter(
     (n) => !n.href.endsWith("/dashboard") && n.href !== `/${role.toLowerCase()}/dashboard`
   );
 
   const summary = useQuery({
     queryKey: ["dashboard-summary", role],
     queryFn: () => apiGet<DashboardSummary>("/projects/dashboard-summary"),
-    enabled: isManagerLike || role === "SALES" || role === "FINANCE",
+    enabled:
+      hasPermission(me?.permissions, "dashboard.view", role) &&
+      (isManagerLike || role === "SALES" || role === "FINANCE"),
   });
 
   const projects = useQuery({
     queryKey: ["projects-home", role],
     queryFn: () => apiGet<ProjectListItem[]>("/projects"),
-    enabled: ["MANAGER", "ADMIN", "SALES", "FINANCE"].includes(role),
+    enabled: hasPermission(me?.permissions, "projects.view", role),
   });
 
   const editorTasks = useQuery({

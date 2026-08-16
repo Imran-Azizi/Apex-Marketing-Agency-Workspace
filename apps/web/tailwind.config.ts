@@ -65,6 +65,7 @@ const config: Config = {
           foreground: "hsl(var(--sidebar-foreground))",
           border: "hsl(var(--sidebar-border))",
           accent: "hsl(var(--sidebar-accent))",
+          "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
         },
         chart: {
           1: "hsl(var(--chart-1))",
@@ -124,6 +125,10 @@ const config: Config = {
           from: { opacity: "0", transform: "translateY(6px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "auth-rise": {
+          from: { opacity: "0", transform: "translateY(12px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
         shimmer: {
           "100%": { transform: "translateX(100%)" },
         },
@@ -136,6 +141,7 @@ const config: Config = {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-slide": "fade-slide 0.22s ease-out",
+        "auth-rise": "auth-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both",
         "sheet-in-left":
           "sheet-in-left 0.45s cubic-bezier(0.22, 1, 0.36, 1) both",
         "sheet-out-left":

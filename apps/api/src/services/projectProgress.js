@@ -8,6 +8,8 @@
  *   - portal: customer-safe labels
  */
 
+import { formatFaDateTime } from '../utils/datetime.js';
+
 /**
  * Canonical workflow stages aligned with production reality.
  * Percentages advance monotonically through the happy path;
@@ -278,13 +280,7 @@ export function buildProjectStageProgressNotification({
   forPortal = false,
   at = new Date(),
 }) {
-  const when = new Intl.DateTimeFormat('fa-AF', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(at));
+  const when = formatFaDateTime(at);
   const stage = PROJECT_WORKFLOW_STAGES.find((s) => s.key === stageKey);
   const stageLabel = forPortal
     ? (stage?.customerLabel || stage?.label || 'مرحله جدید')

@@ -158,4 +158,137 @@ export const openRouterService = {
     }
     throw lastError;
   },
+
+  /**
+   * Generate one image via OpenRouter Image API (POST /images).
+   * @param {{ prompt: string, model?: string, aspectRatio?: string, size?: string, timeoutMs?: number }} args
+   */
+  async generateImage({
+    prompt,
+    model,
+    aspectRatio = '16:9',
+    size,
+    timeoutMs,
+  } = {}) {
+    if (!env.openrouterApiKey) {
+      throw createAiError('OPENROUTER_API_KEY is not configured', {
+        code: 'invalid_api_key',
+        status: 401,
+        provider: 'openrouter',
+      });
+    }
+
+    const cfg = getModelConfig();
+    const imageModel = model || env.openrouterImageModel;
+    const baseUrl = (env.openrouterBaseUrl || 'https://openrouter.ai/api/v1').replace(
+      /\/$/,
+      '',
+    );
+    const controller = new AbortController();
+    const timeout = timeoutMs || Math.max(cfg.timeoutMs, 120_000);
+    const timer = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const body = {
+        model: imageModel,
+        prompt: String(prompt || '').slice(0, 4000),
+        aspect_ratio: aspectRatio,
+        output_format: 'png',
+        n: 1,
+      };
+
+      if (size === '1024x1024') {
+        body.aspect_ratio = '1:1';
+        body.resolution = '1K';
+      } else if (
+        size === '1920x1080' ||
+        size === '1792x1024' ||
+        size === '1536x1024'
+      ) {
+        body.aspect_ratio = '16:9';
+        body.resolution = size === '1920x1080' ? '2K' : '1K';
+      } else if (size) {
+        body.size = size;
+      } else {
+        body.resolution = '1K';
+      }
+
+      const res = await fetch(`${baseUrl}/images`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.openrouterApiKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': cfg.siteUrl,
+          'X-Title': cfg.siteName,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      const errText = !res.ok ? await res.text() : null;
+      if (!res.ok) {
+        const error = createAiError(`OpenRouter image HTTP ${res.status}`, {
+          code: 'openrouter_http',
+          status: res.status,
+          provider: 'openrouter',
+        });
+        error.body = errText;
+        Object.assign(error, formatAiError(error, 'openrouter'));
+        throw error;
+      }
+
+      const data = await res.json();
+      const item = Array.isArray(data.data) ? data.data[0] : data.data || data;
+      let b64 = item?.b64_json || item?.b64 || null;
+      let url = item?.url || null;
+
+      if (!b64 && typeof item?.image === 'string') {
+        if (item.image.startsWith('data:')) {
+          b64 = item.image.replace(/^data:image\/\w+;base64,/, '');
+        } else if (item.image.startsWith('http')) {
+          url = item.image;
+        } else {
+          b64 = item.image;
+        }
+      }
+
+      if (!b64 && !url) {
+        throw createAiError('OpenRouter image response missing image data', {
+          code: 'invalid_response',
+          status: 400,
+          provider: 'openrouter',
+        });
+      }
+
+      return {
+        provider: 'openrouter',
+        model: data.model || imageModel,
+        url,
+        b64,
+        contentType: item?.content_type || item?.mime_type || 'image/png',
+        raw: data,
+      };
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        const timeoutErr = createAiError('OpenRouter image request timed out', {
+          code: 'timeout',
+          status: 504,
+          provider: 'openrouter',
+        });
+        Object.assign(timeoutErr, formatAiError(timeoutErr, 'openrouter'));
+        throw timeoutErr;
+      }
+      if (err?.provider === 'openrouter' || err?.code) throw err;
+      const wrapped = createAiError(err.message || 'OpenRouter image unavailable', {
+        code: 'server_error',
+        status: 503,
+        provider: 'openrouter',
+        cause: err,
+      });
+      Object.assign(wrapped, formatAiError(wrapped, 'openrouter'));
+      throw wrapped;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
 };

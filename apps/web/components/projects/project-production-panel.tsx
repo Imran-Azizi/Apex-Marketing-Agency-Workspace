@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "@/lib/api";
+import { hasPermission } from "@/lib/rbac";
+import { useMeQuery } from "@/lib/permissions";
 import {
   CurrencyField,
   validateCurrencyInput,
@@ -27,24 +29,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Film,
-  Loader2,
-  PackageCheck,
-  Sparkles,
-  UserRound,
-} from "lucide-react";
-import { toast } from "sonner";
-import {
   AIGeneratedContentTab,
   CustomerInfoTab,
   EditingMaterialsSkeleton,
   getProductionTabBadges,
+  NarrationAudioTab,
   PRODUCTION_WORKSPACE_TABS,
   type ProductionWorkspaceTab,
 } from "@/components/projects/editing-materials-panel";
 import { ProjectFinalProductPanel } from "@/components/projects/project-final-product-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FinalProductsPayload } from "@/lib/final-product";
+import {
+  Film,
+  Loader2,
+  Mic2,
+  PackageCheck,
+  Sparkles,
+  UserRound,
+} from "lucide-react";
+import { toast } from "sonner";
 
 type EditingStatus =
   | "ASSIGNED"
@@ -119,6 +123,30 @@ type ProductionPayload = {
     videoRevisionUsed: number;
     videoRevisionMax: number;
     extraVideoRevision: boolean;
+    language?: string | null;
+    tone?: string | null;
+    durationSec?: number | null;
+    platforms?: unknown;
+    brief?: unknown;
+    format?: { id: string; name: string; ratio: string } | null;
+    service?: { id: string; name: string } | null;
+    crmCustomer?: {
+      id?: string;
+      personName: string;
+      companyName: string | null;
+      jobTitle?: string | null;
+      phone?: string | null;
+      email?: string | null;
+      address?: string | null;
+      city?: string | null;
+      normalizedWhatsapp?: string | null;
+      whatsappRaw?: string | null;
+      notes?: string | null;
+    } | null;
+    assignments?: Array<{
+      role: string;
+      teamProfile?: { displayName: string } | null;
+    }>;
   };
 };
 
@@ -139,7 +167,12 @@ export function ProjectProductionPanel({
   initialWorkspaceTab?: ProductionWorkspaceTab;
 }) {
   const qc = useQueryClient();
-  const isManager = roleCode === "MANAGER" || roleCode === "ADMIN";
+  const { data: me } = useMeQuery();
+  const isManager = hasPermission(
+    me?.permissions,
+    ["projects.assign", "video.approve", "video.send"],
+    roleCode,
+  );
   const isEditor = roleCode === "EDITOR";
 
   const [assignOpen, setAssignOpen] = useState(false);
@@ -260,6 +293,7 @@ export function ProjectProductionPanel({
           version: task.version,
         }
       : null,
+    roleCode,
   };
 
   const finalCount =
@@ -278,6 +312,7 @@ export function ProjectProductionPanel({
   const TAB_ICONS: Record<ProductionWorkspaceTab, typeof PackageCheck> = {
     customer: UserRound,
     ai: Sparkles,
+    narration: Mic2,
     final: PackageCheck,
   };
 
@@ -364,6 +399,16 @@ export function ProjectProductionPanel({
         >
           {workspaceTab === "ai" ? (
             <AIGeneratedContentTab {...materialsCtx} />
+          ) : null}
+        </TabsContent>
+
+        <TabsContent
+          value="narration"
+          className="mt-0 text-start focus-visible:ring-0"
+          dir="rtl"
+        >
+          {workspaceTab === "narration" ? (
+            <NarrationAudioTab {...materialsCtx} />
           ) : null}
         </TabsContent>
 

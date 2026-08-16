@@ -18,12 +18,15 @@ import {
 } from "@/lib/upload";
 import { mediaStreamUrl } from "@/lib/media";
 import { formatDate, cn } from "@/lib/utils";
+import { hasPermission } from "@/lib/rbac";
+import { useMeQuery } from "@/lib/permissions";
 import { FinalVideoUploader } from "@/components/projects/final-video-uploader";
 import { VideoPlayer } from "@/components/media/video-player";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
@@ -35,19 +38,27 @@ import {
 } from "@/components/ui/dialog";
 import {
   Calendar,
+  CheckCircle2,
   Download,
   Eye,
   Film,
   Loader2,
   PackageCheck,
+  RefreshCw,
   Send,
+  Sparkles,
   UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  PublishToPortfolioDialog,
+  type ProjectPortfolioState,
+} from "@/components/projects/publish-to-portfolio-dialog";
 
 function statusVariant(
   status: string,
-): "brand" | "secondary" | "outline" | "destructive" | "success" {
+): "brand" | "secondary" | "outline" | "destructive" | "success" | "warning" {
+  if (status === "REVISION_REQUESTED") return "warning";
   if (status === "APPROVED_BY_CUSTOMER") return "success";
   if (status === "SENT_TO_CUSTOMER" || status === "VIEWED_BY_CUSTOMER")
     return "brand";
@@ -62,12 +73,18 @@ function ManagerVideoCard({
   selected,
   onToggle,
   onPreview,
+  onApprove,
+  onRequestRevision,
+  reviewing,
 }: {
   item: FinalVideoItem;
   selectable?: boolean;
   selected?: boolean;
   onToggle?: (id: string) => void;
   onPreview: (item: FinalVideoItem) => void;
+  onApprove?: (item: FinalVideoItem) => void;
+  onRequestRevision?: (item: FinalVideoItem) => void;
+  reviewing?: boolean;
 }) {
   const type = (item.videoType || "WATERMARKED") as FinalVideoType;
   const typeLabel =
@@ -114,6 +131,7 @@ function ManagerVideoCard({
               {typeLabel}
             </Badge>
             <Badge variant={statusVariant(item.status)}>{statusLabel}</Badge>
+            <Badge variant="outline">نسخه {item.version}</Badge>
           </div>
           <p className="truncate text-sm font-medium" title={item.name}>
             {item.name}
@@ -137,6 +155,16 @@ function ManagerVideoCard({
           {item.sizeBytes != null ? formatFileSize(item.sizeBytes) : "—"}
         </div>
       </dl>
+      {item.status === "REVISION_REQUESTED" && item.revisionNotes ? (
+        <div className="border-t border-warning/30 bg-warning/5 px-4 py-3">
+          <p className="text-xs font-medium text-foreground">
+            توضیحات اصلاح مدیر
+          </p>
+          <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
+            {item.revisionNotes}
+          </p>
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-2 border-t border-border/60 px-4 py-3">
         <Button
           size="sm"
@@ -147,6 +175,34 @@ function ManagerVideoCard({
           <Eye className="h-3.5 w-3.5" />
           پیش‌نمایش
         </Button>
+        {["UPLOADED", "PENDING_REVIEW"].includes(item.status) ? (
+          <>
+            <Button
+              size="sm"
+              variant="brand"
+              className="gap-1.5"
+              disabled={reviewing}
+              onClick={() => onApprove?.(item)}
+            >
+              {reviewing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              )}
+              تأیید
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              disabled={reviewing}
+              onClick={() => onRequestRevision?.(item)}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              درخواست اصلاح
+            </Button>
+          </>
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -183,14 +239,30 @@ export function ProjectFinalProductPanel({
   roleCode?: string | null;
 }) {
   const qc = useQueryClient();
-  const isManager = roleCode === "MANAGER" || roleCode === "ADMIN";
+  const { data: me } = useMeQuery();
+  const isManager = hasPermission(
+    me?.permissions,
+    ["video.approve", "video.send"],
+    roleCode,
+  );
+  const canPublishPortfolio = hasPermission(
+    me?.permissions,
+    "portfolio.publish",
+    roleCode,
+  );
   const isEditor = roleCode === "EDITOR";
 
   const [selected, setSelected] = useState<string[]>([]);
   const [allowDownload, setAllowDownload] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [portfolioOpen, setPortfolioOpen] = useState(false);
   const [preview, setPreview] = useState<FinalVideoItem | null>(null);
   const [filter, setFilter] = useState<"all" | "WATERMARKED" | "CLEAN">("all");
+  const [reviewTarget, setReviewTarget] = useState<{
+    item: FinalVideoItem;
+    decision: "APPROVE" | "REQUEST_REVISION";
+  } | null>(null);
+  const [revisionNotes, setRevisionNotes] = useState("");
 
   const dataQ = useQuery({
     queryKey: ["final-products", projectId],
@@ -199,6 +271,13 @@ export function ProjectFinalProductPanel({
         `/production/projects/${projectId}/final-products`,
       ),
     refetchInterval: isManager ? 15_000 : false,
+  });
+
+  const portfolioQ = useQuery({
+    queryKey: ["portfolio-project", projectId],
+    queryFn: () =>
+      apiGet<ProjectPortfolioState>(`/portfolio/projects/${projectId}`),
+    enabled: canPublishPortfolio && !!projectId,
   });
 
   const sendMut = useMutation({
@@ -220,13 +299,48 @@ export function ProjectFinalProductPanel({
       toast.error(e instanceof Error ? e.message : "ارسال ناموفق بود"),
   });
 
+  const reviewMut = useMutation({
+    mutationFn: ({
+      item,
+      decision,
+      notes,
+    }: {
+      item: FinalVideoItem;
+      decision: "APPROVE" | "REQUEST_REVISION";
+      notes?: string;
+    }) =>
+      apiPost(
+        `/production/projects/${projectId}/final-products/${item.id}/review`,
+        { decision, notes },
+      ),
+    onSuccess: (_data, variables) => {
+      toast.success(
+        variables.decision === "APPROVE"
+          ? "ویدیوی نهایی تأیید شد"
+          : "درخواست اصلاح برای ادیتور ارسال شد",
+      );
+      setReviewTarget(null);
+      setRevisionNotes("");
+      qc.invalidateQueries({ queryKey: ["final-products", projectId] });
+      qc.invalidateQueries({ queryKey: ["production-task", projectId] });
+      qc.invalidateQueries({ queryKey: ["project", projectId] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof Error ? e.message : "ثبت نتیجه بررسی ناموفق بود",
+      ),
+  });
+
   const items = dataQ.data?.items || [];
   const filtered = useMemo(() => {
     if (filter === "all") return items;
     return items.filter((i) => i.videoType === filter);
   }, [items, filter]);
 
-  const pendingSelectable = items.filter((i) => !i.sentToCustomer);
+  const pendingSelectable = items.filter(
+    (i) => i.status === "APPROVED" && !i.sentToCustomer,
+  );
 
   const toggle = (id: string) => {
     setSelected((prev) =>
@@ -276,7 +390,9 @@ export function ProjectFinalProductPanel({
         <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <PackageCheck className="h-5 w-5 text-brand" />
-            <h3 className="text-lg font-semibold tracking-tight">محصول نهایی</h3>
+            <h3 className="text-lg font-semibold tracking-tight">
+              محصول نهایی
+            </h3>
             <Badge variant="outline">{dataQ.data.project.code}</Badge>
           </div>
           <p className="text-xs leading-6 text-muted-foreground sm:text-sm">
@@ -289,16 +405,45 @@ export function ProjectFinalProductPanel({
             <span>· ارسال‌شده: {counts.sent}</span>
           </div>
         </div>
-        <Button
-          variant="brand"
-          className="gap-2"
-          disabled={selected.length === 0}
-          onClick={() => setSendOpen(true)}
-        >
-          <Send className="h-4 w-4" />
-          ارسال برای مشتری
-          {selected.length > 0 ? ` (${selected.length})` : ""}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canPublishPortfolio ? (
+            portfolioQ.data?.portfolio?.status === "PUBLISHED" ? (
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => setPortfolioOpen(true)}
+              >
+                <CheckCircle2 className="h-4 w-4 text-success" />
+                در نمونه‌کارها
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                className="gap-2"
+                disabled={!portfolioQ.data?.canPublish}
+                title={
+                  portfolioQ.data?.canPublish
+                    ? undefined
+                    : "فقط پس از تکمیل پروژه و وجود ویدیوی نهایی واجد شرایط"
+                }
+                onClick={() => setPortfolioOpen(true)}
+              >
+                <Sparkles className="h-4 w-4 text-brand" />
+                ارسال به نمونه‌کارها
+              </Button>
+            )
+          ) : null}
+          <Button
+            variant="brand"
+            className="gap-2"
+            disabled={selected.length === 0}
+            onClick={() => setSendOpen(true)}
+          >
+            <Send className="h-4 w-4" />
+            ارسال برای مشتری
+            {selected.length > 0 ? ` (${selected.length})` : ""}
+          </Button>
+        </div>
       </header>
 
       {pendingSelectable.length > 0 ? (
@@ -343,7 +488,9 @@ export function ProjectFinalProductPanel({
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border/70 px-6 py-16 text-center">
           <PackageCheck className="h-8 w-8 text-muted-foreground/40" />
-          <p className="text-sm font-medium">هنوز ویدیوی نهایی آپلود نشده است</p>
+          <p className="text-sm font-medium">
+            هنوز ویدیوی نهایی آپلود نشده است
+          </p>
           <p className="max-w-md text-xs leading-6 text-muted-foreground">
             پس از ارسال توسط ادیتور، ویدیوها اینجا نمایش داده می‌شوند.
           </p>
@@ -354,14 +501,106 @@ export function ProjectFinalProductPanel({
             <ManagerVideoCard
               key={item.id}
               item={item}
-              selectable={!item.sentToCustomer}
+              selectable={item.status === "APPROVED" && !item.sentToCustomer}
               selected={selected.includes(item.id)}
               onToggle={toggle}
               onPreview={setPreview}
+              onApprove={(video) =>
+                setReviewTarget({ item: video, decision: "APPROVE" })
+              }
+              onRequestRevision={(video) =>
+                setReviewTarget({
+                  item: video,
+                  decision: "REQUEST_REVISION",
+                })
+              }
+              reviewing={
+                reviewMut.isPending && reviewTarget?.item.id === item.id
+              }
             />
           ))}
         </div>
       )}
+
+      <Dialog
+        open={!!reviewTarget}
+        onOpenChange={(open) => {
+          if (!open && !reviewMut.isPending) {
+            setReviewTarget(null);
+            setRevisionNotes("");
+          }
+        }}
+      >
+        <DialogContent className="text-start sm:max-w-md" dir="rtl">
+          <DialogHeader className="text-start sm:text-start">
+            <DialogTitle>
+              {reviewTarget?.decision === "APPROVE"
+                ? "تأیید ویدیوی نهایی"
+                : "درخواست اصلاح ویدیوی نهایی"}
+            </DialogTitle>
+            <DialogDescription className="leading-6">
+              {reviewTarget?.decision === "APPROVE"
+                ? `نسخه ${reviewTarget.item.version} از ${reviewTarget.item.videoTypeLabel || "ویدیوی نهایی"} تأیید می‌شود. این نسخه سپس برای ارسال به مشتری آماده خواهد بود.`
+                : `توضیحات اصلاح برای نسخه ${reviewTarget?.item.version || ""} ثبت و به ادیتور اطلاع داده می‌شود.`}
+            </DialogDescription>
+          </DialogHeader>
+          {reviewTarget?.decision === "REQUEST_REVISION" ? (
+            <div className="space-y-2">
+              <Label htmlFor="final-revision-notes">توضیحات اصلاح</Label>
+              <Textarea
+                id="final-revision-notes"
+                rows={5}
+                value={revisionNotes}
+                disabled={reviewMut.isPending}
+                onChange={(e) => setRevisionNotes(e.target.value)}
+                placeholder="اصلاحات مورد نیاز را دقیق و شفاف بنویسید..."
+              />
+            </div>
+          ) : null}
+          <DialogFooter className="gap-2 sm:justify-start">
+            <Button
+              variant="outline"
+              disabled={reviewMut.isPending}
+              onClick={() => {
+                setReviewTarget(null);
+                setRevisionNotes("");
+              }}
+            >
+              انصراف
+            </Button>
+            <Button
+              variant="brand"
+              disabled={
+                reviewMut.isPending ||
+                !reviewTarget ||
+                (reviewTarget.decision === "REQUEST_REVISION" &&
+                  !revisionNotes.trim())
+              }
+              onClick={() => {
+                if (!reviewTarget) return;
+                reviewMut.mutate({
+                  ...reviewTarget,
+                  notes:
+                    reviewTarget.decision === "REQUEST_REVISION"
+                      ? revisionNotes.trim()
+                      : undefined,
+                });
+              }}
+            >
+              {reviewMut.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : reviewTarget?.decision === "APPROVE" ? (
+                <CheckCircle2 className="h-4 w-4" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              {reviewTarget?.decision === "APPROVE"
+                ? "تأیید نهایی"
+                : "ارسال درخواست"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={sendOpen} onOpenChange={setSendOpen}>
         <DialogContent className="text-start sm:max-w-md" dir="rtl">
@@ -380,11 +619,11 @@ export function ProjectFinalProductPanel({
             />
             <div className="space-y-1">
               <Label htmlFor="allow-dl" className="text-sm font-medium">
-                اجازه دانلود برای مشتری
+                باز کردن دانلود قبل از تسویه
               </Label>
               <p className="text-xs leading-5 text-muted-foreground">
-                در صورت فعال بودن، مشتری می‌تواند فایل‌های ارسال‌شده را دانلود
-                کند.
+                معمولاً پس از تسویه کامل، دانلود نسخه بدون واترمارک خودکار فعال
+                می‌شود. این گزینه فقط برای باز کردن زودتر دانلود است.
               </p>
             </div>
           </div>
@@ -429,6 +668,15 @@ export function ProjectFinalProductPanel({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {canPublishPortfolio ? (
+        <PublishToPortfolioDialog
+          projectId={projectId}
+          open={portfolioOpen}
+          onOpenChange={setPortfolioOpen}
+          initial={portfolioQ.data}
+        />
+      ) : null}
     </div>
   );
 }

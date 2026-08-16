@@ -6,16 +6,22 @@ import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
-import { Label } from "@/components/ui/label";
+import { Lock, Phone } from "lucide-react";
 import { loginPortal } from "@/lib/auth";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import {
+  AuthFormError,
+  AuthInput,
+  AuthPasswordField,
+  AuthSubmitButton,
+} from "@/components/auth/auth-field";
 
 const schema = z.object({
-  whatsapp: z.string().min(8, "شماره واتساپ معتبر وارد کنید"),
+  whatsapp: z
+    .string()
+    .min(1, "شماره واتساپ الزامی است")
+    .min(8, "شماره واتساپ معتبر وارد کنید"),
   password: z.string().min(1, "رمز عبور الزامی است"),
 });
 
@@ -25,6 +31,8 @@ export function PortalLoginForm() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   const {
     register,
@@ -32,9 +40,14 @@ export function PortalLoginForm() {
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
+    mode: "onBlur",
+    reValidateMode: "onChange",
   });
 
   async function onSubmit(data: FormData) {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setFormError(null);
     setLoading(true);
     try {
       await loginPortal(data);
@@ -45,53 +58,70 @@ export function PortalLoginForm() {
       router.push("/portal");
       router.refresh();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "اطلاعات ورود نادرست است"
-      );
-    } finally {
+      const message =
+        err instanceof Error ? err.message : "اطلاعات ورود نادرست است";
+      setFormError(message);
+      toast.error(message);
+      submittingRef.current = false;
       setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="whatsapp">شماره واتساپ</Label>
-        <Input
-          id="whatsapp"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel"
-          placeholder="0700123456 یا +93700123456"
-          dir="ltr"
-          {...register("whatsapp")}
-        />
-        <p className="text-xs text-muted-foreground">
-          شماره موبایل افغانستان با ۰۷ یا کد کشور ۹۳
+    <form
+      onSubmit={handleSubmit(onSubmit)}
+      className="space-y-4"
+      noValidate
+      aria-busy={loading || undefined}
+    >
+      {formError ? <AuthFormError message={formError} /> : null}
+
+      <AuthInput
+        id="whatsapp"
+        label="شماره واتساپ"
+        type="tel"
+        inputMode="tel"
+        autoComplete="tel"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        dir="ltr"
+        icon={Phone}
+        required
+        disabled={loading}
+        error={errors.whatsapp?.message}
+        placeholder="0700123456 یا +93700123456"
+        hint="شماره موبایل افغانستان با ۰۷ یا کد کشور ۹۳"
+        autoFocus
+        {...register("whatsapp")}
+      />
+
+      <AuthPasswordField
+        id="password"
+        label="رمز عبور"
+        autoComplete="current-password"
+        dir="ltr"
+        icon={Lock}
+        required
+        disabled={loading}
+        error={errors.password?.message}
+        {...register("password")}
+      />
+
+      <div className="space-y-3">
+        <AuthSubmitButton loading={loading} loadingText="در حال ورود...">
+          ورود به پورتال
+        </AuthSubmitButton>
+
+        <p className="text-center text-sm">
+          <Link
+            href="/portal/forgot-password"
+            className="font-medium text-brand transition-colors hover:text-brand/80 hover:underline underline-offset-4"
+          >
+            فراموشی رمز عبور
+          </Link>
         </p>
-        {errors.whatsapp && (
-          <p className="text-sm text-destructive">{errors.whatsapp.message}</p>
-        )}
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="password">رمز عبور</Label>
-        <PasswordInput
-          id="password"
-          autoComplete="current-password"
-          {...register("password")}
-        />
-        {errors.password && (
-          <p className="text-sm text-destructive">{errors.password.message}</p>
-        )}
-      </div>
-      <Button type="submit" className="w-full" variant="brand" disabled={loading}>
-        {loading ? "در حال ورود..." : "ورود"}
-      </Button>
-      <p className="text-center text-sm">
-        <Link href="/portal/forgot-password" className="text-brand hover:underline">
-          فراموشی رمز عبور
-        </Link>
-      </p>
     </form>
   );
 }

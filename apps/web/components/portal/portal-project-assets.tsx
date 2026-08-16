@@ -43,6 +43,7 @@ export type PortalProjectAsset = {
   mimeType?: string | null;
   sizeBytes?: number | null;
   storageKey?: string;
+  url?: string | null;
   meta?: Record<string, unknown> | null;
   createdAt?: string | null;
 };
@@ -337,7 +338,10 @@ export function PortalProjectAssets({
     }
     const url =
       asset.storageKey && !isReference
-        ? projectThumbnailUrl(asset.storageKey)
+        ? projectThumbnailUrl(asset.storageKey, {
+            url: asset.url,
+            meta: asset.meta,
+          })
         : null;
     if (!url) {
       toast.message("پیش‌نمایش برای این فایل در دسترس نیست");
@@ -398,7 +402,10 @@ export function PortalProjectAssets({
     const isReference = asset.kind === "REFERENCE" || Boolean(refUrl);
     const previewUrl =
       asset.storageKey && !isReference
-        ? projectThumbnailUrl(asset.storageKey)
+        ? projectThumbnailUrl(asset.storageKey, {
+            url: asset.url,
+            meta: asset.meta,
+          })
         : null;
     const downloadUrl =
       asset.storageKey && !isReference ? asset.storageKey : null;
@@ -445,6 +452,12 @@ export function PortalProjectAssets({
               loading="lazy"
               decoding="async"
               className="h-full w-full object-contain p-6 transition-transform duration-300 group-hover:scale-[1.03]"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+                if (process.env.NODE_ENV !== "production") {
+                  console.warn("[portal-asset] image failed:", previewUrl);
+                }
+              }}
             />
           ) : null}
 
@@ -461,6 +474,12 @@ export function PortalProjectAssets({
               loading="lazy"
               decoding="async"
               className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+                if (process.env.NODE_ENV !== "production") {
+                  console.warn("[portal-asset] image failed:", previewUrl);
+                }
+              }}
             />
           ) : null}
 
@@ -656,7 +675,10 @@ export function PortalProjectAssets({
       Boolean(refUrl);
     const previewUrl =
       asset.storageKey && !isReference
-        ? projectThumbnailUrl(asset.storageKey)
+        ? projectThumbnailUrl(asset.storageKey, {
+            url: asset.url,
+            meta: asset.meta,
+          })
         : null;
     const downloadUrl =
       asset.storageKey && !isReference

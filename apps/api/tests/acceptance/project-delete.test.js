@@ -81,6 +81,7 @@ test('project softDelete removes finance, portfolio, and CRM project links', asy
       crmCustomerId: customer.id,
       invoiceId: invoice.id,
       amount: 200,
+      method: 'CASH',
       verification: 'VERIFIED',
       verifiedAt: new Date(),
     },

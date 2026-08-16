@@ -15,7 +15,7 @@ import { syncProjectFinanceFromPayments } from '../crm/paymentFinance.js';
 const router = Router();
 router.use(requireAuth, requireInternal);
 
-router.get('/:projectId/status', requirePermission('download:allow'), async (req, res, next) => {
+router.get('/:projectId/status', requirePermission('delivery.view'), async (req, res, next) => {
   try {
     await syncProjectFinanceFromPayments(prisma, req.params.projectId, { persist: true });
 
@@ -59,7 +59,7 @@ router.get('/:projectId/status', requirePermission('download:allow'), async (req
   } catch (e) { next(e); }
 });
 
-router.post('/:projectId/allow', requireCsrf, requirePermission('download:allow'), async (req, res, next) => {
+router.post('/:projectId/allow', requireCsrf, requirePermission('delivery.allow'), async (req, res, next) => {
   try {
     const projectId = req.params.projectId;
     const finance = await prisma.projectFinance.findUnique({ where: { projectId } });
@@ -130,7 +130,7 @@ router.post('/:projectId/allow', requireCsrf, requirePermission('download:allow'
   } catch (e) { next(e); }
 });
 
-router.post('/:projectId/revoke', requireCsrf, requirePermission('download:allow'), async (req, res, next) => {
+router.post('/:projectId/revoke', requireCsrf, requirePermission('delivery.allow'), async (req, res, next) => {
   try {
     const perm = await prisma.downloadPermission.update({
       where: { projectId: req.params.projectId },
@@ -157,7 +157,7 @@ router.post('/:projectId/revoke', requireCsrf, requirePermission('download:allow
   } catch (e) { next(e); }
 });
 
-router.get('/:projectId/history', requirePermission('download:allow'), async (req, res, next) => {
+router.get('/:projectId/history', requirePermission('delivery.view'), async (req, res, next) => {
   try {
     const perm = await prisma.downloadPermission.findUnique({
       where: { projectId: req.params.projectId },
@@ -177,7 +177,7 @@ router.get('/:projectId/history', requirePermission('download:allow'), async (re
   } catch (e) { next(e); }
 });
 
-router.post('/:projectId/complete', requireCsrf, requirePermission('project:start'), async (req, res, next) => {
+router.post('/:projectId/complete', requireCsrf, requirePermission('projects.complete'), async (req, res, next) => {
   try {
     const project = await prisma.project.update({
       where: { id: req.params.projectId },

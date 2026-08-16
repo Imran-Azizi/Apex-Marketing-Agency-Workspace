@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/loading/spinner";
+import { Logo } from "@/components/brand/logo";
 
 interface SectionLoaderProps {
   label?: string;
@@ -53,12 +54,7 @@ export function GlobalPageLoader({
         className,
       )}
     >
-      <div className="relative flex h-16 w-16 items-center justify-center">
-        <span className="absolute inset-0 rounded-2xl bg-brand/10" />
-        <span className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-brand text-sm font-black text-brand-foreground shadow-lg shadow-brand/25">
-          ا
-        </span>
-      </div>
+      <Logo variant="mark" size="lg" />
       <div className="h-1 w-32 overflow-hidden rounded-full bg-secondary">
         <div className="h-full w-1/3 animate-progress-indeterminate rounded-full bg-brand" />
       </div>

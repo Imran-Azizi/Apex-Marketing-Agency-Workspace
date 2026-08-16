@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-/** Legacy route → home section (bookmark-safe). */
+/** Bookmark-safe: section lives on the home page. */
 export default function ServicesRedirectPage() {
   const router = useRouter();
   useEffect(() => {

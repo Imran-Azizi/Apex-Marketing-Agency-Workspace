@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { use, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
@@ -40,6 +40,7 @@ import {
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import type { ProjectProgress } from "@/lib/project-progress";
 import { getMe, type MeResponse } from "@/lib/auth";
+import { hasPermission } from "@/lib/rbac";
 import {
   ArrowRight,
   Banknote,
@@ -185,23 +186,28 @@ const DETAIL_TABS: Array<{
   },
 ];
 
-/** Role-scoped tabs — editors only see production materials, not finance/AI/customer PII hub. */
-function tabsForRole(role?: string | null): typeof DETAIL_TABS {
-  if (role === "EDITOR") {
-    return DETAIL_TABS.filter((t) =>
-      ["brief", "assets", "production"].includes(t.id),
-    );
-  }
-  if (role === "NARRATOR") {
-    return DETAIL_TABS.filter((t) => ["brief", "narration"].includes(t.id));
-  }
-  if (role === "SALES") {
-    return DETAIL_TABS.filter((t) => t.id !== "finance" && t.id !== "ai");
-  }
-  if (role === "FINANCE") {
-    return DETAIL_TABS.filter((t) => t.id !== "ai" && t.id !== "production");
-  }
-  return DETAIL_TABS;
+/** Permission-scoped tabs with the same role defaults as before. */
+function tabsForAccess(
+  role?: string | null,
+  permissions?: string[] | null,
+): typeof DETAIL_TABS {
+  const can = (code: string) => hasPermission(permissions, code, role);
+  return DETAIL_TABS.filter((tab) => {
+    if (tab.id === "finance") return can("finance.view");
+    if (tab.id === "ai") return can("content.view");
+    if (tab.id === "narration") {
+      return (
+        can("narration.view") ||
+        can("projects.assign") ||
+        can("narration.approve") ||
+        can("narration.edit")
+      );
+    }
+    if (tab.id === "production") {
+      return can("video.view") || can("projects.assign") || can("video.approve");
+    }
+    return can("projects.view") || can("crm.view");
+  });
 }
 
 function sectionForTab(tab: DetailTab): ProjectDataSectionId {
@@ -316,7 +322,7 @@ export default function ProjectDetailPage({
   const [tab, setTab] = useState<DetailTab>("brief");
   const [aiPanel, setAiPanel] = useState<"content" | "feedback">("content");
   const [productionWorkspace, setProductionWorkspace] = useState<
-    "customer" | "ai" | "final" | undefined
+    "customer" | "ai" | "narration" | "final" | undefined
   >(undefined);
 
   useEffect(() => {
@@ -353,6 +359,7 @@ export default function ProjectDetailPage({
     if (
       workspaceParam === "customer" ||
       workspaceParam === "ai" ||
+      workspaceParam === "narration" ||
       workspaceParam === "final"
     ) {
       setProductionWorkspace(workspaceParam);
@@ -365,7 +372,10 @@ export default function ProjectDetailPage({
   });
 
   const role = (me as MeResponse | null)?.role;
-  const blockProjectDetail = role === "NARRATOR" || role === "EDITOR";
+  const permissions = (me as MeResponse | null)?.permissions;
+  const canOpenProjectHub = hasPermission(permissions, "projects.view", role);
+  const blockProjectDetail =
+    (role === "NARRATOR" || role === "EDITOR") && !canOpenProjectHub;
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["project", id],
@@ -374,17 +384,18 @@ export default function ProjectDetailPage({
   });
 
   useEffect(() => {
+    if (!role || canOpenProjectHub) return;
     if (role === "NARRATOR") {
       router.replace(`/narrator/tasks/${id}`);
     }
     if (role === "EDITOR") {
       router.replace(`/editor/tasks/${id}`);
     }
-  }, [role, id, router]);
+  }, [role, id, router, canOpenProjectHub]);
 
   const visibleTabs = useMemo(
-    () => tabsForRole((me as MeResponse | null)?.role),
-    [me],
+    () => tabsForAccess(role, permissions),
+    [role, permissions],
   );
 
   const customerTabs = useMemo(

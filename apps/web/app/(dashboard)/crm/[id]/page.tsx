@@ -71,6 +71,8 @@ interface CrmCustomerDetail {
     createdAt: string;
     paidAt?: string;
     reference?: string | null;
+    method?: string | null;
+    methodLabel?: string | null;
     recordedBy?: { id: string; fullName: string } | null;
     invoice?: { id: string; invoiceNumber: string } | null;
   }>;

@@ -3,13 +3,12 @@ import {
   ensureCsrf,
   API_BASE,
   ApiError,
+  resolveAssetSrc,
   storagePublicUrl,
   type ApiEnvelope,
 } from "@/lib/api";
-import {
-  UPLOAD_PURPOSE,
-  type UploadContext,
-} from "@/lib/media-manager";
+import { AUTH_PANEL_HEADER, resolveClientAuthPanel } from "@/lib/auth-panel";
+import { UPLOAD_PURPOSE, type UploadContext } from "@/lib/media-manager";
 
 export type { UploadContext };
 export { UPLOAD_PURPOSE };
@@ -28,13 +27,76 @@ export type UploadedFile = {
   resourceType?: string;
 };
 
-function resolveUploadContext(
-  context: UploadContext | string,
-): UploadContext {
+function resolveUploadContext(context: UploadContext | string): UploadContext {
   if (typeof context === "string") {
     return { purpose: UPLOAD_PURPOSE.GENERIC, folder: context };
   }
   return context;
+}
+
+function encodedStorageKeyPath(storageKey: string): string {
+  return storageKey
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+}
+
+/** Build /files/raw URL with panel so cookie auth resolves correctly. */
+export function authenticatedRawFileUrl(storageKey: string): string {
+  const panel = resolveClientAuthPanel();
+  const base = `${API_BASE}/files/raw/${encodedStorageKeyPath(storageKey)}`;
+  return panel ? `${base}?panel=${encodeURIComponent(panel)}` : base;
+}
+
+function authFetchHeaders(): HeadersInit {
+  const headers: Record<string, string> = {};
+  const panel = resolveClientAuthPanel();
+  if (panel) headers[AUTH_PANEL_HEADER] = panel;
+  return headers;
+}
+
+/**
+ * Fetch a stored file as a Blob via the authenticated API client
+ * (sends X-APEX-Panel + cookies, retries after silent refresh).
+ */
+async function fetchRawFileBlob(storageKey: string): Promise<Blob> {
+  const panel = resolveClientAuthPanel();
+  try {
+    const response = await api.get<Blob>(
+      `/files/raw/${encodedStorageKeyPath(storageKey)}`,
+      {
+        responseType: "blob",
+        params: panel ? { panel } : undefined,
+      },
+    );
+    const blob = response.data;
+    const contentType = String(response.headers?.["content-type"] || "");
+    if (
+      contentType.includes("application/json") ||
+      (blob.type && blob.type.includes("application/json"))
+    ) {
+      const text = await blob.text();
+      try {
+        const parsed = JSON.parse(text) as ApiEnvelope;
+        throw new ApiError(
+          parsed.error?.message || "دریافت فایل ناموفق بود",
+          400,
+          parsed.error?.code || "FILE_FETCH_FAILED",
+        );
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        throw new ApiError("دریافت فایل ناموفق بود", 400, "FILE_FETCH_FAILED");
+      }
+    }
+    return blob;
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(
+      err instanceof Error ? err.message : "دریافت فایل ناموفق بود",
+      401,
+      "FILE_FETCH_FAILED",
+    );
+  }
 }
 
 export async function uploadFileWithProgress(
@@ -90,8 +152,72 @@ export async function uploadFileWithProgress(
   return data.data;
 }
 
-export function filePreviewUrl(storageKey: string): string | null {
-  return storagePublicUrl(storageKey);
+export function filePreviewUrl(
+  storageKey: string,
+  meta?: unknown,
+): string | null {
+  return resolveAssetSrc({ storageKey, meta }) || storagePublicUrl(storageKey);
+}
+
+function guessMimeFromStorageKey(storageKey: string): string | null {
+  const name = storageKey.split("/").pop()?.toLowerCase() || "";
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".docx")) {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (name.endsWith(".doc")) return "application/msword";
+  if (name.endsWith(".png")) return "image/png";
+  if (
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg") ||
+    name.endsWith(".jfif") ||
+    name.endsWith(".jpe") ||
+    name.endsWith(".jif")
+  ) {
+    return "image/jpeg";
+  }
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".gif")) return "image/gif";
+  return null;
+}
+
+function typedFileBlob(
+  blob: Blob,
+  mimeType?: string | null,
+  storageKey?: string,
+) {
+  const preferred =
+    (mimeType && mimeType !== "application/octet-stream" ? mimeType : null) ||
+    (blob.type && blob.type !== "application/octet-stream"
+      ? blob.type
+      : null) ||
+    (storageKey ? guessMimeFromStorageKey(storageKey) : null);
+  if (preferred && blob.type !== preferred) {
+    return new Blob([blob], { type: preferred });
+  }
+  return blob;
+}
+
+/**
+ * Always fetch via authenticated /files/raw and return a blob: URL.
+ * Required for PDF iframe preview — Cloudinary/CDN URLs are often blocked by
+ * X-Frame-Options when embedded cross-origin.
+ */
+export async function fetchAuthenticatedFileBlobUrl(
+  storageKey: string,
+  mimeType?: string | null,
+): Promise<string | null> {
+  if (!storageKey || storageKey.startsWith("ref://")) return null;
+  try {
+    const blob = typedFileBlob(
+      await fetchRawFileBlob(storageKey),
+      mimeType,
+      storageKey,
+    );
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchAuthenticatedPreview(
@@ -103,17 +229,7 @@ export async function fetchAuthenticatedPreview(
     // Prefer public static URL when available (same-origin cookies not required for <img>/<video>)
     return publicUrl;
   }
-  try {
-    const res = await fetch(
-      `${API_BASE}/files/raw/${storageKey.split("/").map(encodeURIComponent).join("/")}`,
-      { credentials: "include" },
-    );
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return URL.createObjectURL(blob);
-  } catch {
-    return null;
-  }
+  return fetchAuthenticatedFileBlobUrl(storageKey);
 }
 
 export function formatFileSize(bytes?: number | null): string {
@@ -151,21 +267,12 @@ export async function downloadStoredFile(
     throw new Error("فایل قابل دانلود نیست");
   }
 
-  const publicUrl = storagePublicUrl(storageKey);
-  const encodedKey = storageKey.split("/").map(encodeURIComponent).join("/");
-  const rawUrl = `${API_BASE}/files/raw/${encodedKey}`;
-
-  let res = publicUrl
-    ? await fetch(publicUrl, { credentials: "include" })
-    : null;
-  if (!res?.ok) {
-    res = await fetch(rawUrl, { credentials: "include" });
-  }
-  if (!res.ok) {
-    throw new Error("دانلود ناموفق بود");
-  }
-
-  const blob = await res.blob();
+  // Always use authenticated raw stream — public CDN redirects break CORS with credentials.
+  const blob = typedFileBlob(
+    await fetchRawFileBlob(storageKey),
+    guessMimeFromStorageKey(storageKey),
+    storageKey,
+  );
   const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = objectUrl;
@@ -182,7 +289,10 @@ export async function downloadMediaFile(
   filename?: string,
 ): Promise<void> {
   const { mediaStreamUrl } = await import("@/lib/media");
-  const res = await fetch(mediaStreamUrl(fileId), { credentials: "include" });
+  const res = await fetch(mediaStreamUrl(fileId), {
+    credentials: "include",
+    headers: authFetchHeaders(),
+  });
   if (!res.ok) {
     throw new Error("دانلود ناموفق بود");
   }

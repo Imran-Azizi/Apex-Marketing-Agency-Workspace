@@ -43,6 +43,13 @@ const taskInclude = {
   },
   assignedBy: { select: { id: true, fullName: true } },
   audioFile: true,
+  takes: {
+    orderBy: { version: 'asc' },
+    include: {
+      projectFile: true,
+      uploadedBy: { select: { id: true, fullName: true } },
+    },
+  },
   contentVersion: {
     select: {
       id: true,
@@ -96,6 +103,47 @@ async function loadNarratorAssignment(projectId, userId) {
     select: { createdAt: true, deadlineAt: true },
     orderBy: { createdAt: 'desc' },
   });
+}
+
+/**
+ * Backfill NarrationTake rows for uploads that predate take tracking.
+ * Safe to call on every read — no-ops when takes already exist.
+ */
+async function ensureNarrationTakeHistory(taskId, projectId, tx = prisma) {
+  const count = await tx.narrationTake.count({ where: { taskId } });
+  if (count > 0) return false;
+
+  const files = await tx.projectFile.findMany({
+    where: {
+      projectId,
+      kind: 'AUDIO',
+      deletedAt: null,
+      meta: { path: ['narrationTaskId'], equals: taskId },
+    },
+    orderBy: [{ createdAt: 'asc' }, { version: 'asc' }],
+  });
+
+  if (!files.length) return false;
+
+  await tx.narrationTake.createMany({
+    data: files.map((file, index) => ({
+      taskId,
+      projectFileId: file.id,
+      version: file.version ?? index + 1,
+      uploadedById: file.uploadedBy ?? null,
+      createdAt: file.createdAt,
+    })),
+  });
+  return true;
+}
+
+async function nextNarrationTakeVersion(taskId, tx = prisma) {
+  const last = await tx.narrationTake.findFirst({
+    where: { taskId },
+    orderBy: { version: 'desc' },
+    select: { version: true },
+  });
+  return (last?.version ?? 0) + 1;
 }
 
 async function formatTaskResponse(task, auth, projectId) {
@@ -411,6 +459,13 @@ export const narrationService = {
           throw new AppError('این نریشن هنوز به شما ارسال نشده است', 403, 'FORBIDDEN');
         }
       }
+      const backfilled = await ensureNarrationTakeHistory(task.id, task.projectId);
+      if (backfilled) {
+        task = await prisma.narrationTask.findFirst({
+          where: { id: task.id },
+          include: taskInclude,
+        });
+      }
       await maybeRemindDeadline(task);
       return formatTaskResponse(task, auth, projectId);
     }
@@ -692,12 +747,12 @@ export const narrationService = {
     }
 
     const submittedAt = new Date();
-    const nextVersion =
-      (await prisma.projectFile.count({
-        where: { projectId, kind: 'AUDIO', deletedAt: null },
-      })) + 1;
 
+    let nextVersion = 1;
     await prisma.$transaction(async (tx) => {
+      await ensureNarrationTakeHistory(task.id, projectId, tx);
+      nextVersion = await nextNarrationTakeVersion(task.id, tx);
+
       const file = await tx.projectFile.create({
         data: {
           projectId,
@@ -709,6 +764,15 @@ export const narrationService = {
           version: nextVersion,
           uploadedBy: auth.userId,
           meta: mergeStorageMeta({ narrationTaskId: task.id }, storageMeta),
+        },
+      });
+
+      await tx.narrationTake.create({
+        data: {
+          taskId: task.id,
+          projectFileId: file.id,
+          version: nextVersion,
+          uploadedById: auth.userId,
         },
       });
 
@@ -727,7 +791,7 @@ export const narrationService = {
           projectId,
           type: 'VOICE_UPLOAD',
           title: 'آپلود صدای نریشن',
-          body: `فایل صوتی آپلود شد`,
+          body: `نسخه ${nextVersion} فایل صوتی آپلود شد`,
           actorId: auth.userId,
         },
       });

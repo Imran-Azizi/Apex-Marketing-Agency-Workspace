@@ -208,6 +208,23 @@ export function normalizeStoryboardOutput(output, projectId) {
     const action =
       scene.characterActions || scene.action || scene.motion || '';
     const duration = scene.duration || scene.durationSec || '';
+    const title =
+      scene.title ||
+      scene.sceneTitle ||
+      scene.name ||
+      `Scene ${i + 1}`;
+    const visualDirection =
+      scene.visualDirection ||
+      scene.visualGuide ||
+      [scene.environment, scene.lighting, scene.visualStyle]
+        .filter(Boolean)
+        .join(' — ');
+    const imagePrompt =
+      typeof scene.imagePrompt === 'string'
+        ? scene.imagePrompt.trim()
+        : typeof scene.image_prompt === 'string'
+          ? scene.image_prompt.trim()
+          : '';
     if (!String(visual).trim()) {
       const err = new Error(`Storyboard scene ${i + 1} missing visual`);
       err.code = 'invalid_response';
@@ -218,22 +235,32 @@ export function normalizeStoryboardOutput(output, projectId) {
       sceneNumber: scene.sceneNumber ?? scene.scene_number ?? scene.shot ?? i + 1,
       scene_number: scene.sceneNumber ?? scene.scene_number ?? scene.shot ?? i + 1,
       shot: scene.shot ?? scene.sceneNumber ?? scene.scene_number ?? i + 1,
+      title: String(title).trim(),
       duration: String(duration || '5s'),
       camera,
       cameraAngle: scene.cameraAngle || camera,
       visual,
       visualDescription: visual,
+      description: visual,
       action,
       characterActions: action,
       transition: scene.transition || 'Cut',
       environment: scene.environment || '',
       lighting: scene.lighting || '',
+      visualDirection: String(visualDirection || '').trim(),
       motion: scene.motion || action,
       dialogue: scene.dialogue || '',
       soundEffects: scene.soundEffects || '',
       editingNotes: scene.editingNotes || '',
       visualStyle: scene.visualStyle || '',
       notes: scene.notes || visual,
+      imagePrompt,
+      // Preserve previously generated stills when re-normalizing edits
+      imageUrl: scene.imageUrl || scene.image_url || null,
+      imageStorageKey: scene.imageStorageKey || null,
+      imageProvider: scene.imageProvider || null,
+      imageModel: scene.imageModel || null,
+      imageGeneratedAt: scene.imageGeneratedAt || null,
     };
   });
 
@@ -241,7 +268,15 @@ export function normalizeStoryboardOutput(output, projectId) {
     ? o.imagePrompts
     : Array.isArray(o.openaiImagePrompts)
       ? o.openaiImagePrompts
-      : [];
+      : scenes.map((s) => s.imagePrompt).filter(Boolean);
+
+  // Fill missing per-scene prompts from top-level list
+  scenes.forEach((scene, i) => {
+    if (!scene.imagePrompt && imagePrompts[i]) {
+      scene.imagePrompt = String(imagePrompts[i]);
+    }
+  });
+
   const videoPrompts = Array.isArray(o.videoPrompts)
     ? o.videoPrompts
     : Array.isArray(o.soraVideoPrompts)
@@ -250,11 +285,13 @@ export function normalizeStoryboardOutput(output, projectId) {
 
   return {
     projectId: o.projectId || projectId,
+    visualStyleGuide:
+      typeof o.visualStyleGuide === 'string' ? o.visualStyleGuide : '',
     storyboard: scenes,
     scenes,
-    imagePrompts,
+    imagePrompts: scenes.map((s, i) => s.imagePrompt || imagePrompts[i] || ''),
     videoPrompts,
-    openaiImagePrompts: imagePrompts,
+    openaiImagePrompts: scenes.map((s, i) => s.imagePrompt || imagePrompts[i] || ''),
     soraVideoPrompts: videoPrompts,
   };
 }

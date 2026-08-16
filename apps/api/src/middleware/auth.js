@@ -6,6 +6,7 @@ import {
 import { prisma } from '../db/prisma.js';
 import { AppError } from '../utils/response.js';
 import { verifyAccessToken } from '../utils/tokens.js';
+import { effectiveFromUser } from '../services/permissions/effective.js';
 
 function assertPanelMatchesRole(panel, roleCode, audience) {
   if (!panel) return;
@@ -49,6 +50,9 @@ export async function requireAuth(req, res, next) {
               },
             },
           },
+          userPermissions: {
+            select: { granted: true, permission: { select: { code: true } } },
+          },
         },
       });
       if (!user) throw new AppError('User not found', 401, 'UNAUTHENTICATED');
@@ -60,7 +64,7 @@ export async function requireAuth(req, res, next) {
         userId: user.id,
         roleCode: user.role.code,
         panel: panel || roleToPanel(user.role.code),
-        permissions: user.role.permissions.map((p) => p.permission.code),
+        permissions: effectiveFromUser(user),
         user,
       };
     } else if (payload.aud === 'PORTAL') {

@@ -43,6 +43,23 @@ test("resolveCloudinaryResourceType maps mime and extensions", () => {
     resolveCloudinaryResourceType({ filename: "brief.pdf" }),
     "raw",
   );
+  assert.equal(
+    resolveCloudinaryResourceType({ filename: "photo.jfif" }),
+    "image",
+  );
+  assert.equal(
+    resolveCloudinaryResourceType({ storageKey: "images/1-abc.jfif" }),
+    "image",
+  );
+});
+
+test("deliveryFormatForExtension omits jpeg-family formats", async () => {
+  const { deliveryFormatForExtension } = await import(
+    "../../src/services/storage/resource-type.js"
+  );
+  assert.equal(deliveryFormatForExtension("jfif"), undefined);
+  assert.equal(deliveryFormatForExtension("jpg"), undefined);
+  assert.equal(deliveryFormatForExtension("png"), "png");
 });
 
 test("resolveMediaPlacement routes by purpose", () => {
@@ -112,7 +129,7 @@ test("normalizeUploadFolder accepts legacy and new roots", () => {
 
 test("generateStorageKey builds hierarchical keys", () => {
   const key = generateStorageKey("images", "logo.png");
-  assert.match(key, /^images\/\d+-[a-f0-9]+-logo\.png$/);
+  assert.match(key, /^images\/\d+-[a-f0-9]+\.png$/);
 });
 
 test("getMediaCategory supports legacy and new keys", () => {

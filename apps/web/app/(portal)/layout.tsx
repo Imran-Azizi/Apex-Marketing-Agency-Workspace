@@ -21,6 +21,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import { Logo } from "@/components/brand/logo";
 
 export default function PortalLayout({
   children,
@@ -92,7 +93,7 @@ export default function PortalLayout({
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent
           side="right"
-          className="w-[min(100%,20rem)] border-sidebar-border bg-sidebar p-0 text-sidebar-foreground"
+          className="flex w-[min(100%,20rem)] flex-col gap-0 overflow-hidden border-sidebar-border bg-sidebar p-0 text-sidebar-foreground sm:max-w-none"
         >
           <SheetHeader className="sr-only">
             <SheetTitle>منوی پورتال مشتری</SheetTitle>
@@ -112,10 +113,7 @@ export default function PortalLayout({
                 onClick={() => setMobileOpen(true)}
               />
               <div className="min-w-0 text-start lg:hidden">
-                <p className="truncate text-sm font-semibold">اپیکس</p>
-                <p className="truncate text-[11px] text-muted-foreground">
-                  {displayName}
-                </p>
+                <Logo size="sm" subtitle={displayName} />
               </div>
               <p className="hidden truncate text-sm text-muted-foreground lg:block">
                 پورتال مشتری

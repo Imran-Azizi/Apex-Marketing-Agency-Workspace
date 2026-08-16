@@ -3,34 +3,33 @@
 import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
-  ArrowRight,
   Briefcase,
   CalendarClock,
   CalendarPlus,
   Camera,
-  ImagePlus,
-  KeyRound,
   Loader2,
   Mail,
-  Pencil,
   Phone,
   Trash2,
-  UserCheck,
   UserCog,
-  UserX,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiPatch, ApiError } from "@/lib/api";
-import { formatDate, formatPhoneDisplay, cn } from "@/lib/utils";
+import {
+  formatDate,
+  formatDateTime,
+  formatPhoneDisplay,
+  cn,
+} from "@/lib/utils";
 import { filePreviewUrl, uploadFileWithProgress } from "@/lib/upload";
 import { UPLOAD_PURPOSE } from "@/lib/media-manager";
 import { UploadProgress } from "@/components/loading/upload-progress";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmployeeCvPanel } from "./employee-cv-panel";
 import {
   ROLE_BADGE_VARIANTS,
   ROLE_LABELS_FA,
@@ -54,17 +53,6 @@ const ALLOWED_IMAGE_TYPES = new Set([
 ]);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-function formatDateTime(value: string | null) {
-  if (!value) return "—";
-  return new Intl.DateTimeFormat("fa-AF", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
-
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
@@ -75,19 +63,11 @@ function getInitials(name: string) {
 interface EmployeeProfileViewProps {
   employee: Employee;
   currentUserId?: string | null;
-  onBack: () => void;
-  onEdit: () => void;
-  onToggleStatus: () => void;
-  onResetPassword: () => void;
 }
 
 export function EmployeeProfileView({
   employee,
   currentUserId,
-  onBack,
-  onEdit,
-  onToggleStatus,
-  onResetPassword,
 }: EmployeeProfileViewProps) {
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -99,8 +79,6 @@ export function EmployeeProfileView({
   const roleCode = employee.role.code as StaffRole;
   const roleLabel =
     ROLE_LABELS_FA[roleCode] || employee.role.name || employee.role.code;
-  const isManagerRole =
-    employee.role.code === "MANAGER" || employee.role.code === "ADMIN";
   const initials = getInitials(employee.fullName);
   const teamKindLabel = employee.teamProfile?.kind
     ? TEAM_KIND_LABELS[employee.teamProfile.kind] || employee.teamProfile.kind
@@ -212,7 +190,7 @@ export function EmployeeProfileView({
   };
 
   return (
-    <div dir="rtl" className="mx-auto w-full max-w-4xl">
+    <div dir="rtl" className="mx-auto w-full max-w-4xl space-y-4">
       <Card className="overflow-hidden border-border/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
         <div className="relative h-28 overflow-hidden bg-gradient-to-l from-brand via-brand to-brand/75 sm:h-32">
           <div
@@ -225,7 +203,7 @@ export function EmployeeProfileView({
         </div>
 
         <CardContent className="relative px-4 pb-6 pt-0 sm:px-6 sm:pb-7">
-          <div className="-mt-14 flex flex-col gap-5 sm:-mt-16 lg:flex-row lg:items-end lg:justify-between">
+          <div className="-mt-14 flex flex-col gap-5 sm:-mt-16">
             <div className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:items-end">
               <div className="relative shrink-0">
                 <Avatar className="h-28 w-28 border-4 border-card shadow-lg shadow-brand/20 ring-1 ring-border/40 sm:h-32 sm:w-32">
@@ -236,7 +214,7 @@ export function EmployeeProfileView({
                       className="object-cover"
                     />
                   ) : null}
-                  <AvatarFallback className="bg-gradient-to-bl from-brand to-brand/75 text-3xl font-bold text-white">
+                  <AvatarFallback className="bg-gradient-to-bl from-brand to-brand/75 text-3xl font-bold text-brand-foreground">
                     {initials}
                   </AvatarFallback>
                 </Avatar>
@@ -260,6 +238,41 @@ export function EmployeeProfileView({
                     <Camera className="h-6 w-6" />
                   )}
                 </button>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => fileRef.current?.click()}
+                  className={cn(
+                    "absolute bottom-1 start-1 flex h-8 w-8 items-center justify-center rounded-full",
+                    "border border-border/60 bg-card text-foreground shadow-sm",
+                    "transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
+                    busy && "opacity-70",
+                  )}
+                  aria-label={
+                    employee.profileImage ? "تغییر تصویر" : "آپلود تصویر"
+                  }
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                </button>
+
+                {employee.profileImage ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={onRemoveImage}
+                    className={cn(
+                      "absolute bottom-1 end-1 flex h-8 w-8 items-center justify-center rounded-full",
+                      "border border-border/60 bg-card text-muted-foreground shadow-sm",
+                      "transition hover:bg-destructive/10 hover:text-destructive",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30",
+                      busy && "opacity-70",
+                    )}
+                    aria-label="حذف تصویر"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
 
                 <input
                   ref={fileRef}
@@ -299,84 +312,15 @@ export function EmployeeProfileView({
                   )}
                 </p>
 
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3">
                   <Badge
                     variant={ROLE_BADGE_VARIANTS[roleCode] || "secondary"}
                     className="rounded-full"
                   >
                     {roleLabel}
                   </Badge>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => fileRef.current?.click()}
-                    className="h-7 rounded-full px-3 text-xs"
-                  >
-                    <ImagePlus className="h-3.5 w-3.5" />
-                    {employee.profileImage ? "تغییر تصویر" : "آپلود تصویر"}
-                  </Button>
-                  {employee.profileImage && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={busy}
-                      onClick={onRemoveImage}
-                      className="h-7 rounded-full px-3 text-xs text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      حذف تصویر
-                    </Button>
-                  )}
                 </div>
               </div>
-            </div>
-
-            <div className="flex shrink-0 flex-wrap items-center gap-2 lg:pb-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onBack}
-                className="rounded-full border-border/70 bg-background"
-              >
-                <ArrowRight className="h-3.5 w-3.5" />
-                بازگشت
-              </Button>
-              {!isManagerRole && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onEdit}
-                  className="rounded-full border-border/70 bg-background transition-all hover:border-brand/40 hover:bg-brand/[0.04]"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  ویرایش
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onToggleStatus}
-                className="rounded-full border-border/70 bg-background transition-all hover:border-brand/40 hover:bg-brand/[0.04]"
-              >
-                {employee.isActive ? (
-                  <UserX className="h-3.5 w-3.5" />
-                ) : (
-                  <UserCheck className="h-3.5 w-3.5" />
-                )}
-                {employee.isActive ? "غیرفعال‌سازی" : "فعال‌سازی"}
-              </Button>
-              <Button
-                variant="brand"
-                size="sm"
-                onClick={onResetPassword}
-                className="rounded-full shadow-sm shadow-brand/20"
-              >
-                <KeyRound className="h-3.5 w-3.5" />
-                بازنشانی رمز
-              </Button>
             </div>
           </div>
 
@@ -422,13 +366,15 @@ export function EmployeeProfileView({
           </div>
         </CardContent>
       </Card>
+
+      <EmployeeCvPanel employee={employee} currentUserId={currentUserId} />
     </div>
   );
 }
 
 export function EmployeeProfileSkeleton() {
   return (
-    <div dir="rtl" className="mx-auto w-full max-w-4xl">
+    <div dir="rtl" className="mx-auto w-full max-w-4xl space-y-4">
       <Card className="overflow-hidden border-border/50">
         <Skeleton className="h-28 w-full rounded-none sm:h-32" />
         <CardContent className="relative px-4 pb-6 pt-0 sm:px-6 sm:pb-7">
@@ -447,6 +393,7 @@ export function EmployeeProfileSkeleton() {
           </div>
         </CardContent>
       </Card>
+      <Skeleton className="h-[28rem] w-full rounded-2xl" />
     </div>
   );
 }

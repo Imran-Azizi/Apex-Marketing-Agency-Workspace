@@ -8,6 +8,10 @@ import {
   UserCog,
   MessageSquare,
   Mic2,
+  HardDrive,
+  Images,
+  BriefcaseBusiness,
+  Globe,
 } from "lucide-react";
 
 export type InternalRole =
@@ -40,6 +44,17 @@ export interface NavItem {
   href: string;
   label: string;
   icon: LucideIcon;
+  children?: NavItem[];
+}
+
+export function isNavGroup(
+  item: NavItem,
+): item is NavItem & { children: NavItem[] } {
+  return Array.isArray(item.children) && item.children.length > 0;
+}
+
+export function flattenNavLinks(items: NavItem[]): NavItem[] {
+  return items.flatMap((item) => (isNavGroup(item) ? item.children : [item]));
 }
 
 /** Post-login home for each role (Spec §3 + dedicated panels). */
@@ -61,7 +76,21 @@ const MANAGER_NAV: NavItem[] = [
   },
   { href: "/crm", label: "مدیریت مشتریان", icon: Users },
   { href: "/projects", label: "پروژه‌ها", icon: FolderKanban },
+  {
+    href: "group:public-website",
+    label: "مدیریت وبسایت عمومی",
+    icon: Globe,
+    children: [
+      { href: "/manager/portfolio", label: "نمونه‌کارها", icon: Images },
+      {
+        href: "/catalog/services",
+        label: "مدیریت خدمات",
+        icon: BriefcaseBusiness,
+      },
+    ],
+  },
   { href: "/employees", label: "مدیریت کارمندان", icon: UserCog },
+  { href: "/backup", label: "پشتیبان‌گیری", icon: HardDrive },
   { href: "/settings", label: "تنظیمات", icon: Settings },
 ];
 
@@ -104,25 +133,6 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
   ],
 };
 
-/**
- * Prefix-based route ACL. First match wins (more specific first).
- * MANAGER/ADMIN can access everything listed for any role via wildcard.
- */
-const ROUTE_RULES: Array<{ prefix: string; roles: InternalRole[] }> = [
-  { prefix: "/manager", roles: ["MANAGER", "ADMIN"] },
-  { prefix: "/employees", roles: ["MANAGER", "ADMIN"] },
-  { prefix: "/sales", roles: ["MANAGER", "ADMIN", "SALES"] },
-  { prefix: "/editor", roles: ["MANAGER", "ADMIN", "EDITOR"] },
-  { prefix: "/narrator", roles: ["MANAGER", "ADMIN", "NARRATOR"] },
-  { prefix: "/crm", roles: ["MANAGER", "ADMIN", "SALES", "FINANCE"] },
-  { prefix: "/settings", roles: ["MANAGER", "ADMIN"] },
-  { prefix: "/projects", roles: ["MANAGER", "ADMIN", "SALES", "FINANCE"] },
-  {
-    prefix: "/dashboard",
-    roles: ["MANAGER", "ADMIN", "SALES", "FINANCE", "EDITOR", "NARRATOR"],
-  },
-];
-
 export function isInternalRole(
   role: string | null | undefined,
 ): role is InternalRole {
@@ -133,43 +143,149 @@ export function isFullAccessRole(role: string | null | undefined): boolean {
   return role === "MANAGER" || role === "ADMIN";
 }
 
+export function hasPermission(
+  permissions: string[] | null | undefined,
+  code: string | string[],
+  role?: string | null,
+): boolean {
+  if (isFullAccessRole(role)) return true;
+  const needed = Array.isArray(code) ? code : [code];
+  if (!needed.length) return true;
+  const set = new Set(permissions || []);
+  return needed.some((item) => set.has(item));
+}
+
 export function getHomePath(role: string | null | undefined): string {
   if (isInternalRole(role)) return ROLE_HOME[role];
   return "/login";
 }
 
-export function getNavItems(role: string | null | undefined): NavItem[] {
-  if (isInternalRole(role)) return ROLE_NAV[role];
-  return [];
+const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
+  { prefix: "/sales/interactions", permission: "crm.view" },
+  { prefix: "/manager/portfolio", permission: "portfolio.view" },
+  { prefix: "/manager", permission: "dashboard.view" },
+  { prefix: "/sales", permission: "dashboard.view" },
+  { prefix: "/editor", permission: "video.view" },
+  { prefix: "/narrator", permission: "narration.view" },
+  { prefix: "/employees", permission: "employees.view" },
+  { prefix: "/catalog/services", permission: "services.view" },
+  { prefix: "/backup", permission: "backup.view" },
+  { prefix: "/settings", permission: "settings.view" },
+  { prefix: "/crm", permission: "crm.view" },
+  { prefix: "/projects", permission: "projects.view" },
+  { prefix: "/dashboard", permission: "dashboard.view" },
+];
+
+const EXTRA_NAV: Array<NavItem & { permission: string }> = [
+  {
+    href: "/crm",
+    label: "مدیریت مشتریان",
+    icon: Users,
+    permission: "crm.view",
+  },
+  {
+    href: "/projects",
+    label: "پروژه‌ها",
+    icon: FolderKanban,
+    permission: "projects.view",
+  },
+  {
+    href: "/manager/portfolio",
+    label: "نمونه‌کارها",
+    icon: Images,
+    permission: "portfolio.view",
+  },
+  {
+    href: "/employees",
+    label: "مدیریت کارمندان",
+    icon: UserCog,
+    permission: "employees.view",
+  },
+  {
+    href: "/catalog/services",
+    label: "مدیریت خدمات",
+    icon: BriefcaseBusiness,
+    permission: "services.view",
+  },
+  {
+    href: "/backup",
+    label: "پشتیبان‌گیری",
+    icon: HardDrive,
+    permission: "backup.view",
+  },
+  {
+    href: "/settings",
+    label: "تنظیمات",
+    icon: Settings,
+    permission: "settings.view",
+  },
+];
+
+function requiredPermissionForPath(pathname: string): string | null {
+  const rule = ROUTE_PERMISSIONS.find(
+    (r) => pathname === r.prefix || pathname.startsWith(`${r.prefix}/`),
+  );
+  return rule?.permission ?? null;
+}
+
+function filterNavItem(
+  item: NavItem,
+  role: InternalRole,
+  permissions?: string[] | null,
+): NavItem | null {
+  if (isNavGroup(item)) {
+    const children = item.children.filter((child) =>
+      canAccessPath(role, child.href, permissions),
+    );
+    if (!children.length) return null;
+    return { ...item, children };
+  }
+  return canAccessPath(role, item.href, permissions) ? item : null;
+}
+
+export function getNavItems(
+  role: string | null | undefined,
+  permissions?: string[] | null,
+): NavItem[] {
+  if (!isInternalRole(role)) return [];
+  const base = ROLE_NAV[role] || [];
+  const filtered: NavItem[] = [];
+  for (const item of base) {
+    const next = filterNavItem(item, role, permissions);
+    if (next) filtered.push(next);
+  }
+  const seen = new Set(flattenNavLinks(filtered).map((item) => item.href));
+  for (const extra of EXTRA_NAV) {
+    if (seen.has(extra.href)) continue;
+    if (!hasPermission(permissions, extra.permission, role)) continue;
+    filtered.push({
+      href: extra.href,
+      label: extra.label,
+      icon: extra.icon,
+    });
+    seen.add(extra.href);
+  }
+  return filtered;
 }
 
 export function canAccessPath(
   role: string | null | undefined,
   pathname: string,
+  permissions?: string[] | null,
 ): boolean {
   if (!isInternalRole(role)) return false;
-  if (isFullAccessRole(role)) {
-    return (
-      pathname.startsWith("/manager") ||
-      pathname.startsWith("/employees") ||
-      pathname.startsWith("/sales") ||
-      pathname.startsWith("/editor") ||
-      pathname.startsWith("/narrator") ||
-      pathname.startsWith("/crm") ||
-      pathname.startsWith("/projects") ||
-      pathname.startsWith("/settings") ||
-      pathname === "/dashboard" ||
-      pathname.startsWith("/dashboard/")
-    );
+
+  const required = requiredPermissionForPath(pathname);
+  if (!required) return false;
+
+  if (
+    isFullAccessRole(role) &&
+    (permissions == null || permissions.length === 0)
+  ) {
+    return true;
   }
 
-  const rule = ROUTE_RULES.find(
-    (r) => pathname === r.prefix || pathname.startsWith(`${r.prefix}/`),
-  );
-  if (!rule) {
-    return false;
-  }
-  return rule.roles.includes(role);
+  return hasPermission(permissions, required, role);
 }
 
 export function getRoleLabel(role: string | null | undefined): string {

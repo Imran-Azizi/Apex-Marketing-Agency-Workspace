@@ -55,7 +55,13 @@ export const projectService = {
       where,
       include: {
         crmCustomer: { select: { id: true, personName: true, companyName: true } },
-        assignments: { where: { isActive: true }, include: { teamProfile: true } },
+        assignments: {
+          where: { isActive: true },
+          include: {
+            teamProfile: { select: { displayName: true } },
+            user: { select: { id: true, fullName: true } },
+          },
+        },
         finance: ['EDITOR', 'NARRATOR', 'SALES'].includes(auth.roleCode) ? false : true,
       },
       orderBy: { updatedAt: 'desc' },

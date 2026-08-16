@@ -18,16 +18,20 @@ import {
   buildEditingManagerFeedbackNotification,
   buildFinalVideoUploadedNotification,
   buildFinalVideoUploadConfirmedNotification,
+  buildFinalVideoApprovedNotification,
+  buildFinalVideoRevisionRequestedNotification,
 } from "../../services/notifications.js";
 import { serializeEditorTaskSummary } from "./editorView.js";
 import {
   VIDEO_TYPE_LABELS,
   buildFinalFileMeta,
   markApprovedMeta,
+  markRevisionRequestedMeta,
   markSentMeta,
   markViewedMeta,
   serializeFinalVideo,
   isSentToCustomer,
+  resolveVideoStatus,
 } from "./finalProduct.js";
 import { mergeStorageMeta } from "../../services/storage/media-manager.js";
 
@@ -37,6 +41,116 @@ const ACTIVE_EDITING = [
   "REVIEW_REQUIRED",
   "REVISION_REQUESTED",
 ];
+
+async function ensureNarrationTakeHistory(taskId, projectId, tx = prisma) {
+  const count = await tx.narrationTake.count({ where: { taskId } });
+  if (count > 0) return false;
+
+  const files = await tx.projectFile.findMany({
+    where: {
+      projectId,
+      kind: "AUDIO",
+      deletedAt: null,
+      meta: { path: ["narrationTaskId"], equals: taskId },
+    },
+    orderBy: [{ createdAt: "asc" }, { version: "asc" }],
+  });
+
+  if (!files.length) return false;
+
+  await tx.narrationTake.createMany({
+    data: files.map((file, index) => ({
+      taskId,
+      projectFileId: file.id,
+      version: file.version ?? index + 1,
+      uploadedById: file.uploadedBy ?? null,
+      createdAt: file.createdAt,
+    })),
+  });
+  return true;
+}
+
+async function loadProjectNarrationAudio(projectId, mapFile) {
+  let narrationTask = await prisma.narrationTask.findFirst({
+    where: { projectId, status: "APPROVED" },
+    orderBy: { approvedAt: "desc" },
+    include: {
+      audioFile: true,
+      takes: {
+        orderBy: { version: "asc" },
+        include: { projectFile: true },
+      },
+    },
+  });
+
+  if (!narrationTask) return null;
+
+  const backfilled = await ensureNarrationTakeHistory(
+    narrationTask.id,
+    projectId,
+  );
+  if (backfilled) {
+    narrationTask = await prisma.narrationTask.findFirst({
+      where: { id: narrationTask.id },
+      include: {
+        audioFile: true,
+        takes: {
+          orderBy: { version: "asc" },
+          include: { projectFile: true },
+        },
+      },
+    });
+  }
+
+  if (!narrationTask) return null;
+
+  const currentFileId = narrationTask.audioFileId;
+  const rawTakes = narrationTask.takes?.length
+    ? narrationTask.takes
+    : narrationTask.audioFile
+      ? [
+          {
+            id: narrationTask.audioFile.id,
+            version: narrationTask.audioFile.version ?? 1,
+            createdAt: narrationTask.audioFile.createdAt,
+            projectFile: narrationTask.audioFile,
+            projectFileId: narrationTask.audioFile.id,
+          },
+        ]
+      : [];
+
+  const takes = rawTakes
+    .map((take) => {
+      const file = take.projectFile;
+      if (!file) return null;
+      return {
+        id: take.id,
+        version: take.version,
+        createdAt: take.createdAt,
+        isCurrent:
+          take.projectFileId === currentFileId || file.id === currentFileId,
+        audioFile: mapFile(file),
+      };
+    })
+    .filter(Boolean);
+
+  // Editors (and production handoff) only receive the manager-approved current take.
+  const approvedTakes = takes.filter((take) => take.isCurrent);
+  const handoffTakes =
+    approvedTakes.length > 0
+      ? approvedTakes
+      : currentFileId
+        ? takes.filter((take) => take.audioFile?.id === currentFileId)
+        : takes.slice(-1);
+
+  if (!handoffTakes.length) return null;
+
+  return {
+    approvedAt: narrationTask.approvedAt,
+    approvedFileId: currentFileId,
+    takes: handoffTakes,
+  };
+}
 
 const editorTaskInclude = {
   assignedBy: { select: { id: true, fullName: true } },
@@ -64,7 +178,9 @@ async function loadEditorAssignment(projectId, userId) {
 
 async function hydrateEditorSummaries(tasks, userId) {
   if (!tasks.length) return [];
-  const projectIds = [...new Set(tasks.map((t) => t.projectId).filter(Boolean))];
+  const projectIds = [
+    ...new Set(tasks.map((t) => t.projectId).filter(Boolean)),
+  ];
   const assignments = userId
     ? await prisma.projectAssignment.findMany({
         where: {
@@ -386,6 +502,23 @@ export const productionService = {
             },
           },
         },
+        format: true,
+        service: { select: { id: true, name: true } },
+        crmCustomer: {
+          select: {
+            id: true,
+            personName: true,
+            companyName: true,
+            jobTitle: true,
+            phone: true,
+            email: true,
+            address: true,
+            city: true,
+            normalizedWhatsapp: true,
+            whatsappRaw: true,
+            notes: true,
+          },
+        },
         contentVersions: {
           where: {
             OR: [
@@ -514,6 +647,15 @@ export const productionService = {
       meta: f.meta,
     });
 
+    const narrationAudio = await loadProjectNarrationAudio(projectId, mapFile);
+    const approvedVoiceFiles = narrationAudio?.approvedFileId
+      ? voiceFiles.filter((f) => f.id === narrationAudio.approvedFileId)
+      : narrationAudio?.takes?.length
+        ? voiceFiles.filter((f) =>
+            narrationAudio.takes.some((t) => t.audioFile?.id === f.id),
+          )
+        : [];
+
     const materials = {
       brief: project.brief,
       approvedContent: approvedContent
@@ -527,7 +669,9 @@ export const productionService = {
           }
         : null,
       clientAssets: project.assetRefs.map((r) => r.clientAsset),
-      voiceFiles: voiceFiles.map(mapFile),
+      // Production/editor handoff: only manager-approved narration audio
+      voiceFiles: approvedVoiceFiles.map(mapFile),
+      narrationAudio,
       customerFeedback: project.feedback,
       approvals: project.approvals,
     };
@@ -586,6 +730,42 @@ export const productionService = {
         videoRevisionUsed: project.videoRevisionUsed,
         videoRevisionMax: project.videoRevisionMax,
         extraVideoRevision: project.extraVideoRevision,
+        language: project.language,
+        tone: project.tone,
+        durationSec: project.durationSec,
+        platforms: project.platforms,
+        brief: project.brief,
+        format: project.format
+          ? {
+              id: project.format.id,
+              name: project.format.name,
+              ratio: project.format.ratio,
+            }
+          : null,
+        service: project.service
+          ? { id: project.service.id, name: project.service.name }
+          : null,
+        crmCustomer: project.crmCustomer
+          ? {
+              id: project.crmCustomer.id,
+              personName: project.crmCustomer.personName,
+              companyName: project.crmCustomer.companyName,
+              jobTitle: project.crmCustomer.jobTitle,
+              phone: project.crmCustomer.phone,
+              email: project.crmCustomer.email,
+              address: project.crmCustomer.address,
+              city: project.crmCustomer.city,
+              normalizedWhatsapp: project.crmCustomer.normalizedWhatsapp,
+              whatsappRaw: project.crmCustomer.whatsappRaw,
+              notes: project.crmCustomer.notes,
+            }
+          : null,
+        assignments: project.assignments?.map((a) => ({
+          role: a.role,
+          teamProfile: a.teamProfile
+            ? { displayName: a.teamProfile.displayName }
+            : null,
+        })),
       },
       editorAssignment,
     };
@@ -629,6 +809,12 @@ export const productionService = {
       select: { id: true, title: true, code: true, status: true },
     });
     if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
+
+    const narrationAudio = await loadProjectNarrationAudio(projectId, (f) => ({
+      id: f.id,
+      name: f.name,
+      version: f.version,
+    }));
 
     const productionReady = [
       "PRODUCTION_EDITING",
@@ -729,7 +915,15 @@ export const productionService = {
           projectId,
           type: "EDITOR_ASSIGNED",
           title: "ارجاع پروژه به ادیتور",
-          body: `${profile.displayName} — ${assignedAmount} AFN${instructions ? ` — ${instructions}` : ""}`,
+          body: [
+            `${profile.displayName} — ${assignedAmount} AFN`,
+            instructions?.trim() || null,
+            narrationAudio
+              ? `فایل صوتی نریشن تأییدشده مدیر ضمیمه پروژه شد`
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" — "),
           actorId: auth.userId,
         },
       });
@@ -744,6 +938,9 @@ export const productionService = {
         projectCode: project.code,
         deadline: deadlineAt,
         assignedAt,
+        narrationVersionCount: narrationAudio?.takes?.length ?? 0,
+        approvedNarrationVersion:
+          narrationAudio?.takes?.find((t) => t.isCurrent)?.version ?? null,
       }),
       userId: profile.userId,
       audience: "INTERNAL",
@@ -1355,17 +1552,19 @@ export const productionService = {
     // Self-heal: persist APPROVED_BY_CUSTOMER on watermarked cards if approval exists.
     if (customerApproved) {
       const needsBackfill = files.some((f) => {
-        if (f.kind !== "WATERMARKED_FINAL" && f.kind !== "CLEAN_FINAL") return false;
+        if (f.kind !== "WATERMARKED_FINAL" && f.kind !== "CLEAN_FINAL")
+          return false;
         const meta =
           f.meta && typeof f.meta === "object" && !Array.isArray(f.meta)
             ? f.meta
             : {};
-        return meta.status !== "APPROVED_BY_CUSTOMER" && !meta.approvedByCustomer;
+        return (
+          meta.status !== "APPROVED_BY_CUSTOMER" && !meta.approvedByCustomer
+        );
       });
       if (needsBackfill) {
-        const { markSentFinalsApprovedByCustomer } = await import(
-          "./finalProduct.js",
-        );
+        const { markSentFinalsApprovedByCustomer } =
+          await import("./finalProduct.js");
         await markSentFinalsApprovedByCustomer(prisma, projectId, {
           approvedAt: clientFinalApproval?.createdAt || new Date(),
         });
@@ -1443,8 +1642,15 @@ export const productionService = {
    * When both types exist for the latest version, marks editing task for manager review.
    */
   async uploadFinalVideo(projectId, body, auth, req) {
-    const { videoType, storageKey, name, mimeType, sizeBytes, notes, storageMeta } =
-      body || {};
+    const {
+      videoType,
+      storageKey,
+      name,
+      mimeType,
+      sizeBytes,
+      notes,
+      storageMeta,
+    } = body || {};
 
     const type = String(videoType || "").toUpperCase();
     if (!["WATERMARKED", "CLEAN"].includes(type)) {
@@ -1466,13 +1672,6 @@ export const productionService = {
       !String(mimeType).startsWith("video/")
     ) {
       throw new AppError("فرمت ویدیو پشتیبانی نمی‌شود", 400, "INVALID_MIME");
-    }
-    if (sizeBytes != null && Number(sizeBytes) > 200 * 1024 * 1024) {
-      throw new AppError(
-        "حجم فایل نباید بیشتر از ۲۰۰ مگابایت باشد",
-        400,
-        "FILE_TOO_LARGE",
-      );
     }
 
     let task = await prisma.editingTask.findFirst({
@@ -1517,29 +1716,14 @@ export const productionService = {
     }
 
     const kind = type === "CLEAN" ? "CLEAN_FINAL" : "WATERMARKED_FINAL";
-    const version = await nextFinalVersion(projectId);
-    // Reuse same version if sibling of opposite type already uploaded without a full submit pair
-    const latestSibling = await prisma.projectFile.findFirst({
-      where: {
-        projectId,
-        kind: type === "CLEAN" ? "WATERMARKED_FINAL" : "CLEAN_FINAL",
-        deletedAt: null,
-      },
-      orderBy: { version: "desc" },
-      select: { version: true, createdAt: true },
-    });
+    // Versions are independent per video type. Every upload is immutable and
+    // receives the next version without replacing an earlier submission.
     const latestSame = await prisma.projectFile.findFirst({
       where: { projectId, kind, deletedAt: null },
       orderBy: { version: "desc" },
       select: { version: true },
     });
-    let useVersion = version;
-    if (
-      latestSibling &&
-      (!latestSame || latestSame.version < latestSibling.version)
-    ) {
-      useVersion = latestSibling.version;
-    }
+    const useVersion = (latestSame?.version || 0) + 1;
 
     const uploadedAt = new Date();
     const editorUser = await prisma.user.findUnique({
@@ -1562,7 +1746,7 @@ export const productionService = {
           meta: mergeStorageMeta(
             buildFinalFileMeta({
               videoType: type,
-              status: "UPLOADED",
+              status: "PENDING_REVIEW",
               extras: notes?.trim() ? { editorNotes: notes.trim() } : {},
             }),
             storageMeta,
@@ -1589,45 +1773,25 @@ export const productionService = {
         orderBy: { createdAt: "desc" },
       });
 
-      const bothReady = Boolean(pairWm && pairClean);
       await tx.editingTask.update({
         where: { id: task.id },
         data: {
           version: useVersion,
           watermarkedFileId: pairWm?.id || task.watermarkedFileId,
           cleanFileId: pairClean?.id || task.cleanFileId,
-          ...(bothReady
-            ? {
-                status: "REVIEW_REQUIRED",
-                submittedAt: uploadedAt,
-                revisionNotes: null,
-              }
-            : task.status === "ASSIGNED"
-              ? { status: "IN_PROGRESS" }
-              : {}),
+          status: "REVIEW_REQUIRED",
+          submittedAt: uploadedAt,
+          revisionNotes: null,
         },
       });
 
-      if (bothReady) {
-        await tx.project.update({
-          where: { id: projectId },
-          data: {
-            status: "MANAGER_FINAL_REVIEW",
-            customerFacingStatus: "FINAL_REVIEW",
-          },
-        });
-      } else if (
-        ["ASSIGNED", "REVISION_REQUESTED"].includes(task.status) ||
-        task.status === "IN_PROGRESS"
-      ) {
-        await tx.project.update({
-          where: { id: projectId },
-          data: {
-            status: "PRODUCTION_EDITING",
-            customerFacingStatus: "IN_PRODUCTION",
-          },
-        });
-      }
+      await tx.project.update({
+        where: { id: projectId },
+        data: {
+          status: "MANAGER_FINAL_REVIEW",
+          customerFacingStatus: "FINAL_REVIEW",
+        },
+      });
 
       await tx.projectTimelineEvent.create({
         data: {
@@ -1690,6 +1854,215 @@ export const productionService = {
     };
   },
 
+  /** Manager reviews one immutable final-video submission/version. */
+  async reviewFinalVideo(projectId, fileId, body, auth, req) {
+    if (auth.roleCode !== "MANAGER" && auth.roleCode !== "ADMIN") {
+      throw new AppError(
+        "فقط مدیر می‌تواند ویدیوی نهایی را بررسی کند",
+        403,
+        "FORBIDDEN",
+      );
+    }
+
+    const decision = String(body?.decision || "").toUpperCase();
+    if (!["APPROVE", "REQUEST_REVISION"].includes(decision)) {
+      throw new AppError("تصمیم بررسی نامعتبر است", 400, "INVALID_DECISION");
+    }
+    const notes = String(body?.notes || "").trim();
+    if (decision === "REQUEST_REVISION" && !notes) {
+      throw new AppError(
+        "توضیحات اصلاح الزامی است",
+        400,
+        "REVISION_NOTES_REQUIRED",
+      );
+    }
+
+    const file = await prisma.projectFile.findFirst({
+      where: {
+        id: fileId,
+        projectId,
+        kind: { in: ["WATERMARKED_FINAL", "CLEAN_FINAL"] },
+        deletedAt: null,
+      },
+      include: {
+        project: {
+          select: { id: true, title: true, code: true },
+        },
+      },
+    });
+    if (!file) throw new AppError("ویدیو یافت نشد", 404, "NOT_FOUND");
+
+    const currentStatus = resolveVideoStatus(file.meta);
+    if (
+      [
+        "SENT_TO_CUSTOMER",
+        "VIEWED_BY_CUSTOMER",
+        "APPROVED_BY_CUSTOMER",
+      ].includes(currentStatus)
+    ) {
+      throw new AppError(
+        "ویدیوی ارسال‌شده برای مشتری قابل بازبینی نیست",
+        409,
+        "FINAL_ALREADY_SENT",
+      );
+    }
+    if (decision === "APPROVE" && currentStatus === "APPROVED") {
+      throw new AppError(
+        "این نسخه قبلاً تأیید شده است",
+        409,
+        "FINAL_ALREADY_APPROVED",
+      );
+    }
+    if (
+      decision === "REQUEST_REVISION" &&
+      currentStatus === "REVISION_REQUESTED"
+    ) {
+      throw new AppError(
+        "برای این نسخه قبلاً درخواست اصلاح ثبت شده است",
+        409,
+        "FINAL_REVISION_ALREADY_REQUESTED",
+      );
+    }
+
+    const reviewedAt = new Date();
+    const task = await prisma.editingTask.findFirst({
+      where: { projectId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, editorUserId: true, status: true },
+    });
+    const recipientId = file.uploadedBy || task?.editorUserId || null;
+    const videoType = file.kind === "CLEAN_FINAL" ? "CLEAN" : "WATERMARKED";
+    const videoTypeLabel = VIDEO_TYPE_LABELS[videoType];
+
+    await prisma.$transaction(async (tx) => {
+      const nextMeta =
+        decision === "APPROVE"
+          ? {
+              ...markApprovedMeta(file.meta, reviewedAt),
+              reviewedBy: auth.userId,
+            }
+          : markRevisionRequestedMeta(file.meta, {
+              notes,
+              requestedAt: reviewedAt,
+              reviewedBy: auth.userId,
+            });
+
+      await tx.projectFile.update({
+        where: { id: file.id },
+        data: { meta: nextMeta },
+      });
+
+      if (task) {
+        await tx.editingTask.update({
+          where: { id: task.id },
+          data:
+            decision === "REQUEST_REVISION"
+              ? { status: "REVISION_REQUESTED", revisionNotes: notes }
+              : {
+                  status: "REVIEW_REQUIRED",
+                  ...(task.status === "REVISION_REQUESTED"
+                    ? { revisionNotes: null }
+                    : {}),
+                },
+        });
+      }
+
+      await tx.project.update({
+        where: { id: projectId },
+        data:
+          decision === "REQUEST_REVISION"
+            ? {
+                status: "FINAL_REVISION",
+                customerFacingStatus: "FINAL_REVIEW",
+              }
+            : {
+                status: "MANAGER_FINAL_REVIEW",
+                customerFacingStatus: "FINAL_REVIEW",
+              },
+      });
+
+      await tx.approval.create({
+        data: {
+          projectId,
+          type: "MANAGER_FINAL",
+          decision: decision === "APPROVE" ? "APPROVED" : "RETURNED",
+          comment:
+            decision === "APPROVE"
+              ? `file:${file.id};version:${file.version}`
+              : `file:${file.id};version:${file.version}\n${notes}`,
+          actorType: "MANAGER",
+          actorId: auth.userId,
+        },
+      });
+
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId,
+          type:
+            decision === "APPROVE" ? "PRODUCTION_SUBMITTED" : "FINAL_RETURNED",
+          title:
+            decision === "APPROVE"
+              ? `تأیید ${videoTypeLabel} — نسخه ${file.version}`
+              : `درخواست اصلاح ${videoTypeLabel} — نسخه ${file.version}`,
+          body: notes || null,
+          actorId: auth.userId,
+          meta: {
+            fileId: file.id,
+            videoType,
+            version: file.version,
+            decision,
+          },
+        },
+      });
+    });
+
+    if (recipientId) {
+      await createNotificationOnce({
+        ...(decision === "APPROVE"
+          ? buildFinalVideoApprovedNotification({
+              projectId,
+              projectTitle: file.project.title,
+              projectCode: file.project.code,
+              fileId: file.id,
+              videoTypeLabel,
+              version: file.version,
+              approvedAt: reviewedAt,
+            })
+          : buildFinalVideoRevisionRequestedNotification({
+              projectId,
+              projectTitle: file.project.title,
+              projectCode: file.project.code,
+              fileId: file.id,
+              videoTypeLabel,
+              version: file.version,
+              notes,
+              requestedAt: reviewedAt,
+            })),
+        userId: recipientId,
+        audience: "INTERNAL",
+      });
+    }
+
+    await writeAudit({
+      userId: auth.userId,
+      action:
+        decision === "APPROVE"
+          ? "FINAL_VIDEO_APPROVE"
+          : "FINAL_VIDEO_REVISION_REQUEST",
+      entityType: "ProjectFile",
+      entityId: file.id,
+      after: {
+        projectId,
+        decision,
+        notes: notes || null,
+        version: file.version,
+      },
+      req,
+    });
+
+    return this.listFinalProducts(projectId, auth);
+  },
+
   /** Manager selects final videos and sends them to the customer portal. */
   async sendFinalVideos(projectId, body, auth, req) {
     if (auth.roleCode !== "MANAGER" && auth.roleCode !== "ADMIN") {
@@ -1739,9 +2112,19 @@ export const productionService = {
     if (files.length !== fileIds.length) {
       throw new AppError("برخی فایل‌ها یافت نشدند", 404, "NOT_FOUND");
     }
+    const unapproved = files.filter(
+      (file) => resolveVideoStatus(file.meta) !== "APPROVED",
+    );
+    if (unapproved.length > 0) {
+      throw new AppError(
+        "فقط ویدیوهای تأییدشده قابل ارسال برای مشتری هستند",
+        409,
+        "FINAL_REVIEW_REQUIRED",
+      );
+    }
 
-    // Clean files require delivery/payment gate — still mark as sent for visibility metadata,
-    // but portal download remains gated by deliveryAccess.
+    // Clean download is gated by payment settlement in deliveryAccess.
+    // allowDownload may unlock early before balance is settled.
     await prisma.$transaction(async (tx) => {
       for (const file of files) {
         await tx.projectFile.update({

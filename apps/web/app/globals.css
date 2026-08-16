@@ -4,25 +4,33 @@
 
 @layer base {
   :root {
-    /* Surfaces */
-    --background: 210 20% 98%;
-    --foreground: 215 25% 12%;
-    --card: 0 0% 100%;
-    --card-foreground: 215 25% 12%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 12%;
-    --surface: 210 18% 96%;
-    --surface-foreground: 215 20% 22%;
+    /*
+     * APEX brand palette (from design reference):
+     * Primary Dark   #374151  → 217 19% 27%
+     * Secondary Dark #1f2937  → 215 28% 17%
+     * Light Neutral  #f3f4f6  → 220 14% 96%
+     * Brand Accent   #d4af37  → 46 65% 52%
+     */
 
-    /* Actions */
-    --primary: 174 72% 32%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 18% 94%;
-    --secondary-foreground: 215 20% 22%;
-    --muted: 210 16% 93%;
-    --muted-foreground: 215 12% 42%;
-    --accent: 174 40% 92%;
-    --accent-foreground: 174 72% 22%;
+    /* Surfaces */
+    --background: 220 14% 96%;
+    --foreground: 215 28% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 28% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 28% 17%;
+    --surface: 220 14% 94%;
+    --surface-foreground: 217 19% 27%;
+
+    /* Actions — gold accent as primary CTA */
+    --primary: 46 65% 52%;
+    --primary-foreground: 215 28% 17%;
+    --secondary: 220 13% 91%;
+    --secondary-foreground: 215 28% 17%;
+    --muted: 220 14% 93%;
+    --muted-foreground: 217 14% 40%;
+    --accent: 46 42% 92%;
+    --accent-foreground: 45 55% 28%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
     --success: 152 60% 36%;
@@ -31,89 +39,100 @@
     --warning-foreground: 0 0% 100%;
 
     /* Borders & focus */
-    --border: 214 20% 88%;
-    --input: 214 20% 88%;
-    --ring: 174 72% 32%;
+    --border: 220 13% 88%;
+    --input: 220 13% 88%;
+    --ring: 46 65% 52%;
     --radius: 0.5rem;
 
     /* Brand */
-    --brand: 174 72% 32%;
-    --brand-foreground: 0 0% 100%;
-    --brand-muted: 174 35% 90%;
+    --brand: 46 65% 52%;
+    --brand-foreground: 215 28% 17%;
+    --brand-muted: 46 40% 92%;
 
-    /* Sidebar (dark chrome in both modes) */
-    --sidebar-background: 215 28% 14%;
-    --sidebar-foreground: 210 20% 92%;
-    --sidebar-border: 215 22% 20%;
-    --sidebar-accent: 174 55% 38%;
+    /* Sidebar — primary dark chrome */
+    --sidebar-background: 217 19% 27%;
+    --sidebar-foreground: 220 14% 96%;
+    --sidebar-border: 215 28% 17%;
+    --sidebar-accent: 46 65% 52%;
+    --sidebar-accent-foreground: 215 28% 17%;
 
-    /* Charts */
-    --chart-1: 174 72% 32%;
-    --chart-2: 199 89% 42%;
-    --chart-3: 38 92% 48%;
+    /* Charts — brand-led, semantic accents retained for meaning */
+    --chart-1: 46 65% 52%;
+    --chart-2: 217 19% 40%;
+    --chart-3: 215 28% 17%;
     --chart-4: 152 60% 38%;
     --chart-5: 0 72% 51%;
-    --chart-6: 262 52% 52%;
-    --chart-7: 215 16% 47%;
-    --chart-8: 330 70% 48%;
-    --chart-grid: 214 20% 88%;
-    --chart-axis: 215 12% 42%;
+    --chart-6: 38 92% 48%;
+    --chart-7: 218 11% 55%;
+    --chart-8: 45 55% 38%;
+    --chart-grid: 220 13% 88%;
+    --chart-axis: 217 14% 40%;
+
+    /* Public site dot grid — faint charcoal on light surfaces */
+    --public-dot: 215 28% 17%;
+    --public-dot-alpha: 0.07;
+    --public-dot-gap: 1.5rem;
   }
 
   .dark {
-    /* Surfaces */
-    --background: 215 28% 8%;
-    --foreground: 210 20% 96%;
-    --card: 215 26% 11%;
-    --card-foreground: 210 20% 96%;
-    --popover: 215 26% 12%;
-    --popover-foreground: 210 20% 96%;
-    --surface: 215 24% 13%;
-    --surface-foreground: 210 18% 90%;
+    /* Surfaces — secondary dark as canvas */
+    --background: 215 28% 12%;
+    --foreground: 220 14% 96%;
+    --card: 217 19% 18%;
+    --card-foreground: 220 14% 96%;
+    --popover: 217 19% 18%;
+    --popover-foreground: 220 14% 96%;
+    --surface: 217 19% 20%;
+    --surface-foreground: 220 13% 91%;
 
     /* Actions */
-    --primary: 174 60% 42%;
-    --primary-foreground: 215 28% 8%;
-    --secondary: 215 22% 16%;
-    --secondary-foreground: 210 20% 90%;
-    --muted: 215 22% 16%;
-    --muted-foreground: 215 12% 62%;
-    --accent: 174 35% 18%;
-    --accent-foreground: 174 55% 75%;
+    --primary: 46 65% 52%;
+    --primary-foreground: 215 28% 12%;
+    --secondary: 217 19% 27%;
+    --secondary-foreground: 220 14% 96%;
+    --muted: 217 19% 22%;
+    --muted-foreground: 218 11% 65%;
+    --accent: 46 30% 18%;
+    --accent-foreground: 46 70% 68%;
     --destructive: 0 62% 50%;
     --destructive-foreground: 0 0% 100%;
     --success: 152 55% 42%;
     --success-foreground: 0 0% 100%;
     --warning: 38 90% 48%;
-    --warning-foreground: 215 28% 8%;
+    --warning-foreground: 215 28% 12%;
 
     /* Borders & focus */
-    --border: 215 22% 20%;
-    --input: 215 22% 20%;
-    --ring: 174 60% 42%;
+    --border: 217 19% 28%;
+    --input: 217 19% 28%;
+    --ring: 46 65% 52%;
 
     /* Brand */
-    --brand: 174 60% 42%;
-    --brand-foreground: 215 28% 8%;
-    --brand-muted: 174 30% 16%;
+    --brand: 46 65% 52%;
+    --brand-foreground: 215 28% 12%;
+    --brand-muted: 46 28% 16%;
 
-    /* Sidebar */
-    --sidebar-background: 215 30% 6%;
-    --sidebar-foreground: 210 20% 92%;
-    --sidebar-border: 215 22% 14%;
-    --sidebar-accent: 174 55% 38%;
+    /* Sidebar — deeper than page for hierarchy */
+    --sidebar-background: 215 28% 10%;
+    --sidebar-foreground: 220 14% 96%;
+    --sidebar-border: 217 19% 18%;
+    --sidebar-accent: 46 65% 52%;
+    --sidebar-accent-foreground: 215 28% 12%;
 
     /* Charts — brighter for dark surfaces */
-    --chart-1: 174 60% 48%;
-    --chart-2: 199 85% 55%;
-    --chart-3: 38 92% 55%;
+    --chart-1: 46 70% 58%;
+    --chart-2: 217 16% 58%;
+    --chart-3: 220 14% 80%;
     --chart-4: 152 55% 48%;
     --chart-5: 0 70% 58%;
-    --chart-6: 262 55% 62%;
-    --chart-7: 215 14% 58%;
-    --chart-8: 330 65% 58%;
-    --chart-grid: 215 22% 22%;
-    --chart-axis: 215 12% 62%;
+    --chart-6: 38 92% 55%;
+    --chart-7: 218 11% 58%;
+    --chart-8: 45 60% 55%;
+    --chart-grid: 217 19% 26%;
+    --chart-axis: 218 11% 65%;
+
+    /* Public site dot grid — warm, low-contrast on dark surfaces */
+    --public-dot: 42 24% 84%;
+    --public-dot-alpha: 0.09;
   }
 }
 
@@ -155,6 +174,28 @@
     text-wrap: balance;
   }
 
+  /**
+   * Public marketing site canvas: a repeating 1px dot grid that tracks
+   * light/dark via --public-dot tokens. Applied once on the public layout.
+   */
+  .public-dot-pattern {
+    background-color: hsl(var(--background));
+    background-image: radial-gradient(
+      circle at center,
+      hsl(var(--public-dot) / var(--public-dot-alpha)) 1.15px,
+      transparent 1.35px
+    );
+    background-size: var(--public-dot-gap, 1.5rem) var(--public-dot-gap, 1.5rem);
+    background-repeat: repeat;
+    background-attachment: scroll;
+  }
+
+  @media (min-width: 768px) {
+    .public-dot-pattern {
+      --public-dot-gap: 1.75rem;
+    }
+  }
+
   /* Soft elevation that works in both themes */
   .elevation-card {
     @apply border border-border/80 bg-card text-card-foreground shadow-sm;
@@ -162,6 +203,49 @@
 
   .elevation-card-hover {
     @apply elevation-card transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md dark:hover:shadow-black/40;
+  }
+
+  /**
+   * Professional horizontal scroll surface for tables / wide data.
+   * Thin, branded scrollbar; touch-friendly; does not trap vertical scroll.
+   */
+  .apex-h-scroll {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .apex-h-scroll::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .apex-h-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    margin-inline: 4px;
+  }
+
+  .apex-h-scroll::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .apex-h-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.45);
+  }
+
+  .dark .apex-h-scroll {
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+
+  .dark .apex-h-scroll::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+  }
+
+  .dark .apex-h-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.55);
   }
 
   @keyframes public-fade-up {
@@ -179,10 +263,187 @@
     animation: public-fade-up 0.7s ease-out both;
   }
 
+  /* ——— Public hero motion ——— */
+  @keyframes hero-enter {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 14px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  @keyframes hero-float {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+    }
+    50% {
+      transform: translate3d(0, -6px, 0);
+    }
+  }
+
+  @keyframes hero-float-alt {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0);
+    }
+    50% {
+      transform: translate3d(0, 5px, 0);
+    }
+  }
+
+  @keyframes hero-pulse {
+    0%,
+    100% {
+      opacity: 0.55;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0;
+      transform: scale(2.1);
+    }
+  }
+
+  @keyframes hero-orb {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: translate3d(2%, 3%, 0) scale(1.04);
+      opacity: 0.85;
+    }
+  }
+
+  @keyframes hero-orb-alt {
+    0%,
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+      transform: translate3d(-3%, -2%, 0) scale(1.06);
+    }
+  }
+
+  @keyframes hero-timeline {
+    0% {
+      width: 18%;
+    }
+    100% {
+      width: 62%;
+    }
+  }
+
+  @keyframes hero-wave {
+    0%,
+    100% {
+      transform: scaleY(0.55);
+      opacity: 0.55;
+    }
+    50% {
+      transform: scaleY(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes hero-sweep {
+    0% {
+      background-position: 120% 0%;
+    }
+    100% {
+      background-position: -20% 0%;
+    }
+  }
+
+  @keyframes hero-orbit {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .hero-enter {
+    animation: hero-enter 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--hero-delay, 0ms);
+  }
+
+  .hero-float {
+    animation: hero-float 7s ease-in-out infinite;
+  }
+
+  .hero-float-alt {
+    animation: hero-float-alt 8.5s ease-in-out infinite;
+  }
+
+  .hero-pulse {
+    animation: hero-pulse 2.4s ease-out infinite;
+  }
+
+  .hero-orb {
+    animation: hero-orb 14s ease-in-out infinite;
+  }
+
+  .hero-orb-alt {
+    animation: hero-orb-alt 18s ease-in-out infinite;
+  }
+
+  .hero-timeline {
+    animation: hero-timeline 2.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 0.6s;
+  }
+
+  .hero-wave {
+    transform-origin: bottom center;
+    animation: hero-wave 1.35s ease-in-out infinite;
+  }
+
+  .hero-sweep {
+    background-image: linear-gradient(
+      105deg,
+      transparent 40%,
+      hsl(var(--brand) / 0.12) 50%,
+      transparent 60%
+    );
+    background-size: 220% 100%;
+    animation: hero-sweep 9s ease-in-out infinite;
+  }
+
+  .hero-orbit {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: hero-orbit 48s linear infinite;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .animate-public-fade,
-    .animate-public-fade-delay {
-      animation: none;
+    .animate-public-fade-delay,
+    .animate-auth-rise,
+    .hero-enter,
+    .hero-float,
+    .hero-float-alt,
+    .hero-pulse,
+    .hero-orb,
+    .hero-orb-alt,
+    .hero-timeline,
+    .hero-wave,
+    .hero-sweep,
+    .hero-orbit {
+      animation: none !important;
+    }
+
+    .hero-enter {
+      opacity: 1;
+      transform: none;
+    }
+
+    .hero-timeline {
+      width: 62%;
     }
 
     html {

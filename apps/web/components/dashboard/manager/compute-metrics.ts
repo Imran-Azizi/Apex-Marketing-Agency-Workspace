@@ -110,41 +110,12 @@ function inRange(
   return true;
 }
 
-function previousPeriod(from: Date | null, to: Date | null) {
-  if (!from || !to)
-    return { from: null as Date | null, to: null as Date | null };
-  const span = to.getTime() - from.getTime();
-  const prevTo = new Date(from.getTime() - 1);
-  const prevFrom = new Date(prevTo.getTime() - span);
-  return { from: prevFrom, to: prevTo };
-}
-
-function trendPct(current: number, previous: number): number | null {
-  if (previous === 0) return current === 0 ? 0 : 100;
-  return Math.round(((current - previous) / previous) * 1000) / 10;
-}
-
 function countByStatus(
   projects: ManagerProject[],
   statuses: Set<string> | string[],
 ) {
   const set = statuses instanceof Set ? statuses : new Set(statuses);
   return projects.filter((p) => set.has(p.status)).length;
-}
-
-function sparklineByMonth(projects: ManagerProject[], months = 6): number[] {
-  const now = new Date();
-  const keys: string[] = [];
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    keys.push(monthKey(d));
-  }
-  const map = Object.fromEntries(keys.map((k) => [k, 0]));
-  for (const p of projects) {
-    const k = monthKey(new Date(p.createdAt));
-    if (k in map) map[k] += 1;
-  }
-  return keys.map((k) => map[k]);
 }
 
 function financeOf(p: ManagerProject) {
@@ -154,12 +125,17 @@ function financeOf(p: ManagerProject) {
   const discount = num(f.discount);
   const finalPrice = num(f.finalProjectPrice) || Math.max(agreed - discount, 0);
   const received = num(f.received);
-  const expenses =
-    num(f.narratorCost) + num(f.editorCost) + num(f.otherDirectCosts);
+  const narratorCost = num(f.narratorCost);
+  const editorCost = num(f.editorCost);
+  const otherDirectCosts = num(f.otherDirectCosts);
+  const expenses = narratorCost + editorCost + otherDirectCosts;
   return {
     finalPrice,
     received,
     balance: finalPrice - received,
+    narratorCost,
+    editorCost,
+    otherDirectCosts,
     expenses,
     profit: finalPrice - expenses,
   };
@@ -170,21 +146,42 @@ function sumFinance(projects: ManagerProject[]) {
   let received = 0;
   let outstanding = 0;
   let expenses = 0;
+  let narratorCost = 0;
+  let editorCost = 0;
   let profit = 0;
   let any = false;
 
   for (const p of projects) {
     const fin = financeOf(p);
     if (!fin) continue;
-    if (fin.finalPrice || fin.received || fin.expenses) any = true;
+    if (
+      fin.finalPrice ||
+      fin.received ||
+      fin.expenses ||
+      fin.narratorCost ||
+      fin.editorCost
+    ) {
+      any = true;
+    }
     totalRevenue += fin.finalPrice;
     received += fin.received;
     outstanding += Math.max(fin.balance, 0);
     expenses += fin.expenses;
+    narratorCost += fin.narratorCost;
+    editorCost += fin.editorCost;
     profit += fin.profit;
   }
 
-  return { totalRevenue, received, outstanding, expenses, profit, any };
+  return {
+    totalRevenue,
+    received,
+    outstanding,
+    expenses,
+    narratorCost,
+    editorCost,
+    profit,
+    any,
+  };
 }
 
 function revenueInWindow(
@@ -200,24 +197,6 @@ function revenueInWindow(
     if (inRange(anchor, from, to)) sum += fin.finalPrice;
   }
   return sum;
-}
-
-function financeSparkline(projects: ManagerProject[], months = 6): number[] {
-  const now = new Date();
-  const keys: string[] = [];
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    keys.push(monthKey(d));
-  }
-  const map = Object.fromEntries(keys.map((k) => [k, 0]));
-  for (const p of projects) {
-    const fin = financeOf(p);
-    if (!fin) continue;
-    const anchor = p.completedAt || p.createdAt;
-    const k = monthKey(new Date(anchor));
-    if (k in map) map[k] += fin.finalPrice;
-  }
-  return keys.map((k) => map[k]);
 }
 
 function assigneeName(p: ManagerProject, role: string): string {
@@ -239,7 +218,6 @@ export function computeManagerMetrics(input: {
   range: DateRange;
 }): ManagerMetrics {
   const { from, to } = resolveDateRange(input.range);
-  const prev = previousPeriod(from, to);
 
   const allProjects = input.projects;
   const scoped =
@@ -249,15 +227,6 @@ export function computeManagerMetrics(input: {
             inRange(p.createdAt, from, to) || inRange(p.updatedAt, from, to),
         )
       : allProjects;
-
-  const prevScoped =
-    prev.from && prev.to
-      ? allProjects.filter(
-          (p) =>
-            inRange(p.createdAt, prev.from, prev.to) ||
-            inRange(p.updatedAt, prev.from, prev.to),
-        )
-      : [];
 
   const statusCount = (list: ManagerProject[], status: string) =>
     list.filter((p) => p.status === status).length;
@@ -270,16 +239,8 @@ export function computeManagerMetrics(input: {
   const waitingCustomer = countByStatus(scoped, WAITING_CUSTOMER);
   const waitingApproval = countByStatus(scoped, WAITING_APPROVAL);
 
-  const prevTotal = prevScoped.length;
-  const prevActive = prevScoped.filter(
-    (p) => ACTIVE_STATUSES.has(p.status) && p.status !== "ON_HOLD",
-  ).length;
-  const prevCompleted = statusCount(prevScoped, "COMPLETED");
-
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd = endOfDay(new Date(now.getFullYear(), now.getMonth(), 0));
 
   const projectsKpis: KpiMetric[] = [
     kpi({
@@ -289,9 +250,6 @@ export function computeManagerMetrics(input: {
       description: "در بازه انتخاب‌شده",
       href: "/projects",
       tone: "brand",
-      trendPct: from ? trendPct(total, prevTotal) : null,
-      sparkline: sparklineByMonth(allProjects),
-      progress: 100,
     }),
     kpi({
       key: "active",
@@ -300,8 +258,6 @@ export function computeManagerMetrics(input: {
       description: "در حال جریان کاری",
       href: "/projects",
       tone: "info",
-      trendPct: from ? trendPct(active, prevActive) : null,
-      progress: total ? Math.round((active / total) * 100) : 0,
     }),
     kpi({
       key: "completed",
@@ -309,8 +265,6 @@ export function computeManagerMetrics(input: {
       value: completed,
       description: "پروژه‌های پایان‌یافته",
       tone: "success",
-      trendPct: from ? trendPct(completed, prevCompleted) : null,
-      progress: total ? Math.round((completed / total) * 100) : 0,
     }),
     kpi({
       key: "waiting_customer",
@@ -318,7 +272,6 @@ export function computeManagerMetrics(input: {
       value: waitingCustomer,
       description: "تأیید محتوا یا نهایی",
       tone: "warning",
-      progress: total ? Math.round((waitingCustomer / total) * 100) : 0,
     }),
     kpi({
       key: "waiting_approval",
@@ -326,7 +279,6 @@ export function computeManagerMetrics(input: {
       value: waitingApproval,
       description: "نیاز به اقدام مدیر",
       tone: "warning",
-      progress: total ? Math.round((waitingApproval / total) * 100) : 0,
     }),
   ];
 
@@ -380,11 +332,6 @@ export function computeManagerMetrics(input: {
     monthStart,
     endOfDay(now),
   );
-  const prevMonthlyRevenueSum = revenueInWindow(
-    allProjects,
-    lastMonthStart,
-    lastMonthEnd,
-  );
 
   let hasFinance = currentFin.any || monthlyRevenueSum > 0;
   if (!hasFinance) {
@@ -394,24 +341,6 @@ export function computeManagerMetrics(input: {
     });
   }
 
-  const rollingFrom = startOfDay(new Date(now.getTime() - 29 * 86400000));
-  const rollingPrevTo = new Date(rollingFrom.getTime() - 1);
-  const rollingPrevFrom = new Date(rollingPrevTo.getTime() - 29 * 86400000);
-  const rollingProjects = allProjects.filter(
-    (p) =>
-      inRange(p.createdAt, rollingFrom, endOfDay(now)) ||
-      inRange(p.updatedAt, rollingFrom, endOfDay(now)),
-  );
-  const rollingPrevProjects = allProjects.filter(
-    (p) =>
-      inRange(p.createdAt, rollingPrevFrom, rollingPrevTo) ||
-      inRange(p.updatedAt, rollingPrevFrom, rollingPrevTo),
-  );
-  const rollingFin = sumFinance(from || to ? scoped : rollingProjects);
-  const rollingPrevFin = sumFinance(
-    from || to ? prevScoped : rollingPrevProjects,
-  );
-
   const financeCards: KpiMetric[] = [
     kpi({
       key: "total_revenue",
@@ -420,9 +349,6 @@ export function computeManagerMetrics(input: {
       description: "جمع مبلغ توافق‌شده پروژه‌ها",
       format: "currency",
       tone: "brand",
-      trendPct: trendPct(rollingFin.totalRevenue, rollingPrevFin.totalRevenue),
-      sparkline: financeSparkline(allProjects),
-      progress: 100,
     }),
     kpi({
       key: "monthly_revenue",
@@ -431,15 +357,6 @@ export function computeManagerMetrics(input: {
       description: "نسبت به ماه گذشته",
       format: "currency",
       tone: "success",
-      trendPct: trendPct(monthlyRevenueSum, prevMonthlyRevenueSum),
-      progress:
-        monthlyRevenueSum + prevMonthlyRevenueSum > 0
-          ? Math.round(
-              (monthlyRevenueSum /
-                (monthlyRevenueSum + prevMonthlyRevenueSum)) *
-                100,
-            )
-          : 0,
     }),
     kpi({
       key: "received",
@@ -448,14 +365,6 @@ export function computeManagerMetrics(input: {
       description: "مبالغ وصول‌شده از مشتریان",
       format: "currency",
       tone: "info",
-      trendPct: trendPct(rollingFin.received, rollingPrevFin.received),
-      progress:
-        currentFin.totalRevenue > 0
-          ? Math.min(
-              100,
-              Math.round((currentFin.received / currentFin.totalRevenue) * 100),
-            )
-          : 0,
     }),
     kpi({
       key: "outstanding",
@@ -464,16 +373,6 @@ export function computeManagerMetrics(input: {
       description: "مانده قابل وصول",
       format: "currency",
       tone: "warning",
-      trendPct: trendPct(rollingFin.outstanding, rollingPrevFin.outstanding),
-      progress:
-        currentFin.totalRevenue > 0
-          ? Math.min(
-              100,
-              Math.round(
-                (currentFin.outstanding / currentFin.totalRevenue) * 100,
-              ),
-            )
-          : 0,
     }),
     kpi({
       key: "expenses",
@@ -482,14 +381,22 @@ export function computeManagerMetrics(input: {
       description: "هزینه ادیت، نریشن و مستقیم",
       format: "currency",
       tone: "danger",
-      trendPct: trendPct(rollingFin.expenses, rollingPrevFin.expenses),
-      progress:
-        currentFin.totalRevenue > 0
-          ? Math.min(
-              100,
-              Math.round((currentFin.expenses / currentFin.totalRevenue) * 100),
-            )
-          : 0,
+    }),
+    kpi({
+      key: "narrator_cost",
+      label: "مجموع هزینه نریتور",
+      value: currentFin.narratorCost,
+      description: "پرداخت‌های مربوط به نریتورها",
+      format: "currency",
+      tone: "warning",
+    }),
+    kpi({
+      key: "editor_cost",
+      label: "مجموع هزینه ادیتور",
+      value: currentFin.editorCost,
+      description: "پرداخت‌های مربوط به ادیتورها",
+      format: "currency",
+      tone: "info",
     }),
     kpi({
       key: "net_profit",
@@ -498,17 +405,6 @@ export function computeManagerMetrics(input: {
       description: "درآمد منهای هزینه‌های مستقیم",
       format: "currency",
       tone: currentFin.profit >= 0 ? "success" : "danger",
-      trendPct: trendPct(rollingFin.profit, rollingPrevFin.profit),
-      progress:
-        currentFin.totalRevenue > 0
-          ? Math.min(
-              100,
-              Math.max(
-                0,
-                Math.round((currentFin.profit / currentFin.totalRevenue) * 100),
-              ),
-            )
-          : 0,
     }),
   ];
 

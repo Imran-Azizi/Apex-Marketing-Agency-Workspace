@@ -33,6 +33,11 @@ const userSelect = {
   fullName: true,
   phone: true,
   profileImage: true,
+  cvStorageKey: true,
+  cvFileName: true,
+  cvMimeType: true,
+  cvSizeBytes: true,
+  cvUploadedAt: true,
   isActive: true,
   lastLoginAt: true,
   createdAt: true,
@@ -48,6 +53,14 @@ const userSelect = {
   },
 };
 
+const cvFieldsSchema = {
+  cvStorageKey: z.string().optional().nullable(),
+  cvFileName: z.string().optional().nullable(),
+  cvMimeType: z.string().optional().nullable(),
+  cvSizeBytes: z.number().int().nonnegative().optional().nullable(),
+  cvUploadedAt: z.union([z.string(), z.date()]).optional().nullable(),
+};
+
 export const createEmployeeSchema = z.object({
   fullName: z.string().min(2, "نام باید حداقل ۲ حرف باشد"),
   email: z.string().email("ایمیل معتبر وارد کنید"),
@@ -56,6 +69,7 @@ export const createEmployeeSchema = z.object({
   role: z.enum(EMPLOYEE_ROLES),
   profileImage: z.string().optional().nullable(),
   isActive: z.boolean().optional().default(true),
+  ...cvFieldsSchema,
 });
 
 export const updateEmployeeSchema = z.object({
@@ -65,7 +79,34 @@ export const updateEmployeeSchema = z.object({
   role: z.enum(EMPLOYEE_ROLES).optional(),
   profileImage: z.string().optional().nullable(),
   isActive: z.boolean().optional(),
+  ...cvFieldsSchema,
 });
+
+function normalizeCvPayload(body) {
+  if (body.cvStorageKey === undefined) return {};
+  if (!body.cvStorageKey) {
+    return {
+      cvStorageKey: null,
+      cvFileName: null,
+      cvMimeType: null,
+      cvSizeBytes: null,
+      cvUploadedAt: null,
+    };
+  }
+  const uploadedAt = body.cvUploadedAt
+    ? new Date(body.cvUploadedAt)
+    : new Date();
+  return {
+    cvStorageKey: body.cvStorageKey,
+    cvFileName: body.cvFileName?.trim() || null,
+    cvMimeType: body.cvMimeType?.trim() || null,
+    cvSizeBytes:
+      body.cvSizeBytes != null && Number.isFinite(Number(body.cvSizeBytes))
+        ? Number(body.cvSizeBytes)
+        : null,
+    cvUploadedAt: Number.isNaN(uploadedAt.getTime()) ? new Date() : uploadedAt,
+  };
+}
 
 export const resetPasswordSchema = z.object({
   password: z.string().min(8, "رمز عبور باید حداقل ۸ کاراکتر باشد"),
@@ -206,6 +247,7 @@ export const employeesService = {
           fullName: body.fullName.trim(),
           phone: body.phone?.trim() || null,
           profileImage: body.profileImage || null,
+          ...normalizeCvPayload(body),
           passwordHash,
           isActive: body.isActive ?? true,
           roleId: role.id,
@@ -312,6 +354,7 @@ export const employeesService = {
           ...(body.profileImage !== undefined
             ? { profileImage: body.profileImage || null }
             : {}),
+          ...(body.cvStorageKey !== undefined ? normalizeCvPayload(body) : {}),
           ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
           roleId,
         },

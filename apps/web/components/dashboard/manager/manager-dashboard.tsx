@@ -10,8 +10,10 @@ import {
   CheckCircle2,
   Clock3,
   CircleDot,
+  Clapperboard,
   FolderKanban,
   LayoutDashboard,
+  Mic2,
   PiggyBank,
   Receipt,
   TrendingUp,
@@ -26,6 +28,7 @@ import {
 } from "@/lib/project-status";
 import { resolveCurrentStageLabel } from "@/lib/project-progress";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -64,6 +67,8 @@ const FINANCE_ICONS: LucideIcon[] = [
   Banknote,
   Receipt,
   Activity,
+  Mic2,
+  Clapperboard,
   PiggyBank,
 ];
 
@@ -75,13 +80,45 @@ const PROJECT_KPI_ICONS: LucideIcon[] = [
   CircleDot,
 ];
 
-function useNowClock() {
+/**
+ * Isolated live clock — ticks every second without re-rendering the dashboard tree.
+ * Uses the shared 12-hour formatter (ق.ظ./ب.ظ.) and the browser/system timezone.
+ */
+function LiveClock({ className }: { className?: string }) {
   const [now, setNow] = useState(() => new Date());
+
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 30_000);
-    return () => clearInterval(id);
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+    const tick = () => setNow(new Date());
+
+    // Align to the next whole second so display stays in sync
+    const delay = 1000 - (Date.now() % 1000);
+    const timeoutId = setTimeout(() => {
+      tick();
+      intervalId = setInterval(tick, 1000);
+    }, delay);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (intervalId) clearInterval(intervalId);
+    };
   }, []);
-  return now;
+
+  return (
+    <p className={className} suppressHydrationWarning>
+      <span>{formatDate(now)}</span>
+      <span className="mx-1.5 text-muted-foreground/40" aria-hidden>
+        ·
+      </span>
+      <time
+        dateTime={now.toISOString()}
+        dir="ltr"
+        className="inline-block tabular-nums tracking-tight [unicode-bidi:isolate]"
+      >
+        {formatTime(now)}
+      </time>
+    </p>
+  );
 }
 
 function DateFilters({
@@ -164,7 +201,6 @@ function DateFilters({
 }
 
 export function ManagerDashboard() {
-  const now = useNowClock();
   const [range, setRange] = useState<DateRange>({
     preset: "all",
     from: null,
@@ -242,9 +278,7 @@ export function ManagerDashboard() {
             <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-[1.75rem]">
               خوش آمدید، {managerName}
             </h1>
-            <p className="text-sm text-muted-foreground">
-              {formatDate(now)} · {formatTime(now)}
-            </p>
+            <LiveClock className="text-sm text-muted-foreground" />
           </div>
           <DateFilters range={range} onChange={setRange} />
         </div>
@@ -255,9 +289,9 @@ export function ManagerDashboard() {
           title="نمای مالی"
           description="خلاصه اجرایی درآمد، دریافت و سود"
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-[140px] rounded-2xl" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-[132px] rounded-2xl" />
             ))}
           </div>
         </SectionShell>
@@ -267,7 +301,7 @@ export function ManagerDashboard() {
           description="خلاصه اجرایی درآمد، دریافت و سود — فقط پرداخت‌های تأییدشده"
           className="border-brand/15 bg-gradient-to-bl from-brand/[0.06] via-card to-card"
         >
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {metrics.finance.cards.map((card, i) => (
               <KpiCard
                 key={card.key}
@@ -335,8 +369,8 @@ export function ManagerDashboard() {
         ) : metrics.recentProjects.length === 0 ? (
           <EmptyInline message="پروژه‌ای در این بازه یافت نشد." />
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-border/60">
-            <Table>
+          <HorizontalScroll className="rounded-xl border-border/60">
+            <Table className="min-w-[56rem]">
               <TableHeader>
                 <TableRow>
                   <TableHead>پروژه</TableHead>
@@ -427,7 +461,7 @@ export function ManagerDashboard() {
                 })}
               </TableBody>
             </Table>
-          </div>
+          </HorizontalScroll>
         )}
       </SectionShell>
     </div>

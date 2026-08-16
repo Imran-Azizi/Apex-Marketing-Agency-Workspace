@@ -25,7 +25,7 @@ export function PublicSection({
       id={id}
       className={cn(
         "scroll-mt-20 border-t border-border/50",
-        tone === "muted" ? "bg-muted/30" : "bg-background",
+        tone === "muted" ? "bg-muted/20" : "bg-transparent",
         className,
       )}
     >

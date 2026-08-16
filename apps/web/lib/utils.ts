@@ -27,33 +27,71 @@ export function toEnglishDigits(value: string): string {
 /** Locale options that keep Dari/Pashto formatting but force Latin digits. */
 const FA_LATN = { numberingSystem: "latn" as const };
 
-export function formatDate(date: string | Date) {
-  return new Intl.DateTimeFormat("fa-AF", {
-    ...FA_LATN,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(new Date(date));
+/** App UI language for date/time presentation. */
+export type DateTimeLocale = "fa" | "en";
+
+function resolveDateTimeLocale(locale: DateTimeLocale = "fa") {
+  return locale === "en" ? "en-US" : "fa-AF";
 }
 
-export function formatTime(date: string | Date) {
-  return new Intl.DateTimeFormat("fa-AF", {
-    ...FA_LATN,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(new Date(date));
+/** Shared 12-hour clock options (Dari: ق.ظ./ب.ظ. · English: AM/PM). */
+const TIME_12H = {
+  hour: "numeric" as const,
+  minute: "2-digit" as const,
+  hour12: true as const,
+};
+
+function withLocaleOptions(
+  locale: DateTimeLocale,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormatOptions {
+  return locale === "fa" ? { ...FA_LATN, ...options } : options;
 }
 
-export function formatDateTime(date: string | Date) {
-  return new Intl.DateTimeFormat("fa-AF", {
-    ...FA_LATN,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(date));
+export function formatDate(date: string | Date, locale: DateTimeLocale = "fa") {
+  return new Intl.DateTimeFormat(
+    resolveDateTimeLocale(locale),
+    withLocaleOptions(locale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }),
+  ).format(new Date(date));
+}
+
+/**
+ * 12-hour time with localized day period.
+ * Dari/Persian (fa-AF): e.g. 3:30:05 ب.ظ.
+ * English (en-US): e.g. 3:30:05 PM
+ */
+export function formatTime(date: string | Date, locale: DateTimeLocale = "fa") {
+  return new Intl.DateTimeFormat(
+    resolveDateTimeLocale(locale),
+    withLocaleOptions(locale, {
+      ...TIME_12H,
+      second: "2-digit",
+    }),
+  ).format(new Date(date));
+}
+
+/**
+ * Date + 12-hour time with localized day period.
+ * Dari/Persian (fa-AF): e.g. ۶ اسد ۱۴۰۵، 3:30 ب.ظ.
+ * English (en-US): e.g. Aug 6, 2026, 3:30 PM
+ */
+export function formatDateTime(
+  date: string | Date,
+  locale: DateTimeLocale = "fa",
+) {
+  return new Intl.DateTimeFormat(
+    resolveDateTimeLocale(locale),
+    withLocaleOptions(locale, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      ...TIME_12H,
+    }),
+  ).format(new Date(date));
 }
 
 export function formatCurrency(amount: number) {

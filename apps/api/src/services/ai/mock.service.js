@@ -76,59 +76,85 @@ export function mockOutput(agentType, input) {
           scenes: [
             {
               scene_number: 1,
+              title: 'Product Hook',
               duration: '5s',
               visual: 'Premium product close-up that establishes the problem hook',
               camera: 'Close-up',
               action: 'Product hero reveal',
               transition: 'Cut',
+              visualDirection: 'Luxury soft light, dark charcoal backdrop, gold accents',
+              imagePrompt:
+                'Cinematic close-up of premium product, soft light, advertising still, consistent brand look',
             },
             {
               scene_number: 2,
+              title: 'Benefit Demo',
               duration: '15s',
               visual: 'Benefit montage showing solution in action',
               camera: 'Medium',
               action: 'Lifestyle benefit demo',
               transition: 'Match cut',
+              visualDirection: 'Warm lifestyle lighting, modern environment, brand product visible',
+              imagePrompt:
+                'Lifestyle usage scene with product, vibrant colors, commercial photography, same brand style',
             },
             {
               scene_number: 3,
+              title: 'CTA End Card',
               duration: '10s',
               visual: 'End card with clear CTA and brand lockup',
               camera: 'Wide end-card',
               action: 'Logo + CTA',
               transition: 'Fade out',
+              visualDirection: 'Clean end-card composition, brand colors, high contrast CTA',
+              imagePrompt:
+                'Brand logo end card with clear CTA, clean composition, premium advertising style',
             },
           ],
           storyboard: [
             {
               sceneNumber: 1,
+              title: 'Product Hook',
               duration: '5s',
               cameraAngle: 'Close-up',
               characterActions: 'Product hero reveal',
               visualDescription:
                 'Premium product close-up that establishes the problem hook',
+              visualDirection: 'Luxury soft light, dark charcoal backdrop, gold accents',
               transition: 'Cut',
               shot: 1,
+              imagePrompt:
+                'Cinematic close-up of premium product, soft light, advertising still, consistent brand look',
             },
             {
               sceneNumber: 2,
+              title: 'Benefit Demo',
               duration: '15s',
               cameraAngle: 'Medium',
               characterActions: 'Lifestyle benefit demo',
               visualDescription: 'Benefit montage showing solution in action',
+              visualDirection: 'Warm lifestyle lighting, modern environment, brand product visible',
               transition: 'Match cut',
               shot: 2,
+              imagePrompt:
+                'Lifestyle usage scene with product, vibrant colors, commercial photography, same brand style',
             },
             {
               sceneNumber: 3,
+              title: 'CTA End Card',
               duration: '10s',
               cameraAngle: 'Wide end-card',
               characterActions: 'Logo + CTA',
               visualDescription: 'End card with clear CTA and brand lockup',
+              visualDirection: 'Clean end-card composition, brand colors, high contrast CTA',
               transition: 'Fade out',
               shot: 3,
+              imagePrompt:
+                'Brand logo end card with clear CTA, clean composition, premium advertising style',
             },
           ],
+          visualStyleGuide:
+            'Premium cinematic advertising stills, consistent brand product look, charcoal and gold palette',
           imagePrompts: [
             'Cinematic close-up of product, soft light, premium look, 8k, advertising still',
             'Lifestyle usage scene, vibrant colors, natural smile, commercial photography',

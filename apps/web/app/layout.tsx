@@ -9,6 +9,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "اپیکس ورک‌اسپیس",
   description: "سیستم مدیریت مشتری، پورتال، پروژه‌ها و هوش مصنوعی",
+  icons: {
+    icon: [{ url: "/brand/apex-logo.png", type: "image/png" }],
+    apple: [{ url: "/brand/apex-logo.png", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

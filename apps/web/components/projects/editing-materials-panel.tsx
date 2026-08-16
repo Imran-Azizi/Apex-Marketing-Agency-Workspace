@@ -5,9 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   Building2,
-  ChevronDown,
   Clapperboard,
-  Download,
   FolderOpen,
   Mic2,
   Sparkles,
@@ -17,6 +15,7 @@ import {
 import {
   NarrationFinalView,
   ScenarioFinalView,
+  StoryboardFinalView,
 } from "@/components/projects/ai-content-views";
 import {
   ProjectInfoTabContent,
@@ -25,7 +24,6 @@ import {
 } from "@/components/projects/project-customer-overview";
 import { ProjectSectionShell } from "@/components/projects/project-data-sections";
 import { type PortalProjectAsset } from "@/components/portal/portal-project-assets";
-import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -39,8 +37,16 @@ import {
   getCustomTabTriggerClass,
 } from "@/components/shared/tab-styles";
 import { apiGet } from "@/lib/api";
-import { filePreviewUrl, formatFileSize } from "@/lib/upload";
-import { cn, formatDate } from "@/lib/utils";
+import {
+  downloadMediaFile,
+  downloadStoredFile,
+} from "@/lib/upload";
+import { cn } from "@/lib/utils";
+import {
+  NarrationAudioVersions,
+  type NarrationTakeRecord,
+} from "@/components/narration/narration-audio-versions";
+import { toast } from "sonner";
 
 export type EditingMaterialsData = {
   brief?: unknown;
@@ -71,6 +77,25 @@ export type EditingMaterialsData = {
     createdAt?: string;
     version?: number;
   }>;
+  narrationAudio?: {
+    approvedAt?: string | null;
+    approvedFileId?: string | null;
+    takes?: Array<{
+      id: string;
+      version: number;
+      createdAt: string;
+      isCurrent?: boolean;
+      audioFile?: {
+        id: string;
+        name: string;
+        storageKey: string;
+        mimeType?: string | null;
+        sizeBytes?: number | null;
+        version?: number | null;
+        createdAt: string;
+      } | null;
+    }>;
+  } | null;
   customerFeedback?: Array<{
     id: string;
     scope: string;
@@ -79,7 +104,7 @@ export type EditingMaterialsData = {
   }>;
 };
 
-export type ProductionWorkspaceTab = "customer" | "ai" | "final";
+export type ProductionWorkspaceTab = "customer" | "ai" | "narration" | "final";
 
 export const PRODUCTION_WORKSPACE_TABS: Array<{
   id: ProductionWorkspaceTab;
@@ -88,6 +113,7 @@ export const PRODUCTION_WORKSPACE_TABS: Array<{
 }> = [
   { id: "customer", label: "اطلاعات مشتری", shortLabel: "مشتری" },
   { id: "ai", label: "تولید شده هوش مصنوعی", shortLabel: "AI" },
+  { id: "narration", label: "فایل صوتی نریشن", shortLabel: "نریشن" },
   { id: "final", label: "محصول نهایی", shortLabel: "نهایی" },
 ];
 
@@ -109,6 +135,18 @@ type ProjectSummary = {
   videoRevisionUsed: number;
   videoRevisionMax: number;
   extraVideoRevision: boolean;
+  language?: string | null;
+  tone?: string | null;
+  durationSec?: number | null;
+  platforms?: unknown;
+  brief?: unknown;
+  format?: { id: string; name: string; ratio: string } | null;
+  service?: { id: string; name: string } | null;
+  crmCustomer?: ProjectCustomerOverviewData["crmCustomer"] | null;
+  assignments?: Array<{
+    role: string;
+    teamProfile?: { displayName: string } | null;
+  }>;
 };
 
 type TaskSummary = {
@@ -123,15 +161,12 @@ type MaterialsCtx = {
   materials: EditingMaterialsData;
   project: ProjectSummary;
   task?: TaskSummary | null;
+  roleCode?: string | null;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
-}
-
-function faNum(n: number) {
-  return n.toLocaleString("fa-AF", { numberingSystem: "latn" });
 }
 
 function extractScenes(storyboard: unknown) {
@@ -143,7 +178,12 @@ function extractScenes(storyboard: unknown) {
       : Array.isArray(storyboard)
         ? storyboard
         : [];
-  return scenes as Array<Record<string, unknown>>;
+  const list = scenes as Array<Record<string, unknown>>;
+  return [...list].sort((a, b) => {
+    const aNo = Number(a.sceneNumber ?? a.scene_number ?? a.shot ?? 0);
+    const bNo = Number(b.sceneNumber ?? b.scene_number ?? b.shot ?? 0);
+    return aNo - bNo;
+  });
 }
 
 function storyboardSceneCount(storyboard: unknown): number {
@@ -169,13 +209,16 @@ function useMaterialsDerived({ materials }: MaterialsCtx) {
   );
 
   const voiceFiles = materials.voiceFiles || [];
+  const narrationTakes = materials.narrationAudio?.takes || [];
   const scenes = storyboardSceneCount(materials.approvedContent?.storyboard);
 
   return {
     assets,
     voiceFiles,
+    narrationTakes,
     scenes,
     hasNarration: !!materials.approvedContent?.narration,
+    hasNarrationAudio: narrationTakes.length > 0 || voiceFiles.length > 0,
     hasScenario: !!materials.approvedContent?.scenario,
   };
 }
@@ -185,6 +228,10 @@ export function getProductionTabBadges(
   extras?: { finalCount?: number },
 ): Partial<Record<ProductionWorkspaceTab, number>> {
   const assets = ctx.materials.clientAssets?.length || 0;
+  const narrationAudioCount =
+    ctx.materials.narrationAudio?.takes?.length ||
+    ctx.materials.voiceFiles?.length ||
+    0;
   const scenes = storyboardSceneCount(
     ctx.materials.approvedContent?.storyboard,
   );
@@ -196,6 +243,7 @@ export function getProductionTabBadges(
   return {
     customer: assets || undefined,
     ai: aiCount || undefined,
+    narration: narrationAudioCount || undefined,
     final: finalCount || undefined,
   };
 }
@@ -281,155 +329,93 @@ function SectionCard({
   );
 }
 
-function VoiceFileCard({
-  file,
-}: {
-  file: NonNullable<EditingMaterialsData["voiceFiles"]>[number];
-}) {
-  const url = file.storageKey ? filePreviewUrl(file.storageKey) : null;
-  return (
-    <article
-      dir="rtl"
-      className="rounded-2xl border border-border/60 bg-gradient-to-b from-background to-sky-50/40 p-4 text-start shadow-sm dark:to-sky-950/20"
-    >
-      <div className="flex items-start gap-3">
-        <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
-          <Mic2 className="h-5 w-5" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1 space-y-3">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold" title={file.name}>
-                <bdi>{file.name}</bdi>
-              </p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                <bdi dir="ltr">{formatFileSize(file.sizeBytes)}</bdi>
-                {file.createdAt ? ` · ${formatDate(file.createdAt)}` : ""}
-                {file.version != null ? ` · نسخه ${faNum(file.version)}` : ""}
-              </p>
-            </div>
-            {url ? (
-              <Button variant="outline" size="sm" className="gap-1.5" asChild>
-                <a
-                  href={url}
-                  download={file.name}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  دانلود
-                </a>
-              </Button>
-            ) : null}
-          </div>
-          {url ? (
-            <div dir="ltr" className="w-full">
-              <audio
-                controls
-                preload="metadata"
-                className="h-10 w-full"
-                src={url}
-                aria-label={`پخش ${file.name}`}
-              >
-                مرورگر شما از پخش صوت پشتیبانی نمی‌کند.
-              </audio>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              پیش‌نمایش در دسترس نیست
-            </p>
-          )}
-        </div>
-      </div>
-    </article>
-  );
+function buildNarrationTakeRecords(ctx: MaterialsCtx): NarrationTakeRecord[] {
+  const { materials } = ctx;
+  if (materials.narrationAudio?.takes?.length) {
+    const approvedId = materials.narrationAudio.approvedFileId;
+    const approved = materials.narrationAudio.takes.filter(
+      (take) =>
+        take.isCurrent ||
+        (approvedId != null && take.audioFile?.id === approvedId),
+    );
+    const source = approved.length
+      ? approved
+      : materials.narrationAudio.takes.slice(-1);
+    return source.map((take) => ({
+      id: take.id,
+      version: take.version,
+      createdAt: take.createdAt,
+      isCurrent: true,
+      audioFile: take.audioFile ?? undefined,
+    }));
+  }
+
+  const voiceFiles = materials.voiceFiles || [];
+  if (!voiceFiles.length) return [];
+
+  // Fallback: production API already scopes voiceFiles to the approved take.
+  const file = voiceFiles[voiceFiles.length - 1];
+  return [
+    {
+      id: file.id,
+      version: file.version ?? 1,
+      createdAt: file.createdAt || new Date().toISOString(),
+      isCurrent: true,
+      audioFile: {
+        id: file.id,
+        name: file.name,
+        storageKey: file.storageKey || "",
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        version: file.version,
+        createdAt: file.createdAt || new Date().toISOString(),
+      },
+    },
+  ];
 }
 
-function SceneCard({
-  scene,
-  index,
-  defaultOpen,
-}: {
-  scene: Record<string, unknown>;
-  index: number;
-  defaultOpen: boolean;
+async function downloadNarrationAudioFile(file: {
+  id: string;
+  name: string;
+  storageKey: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const sceneNo = Number(
-    scene.sceneNumber ?? scene.scene_number ?? scene.shot ?? index + 1,
-  );
-  const camera = String(scene.camera || scene.cameraAngle || "").trim() || null;
-  const action =
-    String(
-      scene.characterActions || scene.action || scene.motion || "",
-    ).trim() || null;
-  const visual = String(
-    scene.visualDescription || scene.visual || scene.notes || "",
-  ).trim();
-  const dialogue =
-    String(scene.dialogue || scene.voiceover || "").trim() || null;
-  const voice = String(scene.voice || scene.narration || "").trim() || null;
-  const notes = String(scene.editingNotes || scene.notes || "").trim() || null;
-  const transition = String(scene.transition || "").trim() || null;
-  const duration = scene.duration != null ? String(scene.duration) : null;
+  if (file.storageKey) {
+    await downloadStoredFile(file.storageKey, file.name);
+  } else {
+    await downloadMediaFile(file.id, file.name);
+  }
+}
 
-  const fields = [
-    { label: "توضیح بصری", value: visual },
-    { label: "دوربین", value: camera },
-    { label: "حرکت / اکشن", value: action },
-    { label: "صدا", value: voice },
-    { label: "دیالوگ", value: dialogue },
-    { label: "انتقال", value: transition },
-    { label: "مدت", value: duration },
-    { label: "یادداشت", value: notes },
-  ].filter((f) => f.value);
+export function NarrationAudioMaterialsSection({ ctx }: { ctx: MaterialsCtx }) {
+  const takes = useMemo(() => buildNarrationTakeRecords(ctx), [ctx]);
+  const currentFileId =
+    ctx.materials.narrationAudio?.approvedFileId ??
+    takes.find((take) => take.isCurrent)?.audioFile?.id ??
+    takes[0]?.audioFile?.id;
+
+  if (!takes.length) return null;
 
   return (
-    <article
-      dir="rtl"
-      className="overflow-hidden rounded-xl border border-border/60 bg-card text-start"
-    >
-      <button
-        type="button"
-        className="flex w-full items-center gap-3 px-3.5 py-3 text-start transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-semibold tabular-nums">
-          {faNum(sceneNo)}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">صحنه {faNum(sceneNo)}</p>
-          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-            {visual || "بدون توضیح بصری"}
-            {duration ? ` · ${duration}` : ""}
-          </p>
-        </div>
-        <ChevronDown
-          className={cn(
-            "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-180",
-          )}
-        />
-      </button>
-      {open ? (
-        <div className="space-y-3 border-t border-border/50 px-3.5 py-3.5">
-          {fields.map((f) => (
-            <div key={f.label} className="text-start">
-              <p className="text-[11px] text-muted-foreground">{f.label}</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-7">
-                {f.value}
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </article>
+    <NarrationAudioVersions
+      takes={takes}
+      currentFileId={currentFileId}
+      emptyMessage="هنوز فایل صوتی نریشن برای این پروژه موجود نیست."
+      onDownload={async (file) => {
+        try {
+          await downloadNarrationAudioFile(file);
+          toast.success("فایل صوتی با موفقیت دانلود شد");
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "دانلود ناموفق بود");
+          throw e;
+        }
+      }}
+    />
   );
 }
 
 export function StoryboardTab(ctx: MaterialsCtx) {
-  const scenes = extractScenes(ctx.materials.approvedContent?.storyboard);
+  const storyboard = ctx.materials.approvedContent?.storyboard;
+  const scenes = extractScenes(storyboard);
 
   if (!scenes.length) {
     return (
@@ -442,12 +428,10 @@ export function StoryboardTab(ctx: MaterialsCtx) {
 
   return (
     <div
-      className="max-h-[min(42rem,72vh)] space-y-2 overflow-y-auto overscroll-contain"
+      className="max-h-[min(48rem,78vh)] space-y-3 overflow-y-auto overscroll-contain pe-1"
       dir="rtl"
     >
-      {scenes.map((scene, i) => (
-        <SceneCard key={i} scene={scene} index={i} defaultOpen={i === 0} />
-      ))}
+      <StoryboardFinalView value={storyboard} dir="rtl" />
     </div>
   );
 }
@@ -528,7 +512,7 @@ function assetsFromRefs(
 }
 
 function buildCustomerOverview(ctx: MaterialsCtx): ProjectCustomerOverviewData {
-  const brief = asRecord(ctx.materials.brief);
+  const brief = asRecord(ctx.materials.brief) || asRecord(ctx.project.brief);
   const assets = (ctx.materials.clientAssets || []).filter(Boolean).map(
     (a): PortalProjectAsset => ({
       id: a.id,
@@ -542,6 +526,8 @@ function buildCustomerOverview(ctx: MaterialsCtx): ProjectCustomerOverviewData {
     }),
   );
 
+  const crm = ctx.project.crmCustomer || null;
+
   return {
     id: ctx.project.id || "",
     code: ctx.project.code || "",
@@ -549,20 +535,28 @@ function buildCustomerOverview(ctx: MaterialsCtx): ProjectCustomerOverviewData {
     status: ctx.project.status,
     customerFacingStatus: "",
     deadlineAt: null,
-    language: briefString(brief, "language") || null,
-    tone: briefString(brief, "tone") || null,
-    durationSec: briefNumber(brief, "durationSec"),
-    platforms: brief?.platforms,
-    brief,
+    language: ctx.project.language || briefString(brief, "language") || null,
+    tone: ctx.project.tone || briefString(brief, "tone") || null,
+    durationSec:
+      ctx.project.durationSec ?? briefNumber(brief, "durationSec"),
+    platforms: ctx.project.platforms || brief?.platforms,
+    brief: (ctx.project.brief as Record<string, unknown> | null) ?? brief,
+    format: ctx.project.format,
+    service: ctx.project.service || null,
+    assignments: ctx.project.assignments,
     crmCustomer: {
-      personName: briefString(brief, "personName"),
-      companyName: briefString(brief, "companyName") || null,
-      jobTitle: briefString(brief, "jobTitle") || null,
-      phone: briefString(brief, "phone") || null,
-      email: briefString(brief, "email") || null,
-      address: briefString(brief, "address") || null,
-      city: briefString(brief, "city") || null,
-      notes: briefString(brief, "notes") || null,
+      id: crm?.id,
+      personName: crm?.personName || briefString(brief, "personName"),
+      companyName:
+        crm?.companyName || briefString(brief, "companyName") || null,
+      jobTitle: crm?.jobTitle || briefString(brief, "jobTitle") || null,
+      phone: crm?.phone || briefString(brief, "phone") || null,
+      email: crm?.email || briefString(brief, "email") || null,
+      address: crm?.address || briefString(brief, "address") || null,
+      city: crm?.city || briefString(brief, "city") || null,
+      normalizedWhatsapp: crm?.normalizedWhatsapp || null,
+      whatsappRaw: crm?.whatsappRaw || null,
+      notes: crm?.notes || briefString(brief, "notes") || null,
     },
     assets,
   };
@@ -646,11 +640,13 @@ function CustomerInfoSubTabBar({
 export function CustomerInfoTab(ctx: MaterialsCtx) {
   const [infoTab, setInfoTab] = useState<ProjectInfoTabId>("customer");
   const projectId = ctx.project.id;
+  const canFetchProjectDetail =
+    Boolean(projectId) && ctx.roleCode !== "EDITOR";
 
   const projectQ = useQuery({
     queryKey: ["project", projectId],
     queryFn: () => apiGet<ProductionProjectDetail>(`/projects/${projectId}`),
-    enabled: Boolean(projectId),
+    enabled: canFetchProjectDetail,
     retry: false,
     staleTime: 60_000,
   });
@@ -687,6 +683,8 @@ export function CustomerInfoTab(ctx: MaterialsCtx) {
     };
   }, [projectQ.data, materialsOverview]);
 
+  const showLoading = canFetchProjectDetail && projectQ.isLoading && !projectQ.data;
+
   return (
     <div className="space-y-4 text-start" dir="rtl">
       <ProjectSectionShell
@@ -701,7 +699,7 @@ export function CustomerInfoTab(ctx: MaterialsCtx) {
           role="tabpanel"
           className="min-w-0 animate-fade-slide"
         >
-          {projectQ.isLoading && !projectQ.data ? (
+          {showLoading ? (
             <div className="space-y-3" aria-busy="true">
               <Skeleton className="h-40 w-full rounded-2xl" />
               <Skeleton className="h-28 w-full rounded-2xl" />
@@ -819,6 +817,33 @@ export function AIGeneratedContentTab(ctx: MaterialsCtx) {
         ) : null}
         {section === "storyboard" ? <StoryboardTab {...ctx} /> : null}
       </div>
+    </div>
+  );
+}
+
+export function NarrationAudioTab(ctx: MaterialsCtx) {
+  const takes = useMemo(() => buildNarrationTakeRecords(ctx), [ctx]);
+
+  if (!takes.length) {
+    return (
+      <EmptyMaterial
+        icon={Mic2}
+        message="هنوز فایل صوتی نریشن تأییدشده‌ای برای این پروژه موجود نیست. پس از تأیید نریشن توسط مدیر، فایل‌ها اینجا نمایش داده می‌شوند."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4 text-start" dir="rtl">
+      <ProjectSectionShell
+        tone="apex"
+        title="فایل صوتی نریشن"
+        badge="تأییدشده توسط مدیر"
+      >
+        <div className="p-4 sm:p-5">
+          <NarrationAudioMaterialsSection ctx={ctx} />
+        </div>
+      </ProjectSectionShell>
     </div>
   );
 }
