@@ -57,6 +57,7 @@ export async function createNotificationOnce(
         title,
         body,
         link,
+        isRead: false,
         meta: { ...meta, eventKey },
       },
     });
@@ -767,8 +768,55 @@ export function buildEditingCompletedNotification({
   };
 }
 
+export function buildContactMessageNotification({
+  messageId,
+  name,
+  subject,
+  createdAt = new Date(),
+}) {
+  const when = formatFaDateTime(createdAt);
+  return {
+    eventKey: `contact.submitted:${messageId}`,
+    title: "پیام تماس جدید",
+    body: [
+      `فرستنده: ${name}`,
+      subject ? `موضوع: ${subject}` : null,
+      `تاریخ: ${when}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    link: `/manager/messages?id=${messageId}`,
+    meta: {
+      type: "CONTACT_MESSAGE",
+      messageId,
+      customerName: name,
+      statusLabel: "خوانده‌نشده",
+      createdAt: createdAt.toISOString(),
+    },
+  };
+}
+
 export function recipientWhere(auth) {
   return auth.audience === 'PORTAL'
     ? { portalAccountId: auth.portalAccountId }
     : { userId: auth.userId };
+}
+
+/** Parse an optional ISO timestamp used when marking viewed notifications as seen. */
+export function parseViewedBefore(value) {
+  if (value == null || value === '') return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Recipient-scoped filter for unseen (isRead = false) notifications.
+ * When `viewedBefore` is set, notifications created after that instant stay unseen.
+ */
+export function unseenWhere(auth, viewedBefore = null) {
+  const where = { ...recipientWhere(auth), isRead: false };
+  const cutoff =
+    viewedBefore instanceof Date ? parseViewedBefore(viewedBefore.toISOString()) : parseViewedBefore(viewedBefore);
+  if (cutoff) where.createdAt = { lte: cutoff };
+  return where;
 }

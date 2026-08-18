@@ -311,12 +311,12 @@ export const PERMISSION_CATALOG = [
       {
         code: "portfolio.publish",
         label: "انتشار",
-        description: "ارسال پروژه تکمیل‌شده به نمونه‌کارها",
+        description: "آپلود و ارسال پروژه تکمیل‌شده به نمونه‌کارها",
       },
       {
         code: "portfolio.edit",
         label: "ویرایش",
-        description: "ویرایش عنوان، توضیحات و وضعیت انتشار",
+        description: "ویرایش عنوان، کتگوری، مختلط، ترتیب و وضعیت انتشار",
       },
       {
         code: "portfolio.delete",
@@ -346,6 +346,74 @@ export const PERMISSION_CATALOG = [
         description: "ویرایش، ترتیب و انتشار خدمات",
       },
       { code: "services.delete", label: "حذف", description: "حذف نرم خدمت" },
+    ],
+  },
+  {
+    id: "hero",
+    label: "اسلایدها",
+    description: "مدیریت اسلایدشو وب‌سایت عمومی",
+    actions: [
+      {
+        code: "hero.view",
+        label: "مشاهده",
+        description: "مشاهده فهرست اسلایدها در پنل",
+      },
+      {
+        code: "hero.create",
+        label: "ایجاد",
+        description: "ایجاد اسلاید جدید و بارگذاری تصویر",
+      },
+      {
+        code: "hero.edit",
+        label: "ویرایش",
+        description: "ویرایش، ترتیب، انتشار و جایگزینی تصویر اسلاید",
+      },
+      { code: "hero.delete", label: "حذف", description: "حذف اسلاید" },
+    ],
+  },
+  {
+    id: "customers",
+    label: "مشتریان ما",
+    description: "مدیریت معرفی مشتریان وب‌سایت عمومی",
+    actions: [
+      {
+        code: "customers.view",
+        label: "مشاهده",
+        description: "مشاهده فهرست مشتریان در پنل",
+      },
+      {
+        code: "customers.create",
+        label: "ایجاد",
+        description: "ایجاد مشتری جدید و بارگذاری تصویر",
+      },
+      {
+        code: "customers.edit",
+        label: "ویرایش",
+        description: "ویرایش، ترتیب، انتشار و جایگزینی تصویر مشتری",
+      },
+      { code: "customers.delete", label: "حذف", description: "حذف مشتری" },
+    ],
+  },
+  {
+    id: "contact",
+    label: "پیام‌های تماس",
+    description: "مدیریت پیام‌های فرم تماس وب‌سایت عمومی",
+    actions: [
+      {
+        code: "contact.view",
+        label: "مشاهده",
+        description: "مشاهده صندوق پیام‌های تماس و شمارنده خوانده‌نشده",
+      },
+      {
+        code: "contact.edit",
+        label: "تغییر وضعیت",
+        description: "علامت‌گذاری پیام به‌عنوان خوانده‌شده یا خوانده‌نشده",
+      },
+      {
+        code: "contact.delete",
+        label: "حذف",
+        description: "حذف پیام تماس",
+      },
     ],
   },
   {
@@ -430,6 +498,12 @@ export const LEGACY_CODE_MAP = {
     "portfolio.edit",
     "portfolio.delete",
   ],
+  "customers:manage": [
+    "customers.view",
+    "customers.create",
+    "customers.edit",
+    "customers.delete",
+  ],
   "team:manage": [
     "employees.view",
     "employees.create",
@@ -462,6 +536,8 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "finance.create",
     "finance.edit",
     "finance.delete",
+    "contact.view",
+    "contact.edit",
   ],
   EDITOR: ["dashboard.view", "video.view", "video.edit", "video.upload"],
   NARRATOR: ["dashboard.view", "narration.view", "narration.upload"],

@@ -1,7 +1,14 @@
 import { Router } from 'express';
-import { ok } from '../../utils/response.js';
+import { ok, created } from '../../utils/response.js';
 import { prisma } from '../../db/prisma.js';
 import { buildWhatsappCta } from '../../services/whatsapp.js';
+import { requireCsrf } from '../../middleware/csrf.js';
+import { contactLimiter } from '../../middleware/rateLimit.js';
+import { validate } from '../../middleware/validate.js';
+import {
+  contactService,
+  submitContactSchema,
+} from '../contact/service.js';
 import {
   portfolioService,
   streamPortfolioVideo,
@@ -15,6 +22,15 @@ function cachePublic(seconds = 60) {
     next();
   };
 }
+
+router.get('/hero', cachePublic(30), async (req, res, next) => {
+  try {
+    const { heroService } = await import('../hero/service.js');
+    ok(res, await heroService.listPublic());
+  } catch (e) {
+    next(e);
+  }
+});
 
 router.get('/services', cachePublic(60), async (req, res, next) => {
   try {
@@ -48,26 +64,27 @@ router.get('/narrators', cachePublic(15), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get('/narrators/samples', cachePublic(120), async (req, res, next) => {
+router.get('/customers', cachePublic(30), async (req, res, next) => {
   try {
-    ok(res, await prisma.audioSample.findMany({
-      where: {
-        isPublished: true,
-        deletedAt: null,
-        teamProfile: ACTIVE_NARRATOR_WHERE,
-      },
-      include: {
-        teamProfile: {
-          select: { id: true, displayName: true, languages: true, gender: true, tone: true, status: true },
-        },
-      },
-    }));
-  } catch (e) { next(e); }
+    const { customersService } = await import('../customers/service.js');
+    ok(res, await customersService.listPublic());
+  } catch (e) {
+    next(e);
+  }
 });
 
-router.get('/portfolio', cachePublic(60), async (req, res, next) => {
+router.get('/portfolio/categories', cachePublic(30), async (req, res, next) => {
   try {
-    ok(res, await portfolioService.listPublic());
+    const { listCategoriesPublic } = await import('../portfolio/showcase.js');
+    ok(res, await listCategoriesPublic());
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/portfolio', cachePublic(30), async (req, res, next) => {
+  try {
+    ok(res, await portfolioService.listPublic(req.query || {}));
   } catch (e) {
     next(e);
   }
@@ -90,6 +107,28 @@ router.get('/portfolio/:slug', cachePublic(60), async (req, res, next) => {
     next(e);
   }
 });
+
+router.get('/contact-info', cachePublic(30), async (req, res, next) => {
+  try {
+    ok(res, await contactService.getPublicContactInfo());
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post(
+  '/contact',
+  contactLimiter,
+  requireCsrf,
+  validate(submitContactSchema),
+  async (req, res, next) => {
+    try {
+      created(res, await contactService.submit(req.body, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 router.get('/whatsapp-cta', cachePublic(60), async (req, res, next) => {
   try {

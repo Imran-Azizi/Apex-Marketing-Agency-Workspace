@@ -126,6 +126,8 @@ export const api = axios.create({
   baseURL: API_BASE,
   withCredentials: true,
   timeout: 20 * 60 * 1000,
+  maxBodyLength: Infinity,
+  maxContentLength: Infinity,
   headers: {
     "Content-Type": "application/json",
   },

@@ -10,6 +10,10 @@ export const UPLOAD_PURPOSE = {
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
   SERVICE_IMAGE: "service-image",
+  HERO_IMAGE: "hero-image",
+  CUSTOMER_IMAGE: "customer-image",
+  PORTFOLIO_VIDEO: "portfolio-video",
+  PORTFOLIO_THUMBNAIL: "portfolio-thumbnail",
   GENERIC: "generic",
 } as const;
 

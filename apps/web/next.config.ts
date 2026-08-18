@@ -30,6 +30,23 @@ const nextConfig: NextConfig = {
       "@radix-ui/react-slot",
     ],
   },
+  async redirects() {
+    return [
+      { source: "/narrators", destination: "/", permanent: true },
+    ];
+  },
+  async rewrites() {
+    return [
+      {
+        source: "/نمونه-کارها/:slug",
+        destination: "/portfolio/:slug",
+      },
+      {
+        source: "/%D9%86%D9%85%D9%88%D9%86%D9%87-%DA%A9%D8%A7%D8%B1%D9%87%D8%A7/:slug",
+        destination: "/portfolio/:slug",
+      },
+    ];
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     remotePatterns: [

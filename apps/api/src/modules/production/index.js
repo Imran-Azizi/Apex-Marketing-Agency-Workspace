@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
-import { requireInternal, requirePermission } from "../../middleware/rbac.js";
+import { requireInternal, requirePermission, denyRoles } from "../../middleware/rbac.js";
 import { requireCsrf } from "../../middleware/csrf.js";
 import { ok } from "../../utils/response.js";
 import { productionService } from "./service.js";
@@ -10,10 +10,11 @@ router.use(requireAuth, requireInternal);
 
 router.get(
   "/editors",
+  denyRoles("EDITOR"),
   requirePermission("projects.assign"),
   async (req, res, next) => {
     try {
-      ok(res, await productionService.listAvailableEditors());
+      ok(res, await productionService.listAvailableEditors(req.auth));
     } catch (e) {
       next(e);
     }
@@ -77,6 +78,7 @@ router.get(
 router.post(
   "/projects/:projectId/assign",
   requireCsrf,
+  denyRoles("EDITOR"),
   requirePermission("projects.assign"),
   async (req, res, next) => {
     try {

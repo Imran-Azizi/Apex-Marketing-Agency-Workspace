@@ -12,6 +12,13 @@ export function mediaStreamUrl(fileId: string): string {
 export function portfolioPublicStreamUrl(portfolioId: string): string {
   return `${API_BASE}/public/portfolio/${encodeURIComponent(portfolioId)}/stream`;
 }
+
+/** Authenticated stream URL for manager preview of any portfolio item. */
+export function portfolioAdminStreamUrl(portfolioId: string): string {
+  const panel = resolveClientAuthPanel();
+  const base = `${API_BASE}/portfolio/${encodeURIComponent(portfolioId)}/stream`;
+  return panel ? `${base}?panel=${encodeURIComponent(panel)}` : base;
+}
 export type VideoKindLabel = "WATERMARKED" | "CLEAN";
 
 export const VIDEO_KIND_LABELS: Record<VideoKindLabel, string> = {

@@ -1,3 +1,4 @@
+import dns from "dns";
 import { Readable } from "stream";
 import http from "http";
 import https from "https";
@@ -21,15 +22,24 @@ import {
   sanitizeFilename,
 } from "./media-manager.js";
 
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  /* Node < 17 */
+}
+
 let configured = false;
 
 /** Per-request and SDK default — videos on slow links need generous headroom. */
 const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
+/** Small images/docs should fail fast instead of hanging until a 504. */
+const SMALL_UPLOAD_TIMEOUT_MS = 45 * 1000;
 /** Prefer chunked/large upload above this size (Cloudinary recommends ≥5MB chunks). */
 const CHUNKED_UPLOAD_THRESHOLD = 5 * 1024 * 1024;
 /** 5MB chunks keep each part under typical gateway idle limits on slow networks. */
 const CHUNK_SIZE = 5 * 1024 * 1024;
 const UPLOAD_RETRY_ATTEMPTS = 4;
+const SMALL_UPLOAD_RETRY_ATTEMPTS = 3;
 
 function ensureConfigured() {
   if (configured) return;
@@ -113,8 +123,8 @@ function wrapCloudinaryError(err, fallbackMessage = "Cloudinary error") {
   }
   if (isTransientNetworkError(err)) {
     return new AppError(
-      "آپلود ویدیو به دلیل کندی ارتباط با فضای ذخیره‌سازی زمان‌بر شد. لطفاً دوباره تلاش کنید.",
-      504,
+      "اتصال به فضای ذخیره‌سازی ناموفق بود. اینترنت را بررسی کنید و دوباره تلاش کنید.",
+      503,
       "CLOUDINARY_NETWORK",
     );
   }
@@ -203,12 +213,17 @@ function uploadLargeFromPath(filePath, options) {
 }
 
 /**
- * Small-file streaming upload (single request).
+ * Small-file upload from disk — more reliable than upload_stream on Windows
+ * (stream mode often hangs with Request Timeout / EAI_AGAIN on tiny images).
  */
-function uploadStreamFromBuffer(buffer, options) {
+function uploadFileFromPath(filePath, options) {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { ...options, timeout: UPLOAD_TIMEOUT_MS },
+    cloudinary.uploader.upload(
+      filePath,
+      {
+        ...options,
+        timeout: options.timeout || SMALL_UPLOAD_TIMEOUT_MS,
+      },
       (err, uploaded) => {
         if (err) reject(err);
         else if (!uploaded)
@@ -216,8 +231,6 @@ function uploadStreamFromBuffer(buffer, options) {
         else resolve(uploaded);
       },
     );
-    stream.on("error", reject);
-    Readable.from(buffer).pipe(stream);
   });
 }
 
@@ -225,43 +238,47 @@ function uploadStreamFromBuffer(buffer, options) {
  * Upload a buffer with retries for transient Cloudinary/network failures.
  * Videos and files ≥5MB use disk-backed upload_large (chunked) so slow
  * connections do not hit a single-request Request Timeout.
+ * Smaller images/docs use a file upload with a short timeout so the UI
+ * does not sit on a 504 for minutes.
  */
 async function uploadBufferWithRetry(buffer, options, { filename } = {}) {
   const size = Buffer.isBuffer(buffer) ? buffer.length : 0;
   const useLarge =
     size >= CHUNKED_UPLOAD_THRESHOLD || options.resource_type === "video";
+  const attempts = useLarge
+    ? UPLOAD_RETRY_ATTEMPTS
+    : SMALL_UPLOAD_RETRY_ATTEMPTS;
+  const timeout = useLarge ? UPLOAD_TIMEOUT_MS : SMALL_UPLOAD_TIMEOUT_MS;
+  const uploadOptions = { ...options, timeout };
 
   let lastErr = null;
   let tempDir = null;
 
   try {
-    let filePath = null;
-    if (useLarge) {
-      const tmp = await writeTempUploadFile(
-        buffer,
-        filename || `${options.public_id || "upload"}.bin`,
-      );
-      tempDir = tmp.dir;
-      filePath = tmp.filePath;
-    }
+    const tmp = await writeTempUploadFile(
+      buffer,
+      filename || `${options.public_id || "upload"}.bin`,
+    );
+    tempDir = tmp.dir;
+    const filePath = tmp.filePath;
 
-    for (let i = 0; i < UPLOAD_RETRY_ATTEMPTS; i++) {
+    for (let i = 0; i < attempts; i++) {
       try {
-        if (useLarge && filePath) {
-          return await uploadLargeFromPath(filePath, options);
+        if (useLarge) {
+          return await uploadLargeFromPath(filePath, uploadOptions);
         }
-        return await uploadStreamFromBuffer(buffer, options);
+        return await uploadFileFromPath(filePath, uploadOptions);
       } catch (err) {
         lastErr = err;
         const retryable = isTransientNetworkError(err);
         console.warn(
-          `[cloudinary] upload attempt ${i + 1}/${UPLOAD_RETRY_ATTEMPTS} failed:`,
+          `[cloudinary] upload attempt ${i + 1}/${attempts} failed:`,
           err?.error?.message || err?.message || err,
-          `(mode=${useLarge ? "large" : "stream"}, bytes=${size})`,
+          `(mode=${useLarge ? "large" : "file"}, bytes=${size})`,
           retryable ? "(retrying)" : "(not retrying)",
         );
-        if (!retryable || i === UPLOAD_RETRY_ATTEMPTS - 1) break;
-        await sleep(1000 * 2 ** i);
+        if (!retryable || i === attempts - 1) break;
+        await sleep(Math.min(8000, 1000 * 2 ** i));
       }
     }
   } finally {

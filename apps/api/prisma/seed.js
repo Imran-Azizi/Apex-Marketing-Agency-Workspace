@@ -312,6 +312,24 @@ async function main() {
   });
 
   await prisma.setting.upsert({
+    where: { key: 'contact_email' },
+    create: {
+      key: 'contact_email',
+      value: { email: process.env.CONTACT_EMAIL || 'info@apex.af' },
+    },
+    update: {},
+  });
+
+  await prisma.setting.upsert({
+    where: { key: 'contact_phone' },
+    create: {
+      key: 'contact_phone',
+      value: { number: process.env.CONTACT_PHONE || process.env.WHATSAPP_NUMBER || '93700000000' },
+    },
+    update: {},
+  });
+
+  await prisma.setting.upsert({
     where: { key: 'whatsapp_default_message' },
     create: {
       key: 'whatsapp_default_message',
@@ -375,6 +393,22 @@ async function main() {
       'SALES_ASSISTANT', 'INTAKE', 'QC', 'PORTFOLIO', 'PROJECT_ASSISTANT'
     )
   `);
+
+  const portfolioCategories = [
+    { id: 'pcat_beverages', name: 'محصولات نوشیدنی', slug: 'beverages', sortOrder: 1 },
+    { id: 'pcat_cosmetics', name: 'محصولات آرایشی و بهداشتی', slug: 'cosmetics', sortOrder: 2 },
+    { id: 'pcat_services', name: 'شرکت های خدماتی', slug: 'service-companies', sortOrder: 3 },
+    { id: 'pcat_transport', name: 'شرکت های ترانسپورتی', slug: 'transport', sortOrder: 4 },
+    { id: 'pcat_food', name: 'محصولات خوراکی', slug: 'food', sortOrder: 5 },
+    { id: 'pcat_agriculture', name: 'محصولات زراعتی', slug: 'agriculture', sortOrder: 6 },
+  ];
+  for (const category of portfolioCategories) {
+    await prisma.portfolioCategory.upsert({
+      where: { slug: category.slug },
+      create: { ...category, isActive: true, isSystem: true },
+      update: { name: category.name, isSystem: true },
+    });
+  }
 
   console.log('Seed complete.');
   console.log('Manager:', manager.email, '/', password);

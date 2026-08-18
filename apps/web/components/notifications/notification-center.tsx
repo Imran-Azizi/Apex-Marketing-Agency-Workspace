@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   useInfiniteQuery,
   useMutation,
+  useQuery,
   useQueryClient,
   type InfiniteData,
+  type QueryClient,
 } from "@tanstack/react-query";
 import {
   Bell,
@@ -15,6 +17,7 @@ import {
   CheckCircle2,
   Clapperboard,
   FolderKanban,
+  Mail,
   MessageSquareWarning,
   Mic2,
   Send,
@@ -23,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, apiDelete, apiPatch, apiPost, type ApiEnvelope } from "@/lib/api";
+import { api, apiDelete, apiGet, apiPost, type ApiEnvelope } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -57,6 +60,7 @@ export type NotificationItem = {
   body: string | null;
   link: string | null;
   isRead: boolean;
+  isUnseen?: boolean;
   createdAt: string;
   readAt: string | null;
   meta: NotificationMeta;
@@ -70,7 +74,30 @@ type NotificationsPage = {
   totalPages: number;
   hasMore: boolean;
   unreadCount: number;
+  unseenCount: number;
 };
+
+type UnseenCountPayload = {
+  unseenCount: number;
+  unreadCount: number;
+};
+
+type MarkSeenVars = {
+  viewedBefore?: string;
+  silent?: boolean;
+};
+
+const NOTIFICATIONS_QUERY_KEY = ["notifications"] as const;
+const UNSEEN_COUNT_QUERY_KEY = ["notifications", "unseen-count"] as const;
+
+function isUnseenNotification(item: NotificationItem): boolean {
+  return item.isUnseen ?? !item.isRead;
+}
+
+function toSeen(item: NotificationItem, now: string): NotificationItem {
+  if (!isUnseenNotification(item)) return item;
+  return { ...item, isRead: true, isUnseen: false, readAt: now };
+}
 
 async function fetchNotificationsPage({
   pageParam = 1,
@@ -92,14 +119,30 @@ async function fetchNotificationsPage({
     throw new Error(data.error?.message || "خطا در بارگذاری اعلان‌ها");
   }
 
+  const unseenCount = Number(
+    (data.meta?.unseenCount ?? data.meta?.unreadCount) || 0,
+  );
+
   return {
     ...data.data,
-    unreadCount: Number(data.meta?.unreadCount || 0),
+    items: data.data.items.map((item) => ({
+      ...item,
+      isUnseen: item.isUnseen ?? !item.isRead,
+    })),
+    unreadCount: unseenCount,
+    unseenCount,
   };
+}
+
+async function fetchUnseenCount(): Promise<UnseenCountPayload> {
+  const data = await apiGet<UnseenCountPayload>("/notifications/unseen-count");
+  const unseenCount = Number((data?.unseenCount ?? data?.unreadCount) || 0);
+  return { unseenCount, unreadCount: unseenCount };
 }
 
 function NotificationIcon({ type }: { type: string | null }) {
   if (type === "LEAD_CREATED") return <UserRound className="h-4 w-4" />;
+  if (type === "CONTACT_MESSAGE") return <Mail className="h-4 w-4" />;
   if (type === "PROJECT_CREATED") return <FolderKanban className="h-4 w-4" />;
   if (type === "CONTENT_SENT_FOR_APPROVAL") return <Send className="h-4 w-4" />;
   if (type === "CONTENT_APPROVED_BY_CUSTOMER")
@@ -132,31 +175,12 @@ function NotificationIcon({ type }: { type: string | null }) {
   return <Bell className="h-4 w-4" />;
 }
 
-function patchNotificationsCache(
-  data: InfiniteData<NotificationsPage> | undefined,
-  id: string,
-): InfiniteData<NotificationsPage> | undefined {
-  if (!data) return data;
-
-  let didMark = false;
-  const pages = data.pages.map((page) => ({
-    ...page,
-    items: page.items.map((item) => {
-      if (item.id !== id || item.isRead) return item;
-      didMark = true;
-      return { ...item, isRead: true, readAt: new Date().toISOString() };
-    }),
-  }));
-
-  if (didMark && pages[0]) {
-    const baseUnread = data.pages[0]?.unreadCount ?? 0;
-    pages[0] = {
-      ...pages[0],
-      unreadCount: Math.max(0, baseUnread - 1),
-    };
-  }
-
-  return { ...data, pages };
+function setUnseenCountCache(queryClient: QueryClient, unseenCount: number) {
+  const next = Math.max(0, unseenCount);
+  queryClient.setQueryData<UnseenCountPayload>(UNSEEN_COUNT_QUERY_KEY, {
+    unseenCount: next,
+    unreadCount: next,
+  });
 }
 
 function markAllReadInCache(
@@ -169,9 +193,8 @@ function markAllReadInCache(
     pages: data.pages.map((page, index) => ({
       ...page,
       unreadCount: index === 0 ? 0 : page.unreadCount,
-      items: page.items.map((item) =>
-        item.isRead ? item : { ...item, isRead: true, readAt: now },
-      ),
+      unseenCount: index === 0 ? 0 : page.unseenCount,
+      items: page.items.map((item) => toSeen(item, now)),
     })),
   };
 }
@@ -183,6 +206,7 @@ function NotificationCard({
   item: NotificationItem;
   onOpen: (item: NotificationItem) => void;
 }) {
+  const unseen = isUnseenNotification(item);
   const customer =
     item.meta.customerName ||
     (item.body?.match(/مشتری:\s*(.+)/)?.[1] ?? null);
@@ -196,35 +220,52 @@ function NotificationCard({
     <button
       type="button"
       onClick={() => onOpen(item)}
+      data-unseen={unseen ? "true" : "false"}
       className={cn(
-        "w-full rounded-xl border p-3 text-start transition-all",
+        "relative w-full rounded-xl border p-3 text-start",
+        "transition-colors duration-300",
         "hover:border-brand/40 hover:bg-brand/[0.07] hover:shadow-sm",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
         "active:scale-[0.99] active:bg-brand/10",
         "cursor-pointer",
-        item.isRead
-          ? "border-border/80 bg-background opacity-90"
-          : "border-brand/25 bg-brand/5",
+        unseen
+          ? "border-brand/30 bg-brand/[0.08] dark:bg-brand/[0.14]"
+          : "border-border/80 bg-background",
       )}
     >
-      <div className="flex gap-3">
+      {unseen && (
+        <span
+          className="absolute inset-y-2 start-1.5 w-1 rounded-full bg-brand"
+          aria-hidden
+        />
+      )}
+      <div className={cn("flex gap-3", unseen && "ps-2")}>
         <div
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
-            item.isRead
-              ? "bg-muted text-muted-foreground"
-              : "bg-brand/15 text-brand",
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-300",
+            unseen
+              ? "bg-brand/15 text-brand"
+              : "bg-muted text-muted-foreground",
           )}
         >
           <NotificationIcon type={item.meta.type} />
         </div>
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-sm font-semibold leading-snug">{item.title}</h3>
-            {!item.isRead && (
+            <h3
+              className={cn(
+                "text-sm leading-snug transition-colors duration-300",
+                unseen
+                  ? "font-semibold text-foreground"
+                  : "font-medium text-foreground/90",
+              )}
+            >
+              {item.title}
+            </h3>
+            {unseen && (
               <span
                 className="mt-1 h-2 w-2 shrink-0 rounded-full bg-brand"
-                aria-label="خوانده‌نشده"
+                aria-label="اعلان جدید"
               />
             )}
           </div>
@@ -281,15 +322,22 @@ export function NotificationCenter({ className }: { className?: string }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const autoMarkedOnOpenRef = useRef(false);
+
+  const unseenQuery = useQuery({
+    queryKey: UNSEEN_COUNT_QUERY_KEY,
+    queryFn: fetchUnseenCount,
+    staleTime: 8_000,
+    refetchInterval: open ? 8_000 : 12_000,
+    refetchOnWindowFocus: true,
+  });
 
   const query = useInfiniteQuery({
-    queryKey: ["notifications"],
+    queryKey: NOTIFICATIONS_QUERY_KEY,
     queryFn: fetchNotificationsPage,
     initialPageParam: 1,
     getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
-    refetchInterval: open ? 45_000 : false,
-    staleTime: 30_000,
+    refetchInterval: open ? 8_000 : false,
+    staleTime: 15_000,
     refetchOnWindowFocus: open,
   });
 
@@ -297,51 +345,44 @@ export function NotificationCenter({ className }: { className?: string }) {
     () => query.data?.pages.flatMap((p) => p.items) ?? [],
     [query.data],
   );
-  const unreadCount = query.data?.pages[0]?.unreadCount ?? 0;
+  const unseenCount =
+    unseenQuery.data?.unseenCount ??
+    query.data?.pages[0]?.unseenCount ??
+    query.data?.pages[0]?.unreadCount ??
+    0;
   const total = query.data?.pages[0]?.total ?? items.length;
 
   const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["notifications"] });
-
-  const markRead = useMutation({
-    mutationFn: (id: string) => apiPatch(`/notifications/${id}/read`),
-    onMutate: async (id) => {
-      await queryClient.cancelQueries({ queryKey: ["notifications"] });
-      const previous = queryClient.getQueryData<InfiniteData<NotificationsPage>>(
-        ["notifications"],
-      );
-      queryClient.setQueryData<InfiniteData<NotificationsPage>>(
-        ["notifications"],
-        (old) => patchNotificationsCache(old, id),
-      );
-      return { previous };
-    },
-    onError: (_err, _id, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["notifications"], context.previous);
-      }
-    },
-    onSettled: invalidate,
-  });
+    queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
 
   const markAllRead = useMutation({
-    mutationFn: () => apiPost("/notifications/read-all"),
+    mutationFn: (vars?: MarkSeenVars) =>
+      apiPost("/notifications/read-all", vars?.viewedBefore ? { viewedBefore: vars.viewedBefore } : {}),
     onMutate: async () => {
-      await queryClient.cancelQueries({ queryKey: ["notifications"] });
+      await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
       const previous = queryClient.getQueryData<InfiniteData<NotificationsPage>>(
-        ["notifications"],
+        NOTIFICATIONS_QUERY_KEY,
+      );
+      const previousCount = queryClient.getQueryData<UnseenCountPayload>(
+        UNSEEN_COUNT_QUERY_KEY,
       );
       queryClient.setQueryData<InfiniteData<NotificationsPage>>(
-        ["notifications"],
+        NOTIFICATIONS_QUERY_KEY,
         (old) => markAllReadInCache(old),
       );
-      return { previous };
+      setUnseenCountCache(queryClient, 0);
+      return { previous, previousCount };
     },
-    onError: (e, _vars, context) => {
+    onError: (e, vars, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(["notifications"], context.previous);
+        queryClient.setQueryData(NOTIFICATIONS_QUERY_KEY, context.previous);
       }
-      toast.error(e instanceof Error ? e.message : "خطا در به‌روزرسانی اعلان‌ها");
+      if (context?.previousCount) {
+        queryClient.setQueryData(UNSEEN_COUNT_QUERY_KEY, context.previousCount);
+      }
+      if (!vars?.silent) {
+        toast.error(e instanceof Error ? e.message : "خطا در به‌روزرسانی اعلان‌ها");
+      }
     },
     onSettled: invalidate,
   });
@@ -355,53 +396,52 @@ export function NotificationCenter({ className }: { className?: string }) {
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
   });
 
-  const markAllReadPending = markAllRead.isPending;
-  const markAllReadMutate = markAllRead.mutate;
+  const refetchList = query.refetch;
+  const refetchUnseen = unseenQuery.refetch;
 
   useEffect(() => {
-    if (!open) {
-      autoMarkedOnOpenRef.current = false;
-      return;
-    }
-    if (!query.data || query.isLoading) return;
-    if (unreadCount <= 0) return;
-    if (autoMarkedOnOpenRef.current) return;
-    if (markAllReadPending) return;
+    if (!open) return;
+    void refetchList();
+    void refetchUnseen();
+  }, [open, refetchList, refetchUnseen]);
 
-    autoMarkedOnOpenRef.current = true;
-    markAllReadMutate();
-  }, [
-    open,
-    unreadCount,
-    query.data,
-    query.isLoading,
-    markAllReadPending,
-    markAllReadMutate,
-  ]);
+  function markViewedAsSeen() {
+    if (unseenCount <= 0 || markAllRead.isPending) return;
+    markAllRead.mutate({
+      viewedBefore: new Date().toISOString(),
+      silent: true,
+    });
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (open && !nextOpen) {
+      markViewedAsSeen();
+    }
+    setOpen(nextOpen);
+  }
 
   function handleOpenNotification(item: NotificationItem) {
-    if (!item.isRead) {
-      markRead.mutate(item.id);
-    }
-    setOpen(false);
+    handleOpenChange(false);
     if (item.link) {
       router.push(item.link);
     }
   }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
           className={cn("relative", className)}
-          aria-label="اعلان‌ها"
+          aria-label={
+            unseenCount > 0 ? `اعلان‌ها، ${unseenCount} جدید` : "اعلان‌ها"
+          }
         >
           <Bell className="h-4 w-4" />
-          {unreadCount > 0 && (
+          {unseenCount > 0 && (
             <span className="absolute -top-0.5 -left-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
-              {unreadCount > 9 ? "9+" : unreadCount}
+              {unseenCount > 9 ? "9+" : unseenCount}
             </span>
           )}
         </Button>
@@ -422,8 +462,8 @@ export function NotificationCenter({ className }: { className?: string }) {
                     کل: <strong className="text-foreground">{total}</strong>
                   </span>
                   <span>
-                    خوانده‌نشده:{" "}
-                    <strong className="text-brand">{unreadCount}</strong>
+                    جدید:{" "}
+                    <strong className="text-brand">{unseenCount}</strong>
                   </span>
                   {markAllRead.isPending && (
                     <span className="text-muted-foreground">در حال به‌روزرسانی…</span>
@@ -450,11 +490,11 @@ export function NotificationCenter({ className }: { className?: string }) {
               size="sm"
               variant="outline"
               className="h-8"
-              disabled={unreadCount === 0 || markAllRead.isPending}
+              disabled={unseenCount === 0 || markAllRead.isPending}
               isLoading={markAllRead.isPending}
               loadingText="در حال به‌روزرسانی..."
               onClick={() => {
-                if (unreadCount === 0 || markAllRead.isPending) return;
+                if (unseenCount === 0 || markAllRead.isPending) return;
                 markAllRead.mutate(undefined, {
                   onSuccess: () => toast.success("همه اعلان‌ها خوانده شدند"),
                 });

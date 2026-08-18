@@ -4,6 +4,7 @@ import {
   computeEffectivePermissions,
   hasAnyPermission,
   permissionSatisfied,
+  canAssignProjectEditor,
 } from '../../src/services/permissions/effective.js';
 import {
   ALL_PERMISSION_CODES,
@@ -88,6 +89,16 @@ test('sales legacy project:read still satisfies projects.view during rollout', (
   });
   assert.equal(permissionSatisfied(codes, 'projects.view', 'SALES'), true);
   assert.equal(permissionSatisfied(codes, 'crm.create', 'SALES'), true);
+});
+
+test('editor cannot assign a project editor even if projects.assign was granted', () => {
+  const codes = computeEffectivePermissions({
+    roleCode: 'EDITOR',
+    rolePermissionCodes: [...ROLE_DEFAULT_PERMISSIONS.EDITOR, 'projects.assign'],
+  });
+  assert.equal(hasAnyPermission(codes, ['projects.assign'], 'EDITOR'), true);
+  assert.equal(canAssignProjectEditor(codes, 'EDITOR'), false);
+  assert.equal(canAssignProjectEditor(codes, 'MANAGER'), true);
 });
 
 test('editor defaults keep production workflow without manager modules', () => {

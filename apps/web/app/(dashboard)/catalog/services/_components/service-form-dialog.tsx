@@ -32,13 +32,10 @@ type FormState = {
   name: string;
   description: string;
   startingPrice: string;
-  revisionCount: string;
   sortOrder: string;
   isPublished: boolean;
   imageKey: string | null;
   imageUrl: string | null;
-  ctaLabel: string;
-  ctaHref: string;
   slug: string;
 };
 
@@ -47,13 +44,10 @@ function emptyForm(): FormState {
     name: "",
     description: "",
     startingPrice: "",
-    revisionCount: "2",
     sortOrder: "",
     isPublished: true,
     imageKey: null,
     imageUrl: null,
-    ctaLabel: "",
-    ctaHref: "",
     slug: "",
   };
 }
@@ -63,13 +57,10 @@ function fromService(service: PublicService): FormState {
     name: service.name || "",
     description: service.description || "",
     startingPrice: service.startingPrice || "",
-    revisionCount: String(service.revisionCount ?? 2),
     sortOrder: String(service.sortOrder ?? service.displayOrder ?? ""),
     isPublished: service.isPublished ?? service.isActive ?? true,
     imageKey: service.imageKey || null,
     imageUrl: service.imageUrl || null,
-    ctaLabel: service.ctaLabel || "",
-    ctaHref: service.ctaHref || "",
     slug: service.slug || "",
   };
 }
@@ -118,14 +109,11 @@ export function ServiceFormDialog({
         startingPrice: form.startingPrice.trim()
           ? Number(form.startingPrice)
           : null,
-        revisionCount: Number(form.revisionCount || 2),
         sortOrder: form.sortOrder.trim()
           ? Number(form.sortOrder)
           : undefined,
         isPublished: form.isPublished,
         imageKey: form.imageKey,
-        ctaLabel: form.ctaLabel.trim() || null,
-        ctaHref: form.ctaHref.trim() || null,
         slug: form.slug.trim() || null,
       };
       if (editing && service) {
@@ -320,7 +308,7 @@ export function ServiceFormDialog({
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="service-price">قیمت شروع</Label>
               <Input
@@ -335,18 +323,6 @@ export function ServiceFormDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="service-revisions">تعداد بازبینی</Label>
-              <Input
-                id="service-revisions"
-                inputMode="numeric"
-                value={form.revisionCount}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, revisionCount: e.target.value }))
-                }
-                disabled={saveMut.isPending}
-              />
-            </div>
-            <div className="space-y-2">
               <Label htmlFor="service-order">ترتیب نمایش</Label>
               <Input
                 id="service-order"
@@ -356,33 +332,6 @@ export function ServiceFormDialog({
                   setForm((p) => ({ ...p, sortOrder: e.target.value }))
                 }
                 placeholder="خودکار"
-                disabled={saveMut.isPending}
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="service-cta-label">متن دکمه (اختیاری)</Label>
-              <Input
-                id="service-cta-label"
-                value={form.ctaLabel}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, ctaLabel: e.target.value }))
-                }
-                placeholder="جزئیات بیشتر"
-                disabled={saveMut.isPending}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="service-cta-href">لینک دکمه (اختیاری)</Label>
-              <Input
-                id="service-cta-href"
-                value={form.ctaHref}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, ctaHref: e.target.value }))
-                }
-                placeholder="/portal/login یا https://…"
                 disabled={saveMut.isPending}
               />
             </div>

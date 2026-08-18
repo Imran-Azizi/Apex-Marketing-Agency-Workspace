@@ -15,12 +15,14 @@ import {
   type PublicSectionId,
 } from "@/components/public/use-active-section";
 import { cn } from "@/lib/utils";
+import { isPortfolioWorkPath } from "@/lib/portfolio";
 
 const navItems: Array<{ id: PublicSectionId; label: string }> = [
   { id: "home", label: "خانه" },
   { id: "services", label: "خدمات" },
   { id: "portfolio", label: "نمونه‌کارها" },
-  { id: "narrators", label: "نمونه صدا" },
+  { id: "customers", label: "مشتریان ما" },
+  { id: "contact", label: "تماس با ما" },
 ];
 
 export function PublicHeader() {
@@ -33,7 +35,6 @@ export function PublicHeader() {
   function goToItem(id: PublicSectionId) {
     setOpen(false);
     if (onHome) {
-      // Let the mobile sheet finish closing before scrolling
       window.setTimeout(() => scrollToSection(id), open ? 120 : 0);
       return;
     }
@@ -41,6 +42,7 @@ export function PublicHeader() {
   }
 
   function isActive(id: PublicSectionId) {
+    if (id === "portfolio" && isPortfolioWorkPath(pathname)) return true;
     if (!onHome) return false;
     return activeSection === id;
   }
@@ -62,7 +64,7 @@ export function PublicHeader() {
         </button>
 
         <nav
-          className="hidden items-center gap-1 rounded-full border border-border/60 bg-muted/40 p-1 md:flex"
+          className="hidden items-center gap-0.5 rounded-full border border-border/60 bg-muted/40 p-1 md:flex lg:gap-1"
           aria-label="ناوبری صفحه"
         >
           {navItems.map((item) => {
@@ -76,7 +78,7 @@ export function PublicHeader() {
                   goToItem(item.id);
                 }}
                 className={cn(
-                  "rounded-full px-3.5 py-1.5 text-sm font-medium transition-all",
+                  "rounded-full px-2.5 py-1.5 text-[13px] font-medium transition-all lg:px-3.5 lg:text-sm",
                   active
                     ? "bg-brand text-brand-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-background hover:text-foreground",

@@ -34,6 +34,8 @@ function isAllowedMime(mime) {
 
 const upload = multer({
   storage: multer.memoryStorage(),
+  // No fileSize cap — production and portfolio videos must not be rejected by size.
+  limits: { files: 1 },
   fileFilter(_req, file, cb) {
     if (!isAllowedMime(file.mimetype)) {
       cb(new AppError("نوع فایل مجاز نیست", 400, "FILE_TYPE_NOT_ALLOWED"));
@@ -295,6 +297,11 @@ router.post(
       if (!err) return next();
       if (err instanceof AppError) return next(err);
       if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          return next(
+            new AppError("آپلود فایل ناموفق بود", 400, "UPLOAD_FAILED"),
+          );
+        }
         return next(
           new AppError(err.message || "آپلود ناموفق", 400, "UPLOAD_FAILED"),
         );

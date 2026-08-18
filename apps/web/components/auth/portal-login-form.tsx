@@ -55,6 +55,7 @@ export function PortalLoginForm() {
       // Drop the stale unauthenticated "me" cache; otherwise the portal
       // layout reads the old null session and bounces back to the login page.
       queryClient.removeQueries({ queryKey: ["me"] });
+      queryClient.removeQueries({ queryKey: ["notifications"] });
       router.push("/portal");
       router.refresh();
     } catch (err) {

@@ -10,6 +10,10 @@ export const UPLOAD_PURPOSE = Object.freeze({
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
   SERVICE_IMAGE: "service-image",
+  HERO_IMAGE: "hero-image",
+  CUSTOMER_IMAGE: "customer-image",
+  PORTFOLIO_VIDEO: "portfolio-video",
+  PORTFOLIO_THUMBNAIL: "portfolio-thumbnail",
   GENERIC: "generic",
 });
 
@@ -191,6 +195,38 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
   if (purpose === UPLOAD_PURPOSE.SERVICE_IMAGE) {
     return {
       folderPath: `${MEDIA_ROOTS.IMAGES}/services`,
+      category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.HERO_IMAGE) {
+    return {
+      folderPath: `${MEDIA_ROOTS.IMAGES}/hero`,
+      category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.CUSTOMER_IMAGE) {
+    return {
+      folderPath: `${MEDIA_ROOTS.IMAGES}/customers`,
+      category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.PORTFOLIO_VIDEO) {
+    return {
+      folderPath: `${MEDIA_ROOTS.VIDEOS}/portfolio`,
+      category: MEDIA_ROOTS.VIDEOS,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.PORTFOLIO_THUMBNAIL) {
+    return {
+      folderPath: `${MEDIA_ROOTS.IMAGES}/portfolio`,
       category: MEDIA_ROOTS.IMAGES,
       purpose,
     };

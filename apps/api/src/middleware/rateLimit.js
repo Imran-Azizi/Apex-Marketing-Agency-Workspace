@@ -19,6 +19,22 @@ export const otpLimiter = rateLimit({
   message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many OTP requests' } },
 });
 
+/** Public Contact Us form — abuse / spam protection */
+export const contactLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.ip || "anonymous"),
+  message: {
+    success: false,
+    error: {
+      code: "RATE_LIMITED",
+      message: "تعداد درخواست‌ها زیاد است. لطفاً کمی بعد دوباره تلاش کنید.",
+    },
+  },
+});
+
 /** Per-user AI generation limiter (expensive LLM calls) */
 export const aiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

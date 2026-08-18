@@ -16,6 +16,7 @@ import { getNavItems, getRoleLabel } from "@/lib/rbac";
 import { filePreviewUrl } from "@/lib/upload";
 import { Badge } from "@/components/ui/badge";
 import { NotificationCenter } from "@/components/notifications/notification-center";
+import { MessageInboxButton } from "@/components/contact/message-inbox-button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Logo } from "@/components/brand/logo";
 import { DashboardNav } from "@/components/layout/dashboard-nav";
@@ -106,6 +107,7 @@ export function DashboardTopbar({
         )}
         <ThemeToggle />
         <NotificationCenter />
+        <MessageInboxButton />
         <div className="flex items-center gap-2">
           <Avatar className="h-8 w-8 ring-1 ring-border/50">
             {imageUrl && !imageFailed ? (

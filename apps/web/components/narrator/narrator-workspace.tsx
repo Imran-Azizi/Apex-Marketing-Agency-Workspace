@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ALERT_BANNER, ALERT_ICON, SUCCESS_ICON } from "@/lib/theme-tones";
+import { isNarrationApproved, NARRATION_APPROVED_LABEL } from "@/lib/narrator";
 
 type NarrationStatus =
   | "PENDING_NARRATION"
@@ -62,7 +63,7 @@ const STATUS_LABEL: Record<NarrationStatus, string> = {
   PENDING_NARRATION: "در انتظار ضبط",
   RECORDING_IN_PROGRESS: "در حال ضبط",
   NARRATION_SUBMITTED: "ارسال‌شده",
-  APPROVED: "تأییدشده",
+  APPROVED: NARRATION_APPROVED_LABEL,
   REVISION_REQUESTED: "نیاز به اصلاح",
 };
 
@@ -344,6 +345,7 @@ export function NarratorWorkspace({ projectId }: { projectId: string }) {
         <NarrationAudioVersions
           takes={audioVersions}
           currentFileId={data.audioFile?.id}
+          approved={isNarrationApproved(data.status)}
         />
 
         {data.status === "NARRATION_SUBMITTED" && audioVersions.length > 0 && (

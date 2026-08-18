@@ -40,12 +40,37 @@ export const publishPortfolioSchema = z.object({
 
 export const updatePortfolioSchema = z.object({
   title: z.string().trim().min(3).max(120).optional(),
-  description: z.string().trim().min(20).max(2000).optional(),
+  description: z
+    .union([z.string().trim().max(2000), z.literal(''), z.null()])
+    .optional()
+    .transform((v) => (v ? v : v === '' || v === null ? null : undefined)),
   status: z.enum(['PUBLISHED', 'UNPUBLISHED']).optional(),
   videoFileId: z.string().min(1).optional(),
+  storageKey: z
+    .union([z.string().trim().max(500), z.literal(''), z.null()])
+    .optional()
+    .transform((v) => (v ? v : v === '' || v === null ? null : undefined)),
+  thumbnailKey: z
+    .union([z.string().trim().max(500), z.literal(''), z.null()])
+    .optional()
+    .transform((v) => (v ? v : v === '' || v === null ? null : undefined)),
+  categoryIds: z.array(z.string().min(1)).optional(),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional().nullable(),
 });
 
-function slugify(input) {
+function mediaUrlFor(key) {
+  if (!key) return null;
+  try {
+    return storage.publicUrl(key);
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[portfolio] mediaUrl resolve failed:', key, err?.message || err);
+    }
+    return null;
+  }
+}
+
+export function slugify(input) {
   const base = String(input || '')
     .trim()
     .toLowerCase()
@@ -55,7 +80,7 @@ function slugify(input) {
   return base || `portfolio-${Date.now().toString(36)}`;
 }
 
-async function uniqueSlug(base, excludeId = null) {
+export async function uniqueSlug(base, excludeId = null) {
   let candidate = slugify(base);
   let i = 0;
   while (true) {
@@ -119,17 +144,32 @@ function publicSafeBrief(brief) {
   return Object.keys(safe).length ? safe : null;
 }
 
-function serializeAdminItem(item) {
+export function serializeAdminItem(item) {
   const videoType = resolveVideoType(item.videoFile?.kind, asMeta(item.videoFile?.meta));
+  const categories = (item.categories || [])
+    .map((row) => row.category)
+    .filter((category) => category && !category.deletedAt);
   return {
     id: item.id,
     title: item.title,
-    description: item.description,
+    description: item.description || '',
     slug: item.slug,
     status: item.status,
+    sortOrder: item.sortOrder ?? 0,
+    storageKey: item.storageKey || null,
+    thumbnailKey: item.thumbnailKey || null,
+    thumbnailUrl: mediaUrlFor(item.thumbnailKey),
     publishedAt: item.publishedAt,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+    inMixed: Boolean(item.mixedEntry),
+    mixedSortOrder: item.mixedEntry?.sortOrder ?? null,
+    categories: categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      slug: category.slug,
+      isActive: category.isActive,
+    })),
     project: item.project
       ? {
           id: item.project.id,
@@ -150,30 +190,50 @@ function serializeAdminItem(item) {
           sizeBytes: item.videoFile.sizeBytes,
           version: item.videoFile.version,
         }
-      : null,
+      : item.storageKey
+        ? {
+            id: null,
+            name: item.title,
+            kind: 'PORTFOLIO_UPLOAD',
+            videoType: 'CLEAN',
+            mimeType: 'video/mp4',
+            sizeBytes: null,
+            version: 1,
+          }
+        : null,
     publishedBy: item.publishedBy
       ? { id: item.publishedBy.id, fullName: item.publishedBy.fullName }
       : null,
   };
 }
 
-function serializePublicItem(item) {
+export function serializePublicItem(item) {
+  const categories = (item.categories || [])
+    .map((row) => row.category)
+    .filter(Boolean);
   return {
     id: item.id,
     slug: item.slug,
     title: item.title,
-    description: item.description,
+    description: item.description || null,
     publishedAt: item.publishedAt,
-    serviceName: item.project?.service?.name || null,
+    thumbnailUrl: mediaUrlFor(item.thumbnailKey),
+    category: categories[0]
+      ? { id: categories[0].id, name: categories[0].name, slug: categories[0].slug }
+      : null,
+    categories: categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      slug: category.slug,
+    })),
     video: {
-      id: item.videoFile?.id || null,
       mimeType: item.videoFile?.mimeType || 'video/mp4',
       streamPath: `/public/portfolio/${item.id}/stream`,
     },
   };
 }
 
-const itemInclude = {
+export const itemInclude = {
   project: {
     select: {
       id: true,
@@ -198,6 +258,21 @@ const itemInclude = {
     },
   },
   publishedBy: { select: { id: true, fullName: true } },
+  mixedEntry: true,
+  categories: {
+    orderBy: { sortOrder: 'asc' },
+    include: {
+      category: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          isActive: true,
+          deletedAt: true,
+        },
+      },
+    },
+  },
 };
 
 async function loadProjectForPortfolio(projectId) {
@@ -529,12 +604,22 @@ export const portfolioService = {
   async listAdmin(query = {}) {
     const q = String(query.q || '').trim();
     const status = query.status && query.status !== 'ALL' ? String(query.status) : null;
+    const categoryId = String(query.categoryId || '').trim() || null;
+    const mixed =
+      query.mixed === true || query.mixed === 'true'
+        ? true
+        : query.mixed === false || query.mixed === 'false'
+          ? false
+          : null;
     const page = Math.max(1, Number(query.page || 1));
     const pageSize = Math.min(100, Math.max(1, Number(query.pageSize || 20)));
 
     const where = {
       deletedAt: null,
       ...(status ? { status } : {}),
+      ...(categoryId ? { categories: { some: { categoryId } } } : {}),
+      ...(mixed === true ? { mixedEntry: { is: {} } } : {}),
+      ...(mixed === false ? { mixedEntry: null } : {}),
       ...(q
         ? {
             OR: [
@@ -547,11 +632,16 @@ export const portfolioService = {
         : {}),
     };
 
+    const orderBy =
+      mixed === true
+        ? [{ mixedEntry: { sortOrder: 'asc' } }, { createdAt: 'desc' }]
+        : [{ sortOrder: 'asc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }];
+
     const [items, total] = await Promise.all([
       prisma.portfolioItem.findMany({
         where,
         include: itemInclude,
-        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -584,7 +674,10 @@ export const portfolioService = {
 
     const data = {};
     if (body.title != null) data.title = body.title.trim();
-    if (body.description != null) data.description = body.description.trim();
+    if (body.description !== undefined) data.description = body.description;
+    if (body.storageKey !== undefined) data.storageKey = body.storageKey;
+    if (body.thumbnailKey !== undefined) data.thumbnailKey = body.thumbnailKey;
+    if (body.sortOrder != null) data.sortOrder = body.sortOrder;
     if (body.status) {
       data.status = body.status;
       if (body.status === 'PUBLISHED' && !existing.publishedAt) {
@@ -593,6 +686,9 @@ export const portfolioService = {
       }
     }
     if (body.videoFileId) {
+      if (!existing.projectId) {
+        throw new AppError('این نمونه‌کار به پروژه‌ای متصل نیست', 400, 'NO_PROJECT');
+      }
       const project = await loadProjectForPortfolio(existing.projectId);
       const video = pickBestVideo(project, body.videoFileId);
       if (!video) {
@@ -604,9 +700,18 @@ export const portfolioService = {
       data.slug = await uniqueSlug(data.title, existing.id);
     }
 
-    const item = await prisma.portfolioItem.update({
+    await prisma.portfolioItem.update({
       where: { id },
       data,
+    });
+
+    if (body.categoryIds) {
+      const { syncCategoriesForItem } = await import('./showcase.js');
+      await syncCategoriesForItem(id, body.categoryIds);
+    }
+
+    const item = await prisma.portfolioItem.findFirst({
+      where: { id },
       include: itemInclude,
     });
 
@@ -662,67 +767,54 @@ export const portfolioService = {
     return { id, deleted: true };
   },
 
-  async listPublic() {
-    const items = await prisma.portfolioItem.findMany({
-      where: {
-        deletedAt: null,
-        status: 'PUBLISHED',
-        videoFile: { deletedAt: null },
-        project: { deletedAt: null },
-      },
-      include: {
-        project: {
-          select: {
-            service: { select: { name: true } },
-          },
-        },
-        videoFile: {
-          select: {
-            id: true,
-            mimeType: true,
-            name: true,
-          },
-        },
-      },
-      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
-    });
-    return items.map(serializePublicItem);
+  async listPublic(query = {}) {
+    const { listPublicShowcase } = await import('./showcase.js');
+    return listPublicShowcase(query);
   },
 
   async getPublicBySlug(slug) {
+    const { publicItemWhere, publicItemInclude } = await import('./showcase.js');
+    let decoded = slug;
+    try {
+      decoded = decodeURIComponent(String(slug || ''));
+    } catch {
+      decoded = String(slug || '');
+    }
     const item = await prisma.portfolioItem.findFirst({
       where: {
-        slug,
-        deletedAt: null,
-        status: 'PUBLISHED',
-        videoFile: { deletedAt: null },
-        project: { deletedAt: null },
+        slug: decoded,
+        ...publicItemWhere,
       },
-      include: {
-        project: {
-          select: {
-            service: { select: { name: true } },
-          },
-        },
-        videoFile: {
-          select: {
-            id: true,
-            mimeType: true,
-            name: true,
-          },
-        },
-      },
+      include: publicItemInclude,
     });
     if (!item) throw new AppError('نمونه‌کار یافت نشد', 404, 'NOT_FOUND');
-    return serializePublicItem(item);
+
+    const serialized = serializePublicItem(item);
+    const categoryId = serialized.category?.id;
+    let related = [];
+    if (categoryId) {
+      const rows = await prisma.portfolioItemCategory.findMany({
+        where: {
+          categoryId,
+          itemId: { not: item.id },
+          item: publicItemWhere,
+        },
+        orderBy: { sortOrder: 'asc' },
+        take: 8,
+        include: { item: { include: publicItemInclude } },
+      });
+      related = rows.map((row) => serializePublicItem(row.item));
+    }
+
+    return { ...serialized, related };
   },
 
-  async getPublishedStreamTarget(id) {
+  async getStreamTarget(id, { publishedOnly = true } = {}) {
     const item = await prisma.portfolioItem.findFirst({
       where: {
         id,
         deletedAt: null,
-        status: 'PUBLISHED',
+        ...(publishedOnly ? { status: 'PUBLISHED' } : {}),
       },
       include: {
         videoFile: {
@@ -736,10 +828,24 @@ export const portfolioService = {
         },
       },
     });
-    if (!item || !item.videoFile || item.videoFile.deletedAt) {
+    if (!item) {
+      throw new AppError('ویدیوی نمونه‌کار در دسترس نیست', 404, 'NOT_FOUND');
+    }
+    if (item.storageKey) {
+      return {
+        storageKey: item.storageKey,
+        mimeType: 'video/mp4',
+        name: `${item.slug || 'portfolio'}.mp4`,
+      };
+    }
+    if (!item.videoFile || item.videoFile.deletedAt || !item.videoFile.storageKey) {
       throw new AppError('ویدیوی نمونه‌کار در دسترس نیست', 404, 'NOT_FOUND');
     }
     return item.videoFile;
+  },
+
+  async getPublishedStreamTarget(id) {
+    return this.getStreamTarget(id, { publishedOnly: true });
   },
 };
 

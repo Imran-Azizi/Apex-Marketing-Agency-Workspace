@@ -12,6 +12,9 @@ import {
   Images,
   BriefcaseBusiness,
   Globe,
+  Inbox,
+  Presentation,
+  Handshake,
 } from "lucide-react";
 
 export type InternalRole =
@@ -87,6 +90,17 @@ const MANAGER_NAV: NavItem[] = [
         label: "مدیریت خدمات",
         icon: BriefcaseBusiness,
       },
+      {
+        href: "/manager/hero",
+        label: "مدیریت اسلایدهای",
+        icon: Presentation,
+      },
+      {
+        href: "/manager/customers",
+        label: "مشتریان ما",
+        icon: Handshake,
+      },
+      { href: "/manager/messages", label: "پیام‌های تماس", icon: Inbox },
     ],
   },
   { href: "/employees", label: "مدیریت کارمندان", icon: UserCog },
@@ -155,6 +169,18 @@ export function hasPermission(
   return needed.some((item) => set.has(item));
 }
 
+/**
+ * Reassigning the project editor is a manager action.
+ * The EDITOR role must never see or invoke this, even if projects.assign was granted.
+ */
+export function canAssignProjectEditor(
+  permissions: string[] | null | undefined,
+  role?: string | null,
+): boolean {
+  if (role === "EDITOR") return false;
+  return hasPermission(permissions, "projects.assign", role);
+}
+
 export function getHomePath(role: string | null | undefined): string {
   if (isInternalRole(role)) return ROLE_HOME[role];
   return "/login";
@@ -162,7 +188,10 @@ export function getHomePath(role: string | null | undefined): string {
 
 const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
   { prefix: "/sales/interactions", permission: "crm.view" },
+  { prefix: "/manager/messages", permission: "contact.view" },
+  { prefix: "/manager/customers", permission: "customers.view" },
   { prefix: "/manager/portfolio", permission: "portfolio.view" },
+  { prefix: "/manager/hero", permission: "hero.view" },
   { prefix: "/manager", permission: "dashboard.view" },
   { prefix: "/sales", permission: "dashboard.view" },
   { prefix: "/editor", permission: "video.view" },
@@ -194,6 +223,24 @@ const EXTRA_NAV: Array<NavItem & { permission: string }> = [
     label: "نمونه‌کارها",
     icon: Images,
     permission: "portfolio.view",
+  },
+  {
+    href: "/manager/hero",
+    label: "مدیریت اسلایدهای",
+    icon: Presentation,
+    permission: "hero.view",
+  },
+  {
+    href: "/manager/customers",
+    label: "مشتریان ما",
+    icon: Handshake,
+    permission: "customers.view",
+  },
+  {
+    href: "/manager/messages",
+    label: "پیام‌های تماس",
+    icon: Inbox,
+    permission: "contact.view",
   },
   {
     href: "/employees",

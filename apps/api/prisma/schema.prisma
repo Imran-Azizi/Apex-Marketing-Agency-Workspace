@@ -794,17 +794,60 @@ model ProjectFile {
   @@map("project_files")
 }
 
-/// Public showcase entries curated by Manager/Admin from completed projects
+model PortfolioCategory {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  sortOrder Int       @default(0)
+  isActive  Boolean   @default(true)
+  isSystem  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  items PortfolioItemCategory[]
+
+  @@index([isActive, sortOrder])
+  @@index([deletedAt])
+  @@map("portfolio_categories")
+}
+
+model PortfolioItemCategory {
+  itemId     String
+  categoryId String
+  sortOrder  Int      @default(0)
+  item       PortfolioItem     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  category   PortfolioCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([itemId, categoryId])
+  @@index([categoryId, sortOrder])
+  @@map("portfolio_item_categories")
+}
+
+model MixedPortfolioItem {
+  itemId    String        @id
+  item      PortfolioItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+
+  @@index([sortOrder])
+  @@map("mixed_portfolio_items")
+}
+
+/// Public showcase entries — from completed projects or direct manager uploads
 model PortfolioItem {
   id            String          @id @default(cuid())
-  projectId     String
-  project       Project         @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  videoFileId   String
-  videoFile     ProjectFile     @relation(fields: [videoFileId], references: [id], onDelete: Restrict)
+  projectId     String?
+  project       Project?        @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  videoFileId   String?
+  videoFile     ProjectFile?    @relation(fields: [videoFileId], references: [id], onDelete: Restrict)
+  storageKey    String?
+  thumbnailKey  String?
   title         String
-  description   String
+  description   String?
   slug          String          @unique
   status        PortfolioStatus @default(PUBLISHED)
+  sortOrder     Int             @default(0)
   publishedAt   DateTime?
   publishedById String?
   publishedBy   User?           @relation("PortfolioPublisher", fields: [publishedById], references: [id], onDelete: SetNull)
@@ -812,10 +855,14 @@ model PortfolioItem {
   updatedAt     DateTime        @updatedAt
   deletedAt     DateTime?
 
+  categories  PortfolioItemCategory[]
+  mixedEntry  MixedPortfolioItem?
+
   @@index([status, publishedAt])
   @@index([projectId])
   @@index([videoFileId])
   @@index([deletedAt])
+  @@index([sortOrder])
   @@map("portfolio_items")
 }
 
@@ -1310,6 +1357,69 @@ model Notification {
   @@index([portalAccountId, isRead])
   @@index([createdAt])
   @@map("notifications")
+}
+
+/// Public website Hero slideshow slides (manager CMS)
+model HeroSlide {
+  id               String    @id @default(cuid())
+  title            String
+  description      String?   @db.Text
+  imageKey         String
+  altText          String?
+  durationSeconds  Int       @default(5)
+  sortOrder        Int       @default(0)
+  isPublished      Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  @@index([isPublished, sortOrder])
+  @@index([deletedAt])
+  @@index([sortOrder])
+  @@map("hero_slides")
+}
+
+/// Public website «مشتریان ما» showcase (manager CMS — not CRM)
+model ShowcaseCustomer {
+  id           String    @id @default(cuid())
+  name         String
+  companyName  String
+  description  String?   @db.Text
+  imageKey     String
+  sortOrder    Int       @default(0)
+  isPublished  Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  @@index([isPublished, sortOrder])
+  @@index([deletedAt])
+  @@index([sortOrder])
+  @@map("showcase_customers")
+}
+
+/// Public website Contact Us submissions (manager inbox)
+model ContactMessage {
+  id        String    @id @default(cuid())
+  name      String
+  email     String
+  phone     String
+  company   String?
+  subject   String
+  message   String    @db.Text
+  isRead    Boolean   @default(false)
+  readAt    DateTime?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([isRead, createdAt])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@index([email])
+  @@map("contact_messages")
 }
 
 model AuditLog {

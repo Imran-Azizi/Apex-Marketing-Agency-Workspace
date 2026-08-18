@@ -86,6 +86,12 @@ export function hasAnyPermission(effectiveCodes, requiredCodes, roleCode) {
   );
 }
 
+/** Reassigning the project editor is never allowed for the EDITOR role. */
+export function canAssignProjectEditor(permissions, roleCode) {
+  if (roleCode === "EDITOR") return false;
+  return hasAnyPermission(permissions, ["projects.assign"], roleCode);
+}
+
 export function loadOverridesFromUser(user) {
   return (user?.userPermissions || []).map((row) => ({
     code: row.permission?.code,

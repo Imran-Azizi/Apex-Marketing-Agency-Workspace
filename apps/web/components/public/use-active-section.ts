@@ -7,7 +7,8 @@ export const PUBLIC_SECTION_IDS = [
   "home",
   "services",
   "portfolio",
-  "narrators",
+  "customers",
+  "contact",
 ] as const;
 
 export type PublicSectionId = (typeof PUBLIC_SECTION_IDS)[number];

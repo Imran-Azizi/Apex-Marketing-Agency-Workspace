@@ -45,7 +45,6 @@ Envelope:
 | GET | `/public/services` | Service cards |
 | GET | `/public/styles` | Video styles |
 | GET | `/public/narrators` | Active narrator profiles (portal brief selection) |
-| GET | `/public/narrators/samples` | Published audio samples (active narrators only) |
 | GET | `/public/portfolio` | Published items + filters |
 | GET | `/public/portfolio/:slug` | Detail |
 | GET | `/public/whatsapp-cta` | Build WhatsApp URL from settings |

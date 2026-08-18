@@ -27,6 +27,9 @@ import productionRoutes from "./modules/production/index.js";
 import backupRoutes from "./modules/backup/index.js";
 import portfolioRoutes from "./modules/portfolio/index.js";
 import servicesRoutes from "./modules/services/index.js";
+import contactRoutes from "./modules/contact/index.js";
+import heroRoutes from "./modules/hero/index.js";
+import customersRoutes from "./modules/customers/index.js";
 import { storage } from "./services/storage.js";
 
 export function createApp() {
@@ -123,6 +126,9 @@ export function createApp() {
   app.use("/api/v1/portfolio", portfolioRoutes);
   app.use("/api/v1/backup", backupRoutes);
   app.use("/api/v1/services", servicesRoutes);
+  app.use("/api/v1/contact", contactRoutes);
+  app.use("/api/v1/hero", heroRoutes);
+  app.use("/api/v1/customers", customersRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

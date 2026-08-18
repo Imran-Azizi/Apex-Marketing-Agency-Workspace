@@ -122,6 +122,8 @@ export async function uploadFileWithProgress(
     "/files/upload",
     fd,
     {
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity,
       transformRequest: [
         (body, headers) => {
           if (headers && typeof headers === "object") {

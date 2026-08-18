@@ -34,17 +34,8 @@ export const createServiceSchema = z.object({
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
     }),
-  revisionCount: z.coerce.number().int().min(0).max(50).optional().default(2),
   isPublished: z.boolean().optional().default(true),
   sortOrder: z.coerce.number().int().min(0).max(9999).optional().nullable(),
-  ctaLabel: z
-    .union([z.string().trim().max(80), z.literal(""), z.null()])
-    .optional()
-    .transform((v) => (v ? v : null)),
-  ctaHref: z
-    .union([z.string().trim().max(500), z.literal(""), z.null()])
-    .optional()
-    .transform((v) => (v ? v : null)),
 });
 
 export const updateServiceSchema = createServiceSchema.partial();
@@ -162,7 +153,10 @@ export const servicesService = {
       where: { isPublished: true, deletedAt: null },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     });
-    return rows.map(serializeService);
+    return rows.map((row) => {
+      const { revisionCount: _revisionCount, ...item } = serializeService(row);
+      return item;
+    });
   },
 
   async getById(id) {
@@ -194,11 +188,8 @@ export const servicesService = {
         description: data.description ?? null,
         imageKey: data.imageKey ?? null,
         startingPrice: data.startingPrice,
-        revisionCount: data.revisionCount ?? 2,
         isPublished: data.isPublished ?? true,
         sortOrder,
-        ctaLabel: data.ctaLabel ?? null,
-        ctaHref: data.ctaHref ?? null,
       },
     });
 
@@ -238,13 +229,8 @@ export const servicesService = {
         ...(data.startingPrice !== undefined
           ? { startingPrice: data.startingPrice }
           : {}),
-        ...(data.revisionCount != null
-          ? { revisionCount: data.revisionCount }
-          : {}),
         ...(data.isPublished != null ? { isPublished: data.isPublished } : {}),
         ...(data.sortOrder != null ? { sortOrder: data.sortOrder } : {}),
-        ...(data.ctaLabel !== undefined ? { ctaLabel: data.ctaLabel } : {}),
-        ...(data.ctaHref !== undefined ? { ctaHref: data.ctaHref } : {}),
       },
     });
 

@@ -33,8 +33,8 @@ export function PublicServicesSection({
     <PublicSection
       id="services"
       eyebrow="خدمات"
-      title="خدمات تولید محتوا و ویدیو"
-      description="از ایده تا تحویل نهایی — بسته‌های حرفه‌ای متناسب با نیاز برند شما"
+      title="خدمات ما"
+      description="خدمات شرکت اپیکس، ساخت ویدیوهای تبلیغاتی است که با استفاده از موشن گرافیک، فوتیج‌های ارسالی و سرویس‌های هوش مصنوعی تولید می‌شوند."
       tone="muted"
     >
       {isLoading ? (

@@ -296,12 +296,68 @@
     animation: hero-orb 14s ease-in-out infinite;
   }
 
+  @keyframes hero-kenburns {
+    from {
+      transform: scale(1.06);
+      opacity: 0.72;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  @keyframes hero-copy-enter {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 16px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  .hero-slide-visual-active {
+    animation: hero-kenburns 1.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .hero-slide-copy-title {
+    color: #ffffff;
+    text-shadow:
+      0 1px 2px rgb(0 0 0 / 0.42),
+      0 10px 28px rgb(0 0 0 / 0.4);
+  }
+
+  .hero-slide-copy-body {
+    color: rgb(255 255 255 / 0.86);
+    text-shadow:
+      0 1px 2px rgb(0 0 0 / 0.38),
+      0 8px 22px rgb(0 0 0 / 0.32);
+  }
+
+  .hero-slide-copy-active > :nth-child(1) {
+    animation: hero-copy-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .hero-slide-copy-active > :nth-child(2) {
+    animation: hero-copy-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) 90ms both;
+  }
+
+  .hero-slide-copy-active > :nth-child(3) {
+    animation: hero-copy-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) 170ms both;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .animate-public-fade,
     .animate-public-fade-delay,
     .animate-auth-rise,
     .hero-enter,
-    .hero-orb {
+    .hero-orb,
+    .hero-slide-visual-active,
+    .hero-slide-copy-active > :nth-child(1),
+    .hero-slide-copy-active > :nth-child(2),
+    .hero-slide-copy-active > :nth-child(3) {
       animation: none !important;
     }
 

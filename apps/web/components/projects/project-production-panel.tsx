@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost } from "@/lib/api";
-import { hasPermission } from "@/lib/rbac";
+import { canAssignProjectEditor } from "@/lib/rbac";
 import { useMeQuery } from "@/lib/permissions";
 import {
   CurrencyField,
@@ -168,12 +168,9 @@ export function ProjectProductionPanel({
 }) {
   const qc = useQueryClient();
   const { data: me } = useMeQuery();
-  const isManager = hasPermission(
-    me?.permissions,
-    ["projects.assign", "video.approve", "video.send"],
-    roleCode,
-  );
-  const isEditor = roleCode === "EDITOR";
+  const resolvedRole = roleCode ?? me?.role ?? null;
+  const canAssignEditor = canAssignProjectEditor(me?.permissions, resolvedRole);
+  const isEditor = resolvedRole === "EDITOR";
 
   const [assignOpen, setAssignOpen] = useState(false);
   const [editorId, setEditorId] = useState("");
@@ -215,7 +212,7 @@ export function ProjectProductionPanel({
   const editorsQ = useQuery({
     queryKey: ["production-editors"],
     queryFn: () => apiGet<EditorProfile[]>("/production/editors"),
-    enabled: isManager && assignOpen,
+    enabled: canAssignEditor && assignOpen,
   });
 
   const invalidate = () => {
@@ -231,6 +228,9 @@ export function ProjectProductionPanel({
 
   const assignMut = useMutation({
     mutationFn: () => {
+      if (!canAssignEditor) {
+        throw new Error("شما اجازه تغییر ادیتور را ندارید");
+      }
       const costError = validateCurrencyInput(editingCost, "هزینه ادیت");
       if (costError) {
         setEditingCostError(costError);
@@ -303,7 +303,7 @@ export function ProjectProductionPanel({
 
   const tabBadges = getProductionTabBadges(materialsCtx, { finalCount });
 
-  const showAssign = isManager;
+  const showAssign = canAssignEditor;
   const showStart =
     isEditor &&
     task &&
@@ -426,6 +426,7 @@ export function ProjectProductionPanel({
         </TabsContent>
       </Tabs>
 
+      {canAssignEditor ? (
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
         <DialogContent className="text-start sm:max-w-md" dir="rtl">
           <DialogHeader className="text-start sm:text-start">
@@ -512,6 +513,7 @@ export function ProjectProductionPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      ) : null}
     </div>
   );
 }

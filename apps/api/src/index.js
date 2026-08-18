@@ -1,6 +1,13 @@
+import dns from "dns";
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { startBackupScheduler } from "./services/backupScheduler.js";
+
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  /* Node < 17 */
+}
 
 /**
  * Transient outbound network failures (Cloudinary/undici HTTP/2 resets, etc.)
@@ -78,3 +85,4 @@ server.requestTimeout = 20 * 60 * 1000;
 server.headersTimeout = 21 * 60 * 1000;
 server.timeout = 20 * 60 * 1000;
 server.keepAliveTimeout = 120 * 1000;
+

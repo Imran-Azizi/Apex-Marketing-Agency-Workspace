@@ -305,6 +305,8 @@ export const env = {
   defaultManagerPassword:
     process.env.DEFAULT_MANAGER_PASSWORD || "ApexManager!2026",
   whatsappNumber: process.env.WHATSAPP_NUMBER || "93700000000",
+  contactEmail: process.env.CONTACT_EMAIL || "info@apex.af",
+  contactPhone: process.env.CONTACT_PHONE || process.env.WHATSAPP_NUMBER || "93700000000",
   /**
    * Return plaintext OTP in API responses for manual WhatsApp delivery.
    * Defaults to true because no automated WhatsApp/SMS OTP provider is wired yet.

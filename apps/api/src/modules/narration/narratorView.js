@@ -180,6 +180,7 @@ export function serializeNarratorNotification(notification) {
     title: notification.title,
     body: sanitizeNarratorNotificationBody(notification.body),
     isRead: notification.isRead,
+    isUnseen: !notification.isRead,
     createdAt: notification.createdAt,
     readAt: notification.readAt ?? null,
     type: meta.type || null,

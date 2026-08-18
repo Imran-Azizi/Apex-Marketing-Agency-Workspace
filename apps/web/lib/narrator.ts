@@ -37,13 +37,20 @@ export type NarratorTaskSummary = {
   progress?: import("@/lib/project-progress").ProjectProgress | number | null;
 };
 
+/** Shown only after the manager explicitly confirms the uploaded audio. */
+export const NARRATION_APPROVED_LABEL = "نریشن تایید شد";
+
 export const NARRATION_STATUS_LABEL: Record<string, string> = {
   PENDING_NARRATION: "جدید",
   RECORDING_IN_PROGRESS: "در حال کار",
   NARRATION_SUBMITTED: "ارسال‌شده",
-  APPROVED: "تکمیل‌شده",
+  APPROVED: NARRATION_APPROVED_LABEL,
   REVISION_REQUESTED: "نیاز به اصلاح",
 };
+
+export function isNarrationApproved(status?: string | null): boolean {
+  return status === "APPROVED";
+}
 
 export const NARRATION_PRIORITY_LABEL: Record<string, string> = {
   OVERDUE: "مهلت گذشته",

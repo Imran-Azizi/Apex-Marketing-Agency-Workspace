@@ -11,7 +11,7 @@ export default function PortfolioRedirectPage() {
   }, [router]);
   return (
     <div className="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-      در حال انتقال به بخش نمونه‌کارها…
+      در حال انتقال به بخش نمونه های کاری…
     </div>
   );
 }

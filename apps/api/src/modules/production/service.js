@@ -22,6 +22,7 @@ import {
   buildFinalVideoRevisionRequestedNotification,
 } from "../../services/notifications.js";
 import { serializeEditorTaskSummary } from "./editorView.js";
+import { canAssignProjectEditor } from "../../services/permissions/effective.js";
 import {
   VIDEO_TYPE_LABELS,
   buildFinalFileMeta,
@@ -311,8 +312,22 @@ async function nextFinalVersion(projectId, tx = prisma) {
   return (latest?.version || 0) + 1;
 }
 
+function assertCanAssignProjectEditor(auth) {
+  if (auth?.roleCode === "EDITOR") {
+    throw new AppError(
+      "ادیتور اجازه تغییر یا ارجاع ادیتور پروژه را ندارد",
+      403,
+      "FORBIDDEN",
+    );
+  }
+  if (!canAssignProjectEditor(auth?.permissions, auth?.roleCode)) {
+    throw new AppError("شما اجازه دسترسی به این منبع را ندارید", 403, "FORBIDDEN");
+  }
+}
+
 export const productionService = {
-  async listAvailableEditors() {
+  async listAvailableEditors(auth) {
+    assertCanAssignProjectEditor(auth);
     return prisma.teamProfile.findMany({
       where: {
         kind: "EDITOR",
@@ -777,6 +792,7 @@ export const productionService = {
     auth,
     req,
   ) {
+    assertCanAssignProjectEditor(auth);
     if (!editorProfileId)
       throw new AppError("انتخاب ادیتور الزامی است", 400, "EDITOR_REQUIRED");
 

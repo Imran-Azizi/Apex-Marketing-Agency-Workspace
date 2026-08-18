@@ -8,7 +8,18 @@ import {
   portfolioService,
   publishPortfolioSchema,
   updatePortfolioSchema,
+  streamPortfolioVideo,
 } from './service.js';
+import {
+  showcaseMethods,
+  createPortfolioItemSchema,
+  createCategorySchema,
+  updateCategorySchema,
+  mixedSelectionSchema,
+  reorderPortfolioSchema,
+} from './showcase.js';
+
+Object.assign(portfolioService, showcaseMethods);
 
 const router = Router();
 router.use(requireAuth, requireInternal);
@@ -20,6 +31,93 @@ router.get('/', requirePermission('portfolio.view'), async (req, res, next) => {
     next(e);
   }
 });
+
+router.get('/stats', requirePermission('portfolio.view'), async (req, res, next) => {
+  try {
+    ok(res, await portfolioService.getStats());
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get(
+  '/categories',
+  requirePermission('portfolio.view'),
+  async (req, res, next) => {
+    try {
+      ok(res, await portfolioService.listCategoriesAdmin());
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/categories',
+  requireCsrf,
+  requirePermission('portfolio.edit'),
+  validate(createCategorySchema),
+  async (req, res, next) => {
+    try {
+      created(res, await portfolioService.createCategory(req.body, req.auth, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.patch(
+  '/categories/:id',
+  requireCsrf,
+  requirePermission('portfolio.edit'),
+  validate(updateCategorySchema),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await portfolioService.updateCategory(req.params.id, req.body, req.auth, req),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get('/mixed', requirePermission('portfolio.view'), async (req, res, next) => {
+  try {
+    ok(res, await portfolioService.listMixedAdmin());
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.put(
+  '/mixed',
+  requireCsrf,
+  requirePermission('portfolio.edit'),
+  validate(mixedSelectionSchema),
+  async (req, res, next) => {
+    try {
+      ok(res, await portfolioService.setMixed(req.body.orderedIds, req.auth, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.patch(
+  '/reorder',
+  requireCsrf,
+  requirePermission('portfolio.edit'),
+  validate(reorderPortfolioSchema),
+  async (req, res, next) => {
+    try {
+      ok(res, await portfolioService.reorderPortfolio(req.body, req.auth, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 router.get(
   '/projects/:projectId',
@@ -60,6 +158,35 @@ router.post(
         req,
       );
       created(res, item);
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/',
+  requireCsrf,
+  requirePermission('portfolio.publish'),
+  validate(createPortfolioItemSchema),
+  async (req, res, next) => {
+    try {
+      created(res, await portfolioService.createItem(req.body, req.auth, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
+  '/:id/stream',
+  requirePermission('portfolio.view'),
+  async (req, res, next) => {
+    try {
+      const file = await portfolioService.getStreamTarget(req.params.id, {
+        publishedOnly: false,
+      });
+      await streamPortfolioVideo(req, res, file);
     } catch (e) {
       next(e);
     }

@@ -53,6 +53,10 @@ import {
   NarrationAudioVersions,
   type NarrationTakeRecord,
 } from "@/components/narration/narration-audio-versions";
+import {
+  isNarrationApproved,
+  NARRATION_APPROVED_LABEL,
+} from "@/lib/narrator";
 
 type NarrationStatus =
   | "PENDING_NARRATION"
@@ -122,7 +126,7 @@ const STATUS_LABEL: Record<NarrationStatus, string> = {
   PENDING_NARRATION: "در انتظار نریشن",
   RECORDING_IN_PROGRESS: "در حال ضبط",
   NARRATION_SUBMITTED: "ارسال‌شده",
-  APPROVED: "تأییدشده",
+  APPROVED: NARRATION_APPROVED_LABEL,
   REVISION_REQUESTED: "درخواست اصلاح",
 };
 
@@ -195,7 +199,9 @@ function StatusTracker({ status }: { status: NarrationStatus }) {
               status === "REVISION_REQUESTED" && i === 2 && ALERT_CALLOUT,
             )}
           >
-            <p className="font-medium">{STATUS_LABEL[step]}</p>
+            <p className="font-medium">
+              {step === "APPROVED" ? "تایید" : STATUS_LABEL[step]}
+            </p>
           </li>
         );
       })}
@@ -558,7 +564,7 @@ export function ProjectNarrationPanel({
 
             <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-4 lg:col-span-2">
               <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-semibold">متن نریشن تأییدشده</p>
+                <p className="text-sm font-semibold">متن نریشن</p>
                 {task.contentVersion && (
                   <Badge variant="secondary" className="font-normal">
                     نسخه{" "}
@@ -694,6 +700,7 @@ export function ProjectNarrationPanel({
             <NarrationAudioVersions
               takes={audioVersions}
               currentFileId={task.audioFile?.id}
+              approved={isNarrationApproved(task.status)}
               onDownload={async (file) => {
                 try {
                   await handleAudioDownload(file);

@@ -1,33 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import {
-  Eye,
-  Film,
-  Loader2,
-  Pencil,
-  Search,
-  Trash2,
-  EyeOff,
-  CheckCircle2,
-  ExternalLink,
-} from "lucide-react";
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, Loader2, Trash2 } from "lucide-react";
 import { apiDelete, apiGet, apiPatch } from "@/lib/api";
-import { formatDate, cn } from "@/lib/utils";
-import { mediaStreamUrl } from "@/lib/media";
 import { hasPermission } from "@/lib/rbac";
 import { useMeQuery } from "@/lib/permissions";
-import { PageHeader } from "@/components/shared/page-header";
-import { EmptyState } from "@/components/shared/empty-state";
-import { VideoPlayer } from "@/components/media/video-player";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -36,112 +21,110 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { toast } from "sonner";
+import { ErrorState } from "@/components/loading/error-state";
+import { PortfolioHeader } from "./_components/portfolio-header";
+import { PortfolioStats } from "./_components/portfolio-stats";
+import { PortfolioToolbar } from "./_components/portfolio-toolbar";
+import { PortfolioGrid } from "./_components/portfolio-grid";
+import { PortfolioPreview } from "./_components/portfolio-preview";
+import { PortfolioEmptyState } from "./_components/portfolio-empty-state";
+import { PortfolioSkeleton } from "./_components/portfolio-skeleton";
+import { PortfolioVideoForm } from "./_components/portfolio-video-form";
+import { MixedPortfolioManager } from "./_components/mixed-portfolio-manager";
+import { CategoryManager } from "./_components/category-manager";
+import type {
+  PortfolioAdminCategory,
+  PortfolioAdminItem,
+  PortfolioListPayload,
+  PortfolioMixedFilter,
+  PortfolioStats as PortfolioStatsType,
+  PortfolioStatusFilter,
+} from "./_components/types";
 
-type PortfolioAdminItem = {
-  id: string;
-  title: string;
-  description: string;
-  slug: string;
-  status: "PUBLISHED" | "UNPUBLISHED";
-  publishedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  project: {
-    id: string;
-    code: string;
-    title: string;
-    status: string;
-    completedAt: string | null;
-    serviceName: string | null;
-  } | null;
-  video: {
-    id: string;
-    name: string;
-    kind: string;
-    videoType: string | null;
-    mimeType: string | null;
-    sizeBytes: number | null;
-    version: number;
-  } | null;
-  publishedBy: { id: string; fullName: string } | null;
-};
-
-type ListPayload = {
-  items: PortfolioAdminItem[];
-  total: number;
-  page: number;
-  pageSize: number;
-};
+const PAGE_SIZE = 12;
 
 export default function PortfolioAdminPage() {
   const qc = useQueryClient();
   const { data: me } = useMeQuery();
+  const canPublish = hasPermission(me?.permissions, "portfolio.publish", me?.role);
   const canEdit = hasPermission(me?.permissions, "portfolio.edit", me?.role);
-  const canDelete = hasPermission(
-    me?.permissions,
-    "portfolio.delete",
-    me?.role,
-  );
+  const canDelete = hasPermission(me?.permissions, "portfolio.delete", me?.role);
 
+  const [tab, setTab] = useState("videos");
+  const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"ALL" | "PUBLISHED" | "UNPUBLISHED">(
-    "ALL",
-  );
+  const [status, setStatus] = useState<PortfolioStatusFilter>("ALL");
+  const [categoryId, setCategoryId] = useState("ALL");
+  const [mixed, setMixed] = useState<PortfolioMixedFilter>("ALL");
+  const [page, setPage] = useState(1);
   const [preview, setPreview] = useState<PortfolioAdminItem | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [editItem, setEditItem] = useState<PortfolioAdminItem | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editDescription, setEditDescription] = useState("");
   const [deleteItem, setDeleteItem] = useState<PortfolioAdminItem | null>(null);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setQ(searchInput.trim());
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const categoriesQ = useQuery({
+    queryKey: ["portfolio-categories"],
+    queryFn: () => apiGet<PortfolioAdminCategory[]>("/portfolio/categories"),
+  });
+
+  const statsQ = useQuery({
+    queryKey: ["portfolio-admin-stats"],
+    queryFn: () => apiGet<PortfolioStatsType>("/portfolio/stats"),
+  });
+
   const listQ = useQuery({
-    queryKey: ["portfolio-admin", q, status],
+    queryKey: ["portfolio-admin", q, status, categoryId, mixed, page],
     queryFn: () => {
       const params = new URLSearchParams();
-      if (q.trim()) params.set("q", q.trim());
+      if (q) params.set("q", q);
       if (status !== "ALL") params.set("status", status);
-      params.set("pageSize", "50");
-      const qs = params.toString();
-      return apiGet<ListPayload>(`/portfolio${qs ? `?${qs}` : ""}`);
+      if (categoryId !== "ALL") params.set("categoryId", categoryId);
+      if (mixed === "IN") params.set("mixed", "true");
+      if (mixed === "OUT") params.set("mixed", "false");
+      params.set("page", String(page));
+      params.set("pageSize", String(PAGE_SIZE));
+      return apiGet<PortfolioListPayload>(`/portfolio?${params.toString()}`);
     },
+    placeholderData: keepPreviousData,
   });
 
   const items = listQ.data?.items || [];
+  const total = listQ.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const hasQuery =
+    Boolean(q) || status !== "ALL" || categoryId !== "ALL" || mixed !== "ALL";
+  const categories = categoriesQ.data || [];
 
-  const counts = useMemo(() => {
-    const published = items.filter((i) => i.status === "PUBLISHED").length;
-    return {
-      total: listQ.data?.total ?? items.length,
-      published,
-      unpublished: (listQ.data?.total ?? items.length) - published,
-    };
-  }, [items, listQ.data?.total]);
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  function invalidateAll() {
+    qc.invalidateQueries({ queryKey: ["portfolio-admin"] });
+    qc.invalidateQueries({ queryKey: ["portfolio-admin-stats"] });
+    qc.invalidateQueries({ queryKey: ["portfolio-categories"] });
+    qc.invalidateQueries({ queryKey: ["portfolio-mixed"] });
+    qc.invalidateQueries({ queryKey: ["public-portfolio"] });
+    qc.invalidateQueries({ queryKey: ["public-portfolio-tabs"] });
+  }
 
   const updateMut = useMutation({
     mutationFn: (payload: {
       id: string;
-      title?: string;
-      description?: string;
       status?: "PUBLISHED" | "UNPUBLISHED";
-    }) =>
-      apiPatch(`/portfolio/${payload.id}`, {
-        title: payload.title,
-        description: payload.description,
-        status: payload.status,
-      }),
+    }) => apiPatch(`/portfolio/${payload.id}`, { status: payload.status }),
     onSuccess: () => {
-      toast.success("نمونه‌کار به‌روزرسانی شد");
-      qc.invalidateQueries({ queryKey: ["portfolio-admin"] });
-      qc.invalidateQueries({ queryKey: ["public-portfolio"] });
-      setEditItem(null);
+      toast.success("وضعیت نمونه‌کار به‌روزرسانی شد");
+      invalidateAll();
     },
     onError: (e) =>
       toast.error(e instanceof Error ? e.message : "به‌روزرسانی ناموفق بود"),
@@ -150,308 +133,179 @@ export default function PortfolioAdminPage() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => apiDelete(`/portfolio/${id}`),
     onSuccess: () => {
-      toast.success("از نمونه‌کارها حذف شد (پروژه اصلی باقی ماند)");
-      qc.invalidateQueries({ queryKey: ["portfolio-admin"] });
-      qc.invalidateQueries({ queryKey: ["public-portfolio"] });
-      qc.invalidateQueries({ queryKey: ["portfolio-project"] });
+      toast.success("نمونه‌کار حذف شد");
+      invalidateAll();
       setDeleteItem(null);
     },
     onError: (e) =>
       toast.error(e instanceof Error ? e.message : "حذف ناموفق بود"),
   });
 
-  function openEdit(item: PortfolioAdminItem) {
-    setEditItem(item);
-    setEditTitle(item.title);
-    setEditDescription(item.description);
-  }
-
   return (
-    <div className="space-y-6" dir="rtl">
-      <PageHeader
-        title="نمونه‌کارها"
-        subtitle="مدیریت پروژه‌های منتشرشده در وب‌سایت عمومی"
-        actions={
-          <Button variant="outline" size="sm" asChild className="gap-1.5">
-            <Link href="/portfolio" target="_blank" rel="noreferrer">
-              <ExternalLink className="h-3.5 w-3.5" />
-              مشاهده عمومی
-            </Link>
-          </Button>
-        }
+    <div className="space-y-6 text-start" dir="rtl">
+      <PortfolioHeader
+        canCreate={canPublish}
+        onCreate={() => {
+          setEditItem(null);
+          setFormOpen(true);
+        }}
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <StatCard label="کل نمونه‌کارها" value={counts.total} />
-        <StatCard label="منتشرشده" value={counts.published} tone="success" />
-        <StatCard label="غیرفعال" value={Math.max(0, counts.unpublished)} />
-      </div>
+      <PortfolioStats
+        stats={
+          statsQ.data || { total: 0, published: 0, categories: 0, mixed: 0 }
+        }
+        loading={statsQ.isLoading}
+      />
 
-      <div className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-4 sm:flex-row sm:items-center">
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="جستجو در عنوان، توضیحات یا پروژه…"
-            className="h-10 ps-9"
+      <Tabs value={tab} onValueChange={setTab} className="space-y-5">
+        <TabsList
+          variant="line"
+          className="w-full justify-start overflow-x-auto"
+          dir="rtl"
+        >
+          <TabsTrigger variant="line" value="videos">
+            ویدیوها
+          </TabsTrigger>
+          <TabsTrigger variant="line" value="mixed">
+            مدیریت مختلط
+          </TabsTrigger>
+          <TabsTrigger variant="line" value="categories">
+            مدیریت کتگوری ها
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="videos" className="space-y-5">
+          <PortfolioToolbar
+            search={searchInput}
+            onSearchChange={setSearchInput}
+            status={status}
+            onStatusChange={(next) => {
+              setStatus(next);
+              setPage(1);
+            }}
+            categoryId={categoryId}
+            onCategoryChange={(next) => {
+              setCategoryId(next);
+              setPage(1);
+            }}
+            mixed={mixed}
+            onMixedChange={(next) => {
+              setMixed(next);
+              setPage(1);
+            }}
+            categories={categories}
           />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ["ALL", "همه"],
-              ["PUBLISHED", "منتشرشده"],
-              ["UNPUBLISHED", "غیرفعال"],
-            ] as const
-          ).map(([id, label]) => (
-            <Button
-              key={id}
-              size="sm"
-              variant={status === id ? "brand" : "outline"}
-              onClick={() => setStatus(id)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      </div>
 
-      {listQ.isLoading ? (
-        <div className="space-y-3">
-          <Skeleton className="h-16 w-full rounded-xl" />
-          <Skeleton className="h-64 w-full rounded-xl" />
-        </div>
-      ) : null}
+          {listQ.isLoading ? <PortfolioSkeleton /> : null}
 
-      {listQ.isError ? (
-        <EmptyState
-          title="بارگذاری نمونه‌کارها ناموفق بود"
-          description="لطفاً دوباره تلاش کنید."
-        />
-      ) : null}
-
-      {listQ.data && items.length === 0 ? (
-        <EmptyState
-          title="هنوز نمونه‌کاری منتشر نشده است"
-          description="از تب محصول نهایی پروژه‌های تکمیل‌شده، گزینه «ارسال به نمونه‌کارها» را استفاده کنید."
-        />
-      ) : null}
-
-      {items.length > 0 ? (
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>نمونه‌کار</TableHead>
-                <TableHead>پروژه</TableHead>
-                <TableHead>وضعیت</TableHead>
-                <TableHead>تاریخ انتشار</TableHead>
-                <TableHead className="w-[1%] whitespace-nowrap">عملیات</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>
-                    <div className="min-w-0 max-w-sm space-y-1">
-                      <p className="truncate font-medium">{item.title}</p>
-                      <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-                        {item.description}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-1 text-sm">
-                      <p className="font-medium">{item.project?.title || "—"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {item.project?.code}
-                        {item.project?.serviceName
-                          ? ` · ${item.project.serviceName}`
-                          : ""}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        item.status === "PUBLISHED" ? "success" : "secondary"
-                      }
-                    >
-                      {item.status === "PUBLISHED" ? "منتشرشده" : "غیرفعال"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {item.publishedAt ? formatDate(item.publishedAt) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 gap-1 px-2"
-                        onClick={() => setPreview(item)}
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        پیش‌نمایش
-                      </Button>
-                      {canEdit ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1 px-2"
-                          onClick={() => openEdit(item)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          ویرایش
-                        </Button>
-                      ) : null}
-                      {canEdit ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1 px-2"
-                          disabled={updateMut.isPending}
-                          onClick={() =>
-                            updateMut.mutate({
-                              id: item.id,
-                              status:
-                                item.status === "PUBLISHED"
-                                  ? "UNPUBLISHED"
-                                  : "PUBLISHED",
-                            })
-                          }
-                        >
-                          {item.status === "PUBLISHED" ? (
-                            <>
-                              <EyeOff className="h-3.5 w-3.5" />
-                              لغو انتشار
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              انتشار
-                            </>
-                          )}
-                        </Button>
-                      ) : null}
-                      {canDelete ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1 px-2 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteItem(item)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          حذف
-                        </Button>
-                      ) : null}
-                      {item.project?.id ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 gap-1 px-2"
-                          asChild
-                        >
-                          <Link href={`/projects/${item.project.id}`}>
-                            <Film className="h-3.5 w-3.5" />
-                            پروژه
-                          </Link>
-                        </Button>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      ) : null}
-
-      <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
-        <DialogContent className="max-w-3xl text-start sm:max-w-3xl" dir="rtl">
-          <DialogHeader className="text-start">
-            <DialogTitle>{preview?.title}</DialogTitle>
-            <DialogDescription className="leading-6">
-              {preview?.description}
-            </DialogDescription>
-          </DialogHeader>
-          {preview?.video?.id ? (
-            <VideoPlayer
-              src={mediaStreamUrl(preview.video.id)}
-              title={preview.title}
+          {listQ.isError ? (
+            <ErrorState
+              title="دریافت نمونه‌کارها با مشکل مواجه شد"
+              onRetry={() => void listQ.refetch()}
             />
           ) : null}
-        </DialogContent>
-      </Dialog>
 
-      <Dialog
-        open={!!editItem}
-        onOpenChange={(o) => !o && !updateMut.isPending && setEditItem(null)}
-      >
-        <DialogContent className="text-start sm:max-w-lg" dir="rtl">
-          <DialogHeader className="text-start">
-            <DialogTitle>ویرایش نمونه‌کار</DialogTitle>
-            <DialogDescription>
-              عنوان و توضیحات عمومی را ویرایش کنید.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-portfolio-title">عنوان</Label>
-              <Input
-                id="edit-portfolio-title"
-                value={editTitle}
-                disabled={updateMut.isPending}
-                onChange={(e) => setEditTitle(e.target.value)}
-                maxLength={120}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-portfolio-desc">توضیحات</Label>
-              <Textarea
-                id="edit-portfolio-desc"
-                rows={5}
-                value={editDescription}
-                disabled={updateMut.isPending}
-                onChange={(e) => setEditDescription(e.target.value)}
-                maxLength={2000}
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2 sm:justify-start">
-            <Button
-              variant="outline"
-              disabled={updateMut.isPending}
-              onClick={() => setEditItem(null)}
-            >
-              انصراف
-            </Button>
-            <Button
-              variant="brand"
-              className="gap-2"
-              disabled={
-                updateMut.isPending ||
-                editTitle.trim().length < 3 ||
-                editDescription.trim().length < 20
-              }
-              onClick={() => {
-                if (!editItem) return;
-                updateMut.mutate({
-                  id: editItem.id,
-                  title: editTitle.trim(),
-                  description: editDescription.trim(),
-                });
+          {!listQ.isLoading && !listQ.isError && items.length === 0 ? (
+            <PortfolioEmptyState
+              hasQuery={hasQuery}
+              canCreate={canPublish}
+              onCreate={() => {
+                setEditItem(null);
+                setFormOpen(true);
               }}
+            />
+          ) : null}
+
+          {items.length > 0 ? (
+            <div
+              className={
+                listQ.isFetching && !listQ.isLoading
+                  ? "space-y-5 opacity-70 transition-opacity"
+                  : "space-y-5"
+              }
             >
-              {updateMut.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <PortfolioGrid
+                items={items}
+                canEdit={canEdit}
+                canDelete={canDelete}
+                publishPendingId={
+                  updateMut.isPending ? updateMut.variables?.id ?? null : null
+                }
+                onPreview={setPreview}
+                onEdit={(item) => {
+                  setEditItem(item);
+                  setFormOpen(true);
+                }}
+                onTogglePublish={(item) =>
+                  updateMut.mutate({
+                    id: item.id,
+                    status:
+                      item.status === "PUBLISHED" ? "UNPUBLISHED" : "PUBLISHED",
+                  })
+                }
+                onDelete={setDeleteItem}
+              />
+              {total > PAGE_SIZE ? (
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-card px-3 py-2 text-sm" dir="rtl">
+                  <p className="text-start text-muted-foreground">
+                    {total} مورد · صفحه {page} از {pageCount}
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      aria-label="صفحه قبل"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8"
+                      disabled={page >= pageCount}
+                      onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                      aria-label="صفحه بعد"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
               ) : null}
-              ذخیره
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </div>
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="mixed">
+          <MixedPortfolioManager categories={categories} canEdit={canEdit} />
+        </TabsContent>
+
+        <TabsContent value="categories">
+          <CategoryManager categories={categories} canEdit={canEdit} />
+        </TabsContent>
+      </Tabs>
+
+      <PortfolioPreview
+        item={preview}
+        open={!!preview}
+        onOpenChange={(open) => {
+          if (!open) setPreview(null);
+        }}
+      />
+
+      <PortfolioVideoForm
+        open={formOpen}
+        item={editItem}
+        categories={categories.filter((category) => category.isActive)}
+        onOpenChange={(open) => {
+          setFormOpen(open);
+          if (!open) setEditItem(null);
+        }}
+        onSaved={invalidateAll}
+      />
 
       <Dialog
         open={!!deleteItem}
@@ -459,10 +313,10 @@ export default function PortfolioAdminPage() {
       >
         <DialogContent className="text-start sm:max-w-md" dir="rtl">
           <DialogHeader className="text-start">
-            <DialogTitle>حذف از نمونه‌کارها</DialogTitle>
+            <DialogTitle>حذف نمونه‌کار</DialogTitle>
             <DialogDescription className="leading-6">
-              «{deleteItem?.title}» از وب‌سایت عمومی حذف می‌شود. پروژه اصلی و
-              ویدیوی نهایی حذف نمی‌شوند.
+              «{deleteItem?.title}» از وب‌سایت عمومی حذف می‌شود. فایل‌های پروژه
+              اصلی باقی می‌مانند.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:justify-start">
@@ -484,35 +338,11 @@ export default function PortfolioAdminPage() {
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              حذف از نمونه‌کارها
+              حذف نمونه‌کار
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone?: "success";
-}) {
-  return (
-    <div className="rounded-2xl border border-border/70 bg-card px-4 py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p
-        className={cn(
-          "mt-1 text-2xl font-semibold tabular-nums",
-          tone === "success" && "text-success",
-        )}
-      >
-        {value}
-      </p>
     </div>
   );
 }

@@ -56,6 +56,7 @@ export function LoginForm() {
       // Drop the stale unauthenticated "me" cache; otherwise the dashboard
       // layout reads the old null session and bounces back to /login.
       queryClient.removeQueries({ queryKey: ["me"] });
+      queryClient.removeQueries({ queryKey: ["notifications"] });
       router.push(home);
       router.refresh();
     } catch (err) {

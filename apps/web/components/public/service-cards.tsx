@@ -110,18 +110,8 @@ export function ServiceCard({
           <div className="flex-1" />
         )}
 
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
-          {service.revisionCount != null ? (
-            <span className="text-xs text-muted-foreground">
-              {service.revisionCount.toLocaleString("fa-AF", {
-                numberingSystem: "latn",
-              })}{" "}
-              دور بازبینی
-            </span>
-          ) : (
-            <span />
-          )}
-          {ctaHref ? (
+        {ctaHref ? (
+          <div className="mt-1 flex justify-end border-t border-border/60 pt-4">
             <Button
               asChild
               size="sm"
@@ -133,8 +123,8 @@ export function ServiceCard({
                 <ArrowLeft className="h-3.5 w-3.5" />
               </Link>
             </Button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
     </article>
   );

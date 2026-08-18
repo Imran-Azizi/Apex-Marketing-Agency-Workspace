@@ -9,7 +9,6 @@ export type PublicService = {
   imageKey?: string | null;
   imageUrl?: string | null;
   startingPrice?: string | null;
-  revisionCount?: number;
   sortOrder?: number;
   displayOrder?: number;
   ctaLabel?: string | null;

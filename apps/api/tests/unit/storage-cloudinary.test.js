@@ -102,6 +102,20 @@ test("resolveMediaPlacement routes by purpose", () => {
     { contentType: "image/jpeg", filename: "avatar.jpg" },
   );
   assert.equal(profile.folderPath, "users/user456");
+
+  const hero = resolveMediaPlacement(
+    { purpose: UPLOAD_PURPOSE.HERO_IMAGE },
+    { contentType: "image/jpeg", filename: "slide.jpg" },
+  );
+  assert.equal(hero.folderPath, "images/hero");
+  assert.equal(hero.category, MEDIA_ROOTS.IMAGES);
+
+  const customer = resolveMediaPlacement(
+    { purpose: UPLOAD_PURPOSE.CUSTOMER_IMAGE },
+    { contentType: "image/jpeg", filename: "client.jpg" },
+  );
+  assert.equal(customer.folderPath, "images/customers");
+  assert.equal(customer.category, MEDIA_ROOTS.IMAGES);
 });
 
 test("parseUploadContext maps legacy folders to purpose", () => {

@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Download, Loader2, Mic2 } from "lucide-react";
+import { CheckCircle2, Download, Loader2, Mic2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, formatDateTime } from "@/lib/utils";
 import { formatFileSize, filePreviewUrl } from "@/lib/upload";
+import { NARRATION_APPROVED_LABEL } from "@/lib/narrator";
+import { SUCCESS_ICON } from "@/lib/theme-tones";
 
 export type NarrationAudioFile = {
   id: string;
@@ -32,6 +34,8 @@ type Props = {
   emptyMessage?: string;
   onDownload?: (file: NarrationAudioFile) => Promise<void>;
   className?: string;
+  /** Manager-confirmed audio only — never set from upload alone. */
+  approved?: boolean;
 };
 
 function faNum(n: number) {
@@ -59,6 +63,7 @@ export function NarrationAudioVersions({
   emptyMessage = "هنوز فایل صوتی آپلود نشده است",
   onDownload,
   className,
+  approved = false,
 }: Props) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
@@ -85,6 +90,12 @@ export function NarrationAudioVersions({
 
   return (
     <div className={cn("space-y-3", className)}>
+      {approved ? (
+        <p className="flex items-center gap-1.5 text-sm font-semibold">
+          <CheckCircle2 className={cn("h-4 w-4 shrink-0", SUCCESS_ICON)} />
+          {NARRATION_APPROVED_LABEL}
+        </p>
+      ) : null}
       {versions.map((take) => {
         const file = take.file!;
         const previewUrl = filePreviewUrl(file.storageKey);
@@ -105,9 +116,7 @@ export function NarrationAudioVersions({
               <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-semibold">
-                    {versions.length > 1
-                      ? `نسخه ${faNum(take.version)}`
-                      : "نریشن تأییدشده"}
+                    {`نسخه ${faNum(take.version)}`}
                   </p>
                   {take.isCurrent && versions.length > 1 ? (
                     <Badge variant="brand" className="text-[11px]">
