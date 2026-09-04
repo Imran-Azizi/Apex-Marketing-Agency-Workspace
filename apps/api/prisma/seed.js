@@ -66,7 +66,17 @@ const ROLE_PERMS = Object.fromEntries(
 
 async function main() {
   console.log('Seeding APEX Workspace...');
+  const host = (() => {
+    try {
+      return new URL(process.env.DATABASE_URL).host;
+    } catch {
+      return '(invalid DATABASE_URL)';
+    }
+  })();
+  console.log(`Connecting to database at ${host}…`);
+  console.log('(Railway public proxies can take 30–60s per attempt; please wait.)');
   await connectWithRetry();
+  console.log('Database connected. Writing seed data…');
 
   for (const code of PERMISSIONS) {
     await prisma.permission.upsert({

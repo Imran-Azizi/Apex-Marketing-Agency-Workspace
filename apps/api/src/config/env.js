@@ -150,9 +150,10 @@ let cookieSecure =
   (isProd && (crossOrigin || cookieSameSite === "none"));
 
 // Cross-site credentialed auth (browser on Vercel, API on Railway) requires
-// SameSite=None; Secure. Force whenever the API is HTTPS and CORS includes another host —
-// covers misconfigured WEB_URL / COOKIE_* / NODE_ENV on Railway.
-const forceCrossSiteCookies = crossOrigin && /^https:/i.test(apiUrl);
+// SameSite=None; Secure. Force whenever CORS includes a different frontend host
+// — do not require API_URL itself to be https (Railway private URLs are often http).
+const frontendUsesHttps = corsOrigins.some((o) => /^https:/i.test(o));
+const forceCrossSiteCookies = crossOrigin && (isProd || frontendUsesHttps);
 if (forceCrossSiteCookies) {
   if (cookieSameSite !== "none") {
     console.warn(
