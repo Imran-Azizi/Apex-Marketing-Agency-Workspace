@@ -131,17 +131,69 @@ export function buildProjectCreatedNotification({
   };
 }
 
-export function buildLeadCreatedNotification({ customerId, personName, phone }) {
+export function buildLeadCreatedNotification({
+  customerId,
+  personName,
+  phone,
+  customerCode,
+  source,
+}) {
   return {
     eventKey: `lead.created:${customerId}`,
     title: 'سرنخ جدید',
-    body: `${personName}${phone ? ` — ${phone}` : ''}`,
+    body: [
+      personName,
+      customerCode,
+      phone,
+      source ? `منبع: ${source}` : null,
+    ]
+      .filter(Boolean)
+      .join(' — '),
     link: `/crm/${customerId}`,
     meta: {
       type: 'LEAD_CREATED',
       customerId,
       customerName: personName,
+      customerCode: customerCode || null,
       phone: phone || null,
+      source: source || null,
+    },
+  };
+}
+
+export function buildCustomerConvertedNotification({
+  customerId,
+  personName,
+  customerCode,
+  companyName,
+  actorName,
+  transferredAt = new Date(),
+}) {
+  const when = transferredAt ? formatFaDateTime(transferredAt) : null;
+  const body = [
+    'مشتری جدید از صفحه CRM و فروش به صفحه مدیریت مشتریان انتقال گردید.',
+    personName ? `نام: ${personName}` : null,
+    customerCode ? `شناسه مشتری: ${customerCode}` : null,
+    companyName ? `شرکت: ${companyName}` : null,
+    actorName ? `توسط: ${actorName}` : null,
+    when ? `زمان: ${when}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return {
+    eventKey: `crm.converted:${customerId}`,
+    title: 'انتقال مشتری از CRM و فروش',
+    body,
+    link: `/crm/${customerId}`,
+    meta: {
+      type: 'CUSTOMER_CREATED',
+      customerId,
+      customerName: personName,
+      customerCode: customerCode || null,
+      companyName: companyName || null,
+      actorName: actorName || null,
+      transferredAt: transferredAt ? new Date(transferredAt).toISOString() : null,
     },
   };
 }
@@ -453,11 +505,12 @@ export function buildEditingSubmittedNotification({
   const when = formatFaDateTime(submittedAt);
   const editor = editorName || 'ادیتور';
   const typePart = videoTypeLabel ? ` (${videoTypeLabel})` : '';
+  const titleName = projectTitle || 'پروژه';
   return {
     eventKey: `editing.submitted:${projectId}:v${version}:${submittedAt.toISOString()}`,
-    title: 'ویدیوی نهایی آپلود شد',
+    title: `ویدیو جدید در پروژه «${titleName}» آپلود شد`,
     body: [
-      `ادیتور ${editor} نسخه نهایی پروژه «${projectTitle}»${typePart} را آپلود کرد.`,
+      `ادیتور ${editor} یک ویدیوی جدید برای پروژه «${titleName}»${typePart} آپلود کرد.`,
       projectCode ? `شناسه: ${projectCode}` : null,
       version ? `نسخه: ${version}` : null,
       `تاریخ: ${when}`,
@@ -494,11 +547,12 @@ export function buildFinalVideoUploadedNotification({
   const when = formatFaDateTime(uploadedAt);
   const editor = editorName || 'ادیتور';
   const label = videoTypeLabel || (videoType === 'CLEAN' ? 'بدون واترمارک' : 'دارای واترمارک');
+  const titleName = projectTitle || 'پروژه';
   return {
     eventKey: `final.uploaded:${projectId}:${fileId || uploadedAt.toISOString()}`,
-    title: 'ویدیوی نهایی پروژه آپلود شد',
+    title: `ویدیو جدید در پروژه «${titleName}» آپلود شد`,
     body: [
-      `ادیتور ${editor} نسخه نهایی پروژه «${projectTitle}» را آپلود کرد.`,
+      `ادیتور ${editor} یک ویدیوی جدید در پروژه «${titleName}» آپلود کرد.`,
       `نوع: ${label}`,
       projectCode ? `شناسه: ${projectCode}` : null,
       version ? `نسخه: ${version}` : null,
@@ -702,6 +756,148 @@ export function buildEditingManagerFeedbackNotification({
   };
 }
 
+export function buildPosterSubmittedNotification({
+  projectId,
+  projectTitle,
+  projectCode,
+  editorName,
+  posterId,
+  version,
+  uploadedAt = new Date(),
+}) {
+  const when = formatFaDateTime(uploadedAt);
+  const editor = editorName || "ادیتور";
+  return {
+    eventKey: `poster.uploaded:${posterId}`,
+    title: "پوستر جدید برای بررسی مدیریت ارسال شد.",
+    body: [
+      `ادیتور ${editor} پوستر پروژه «${projectTitle}» را برای بررسی ارسال کرد.`,
+      projectCode ? `شناسه: ${projectCode}` : null,
+      version ? `نسخه: ${version}` : null,
+      `تاریخ: ${when}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    link: `/projects/${projectId}?tab=production&workspace=poster`,
+    meta: {
+      type: "POSTER_UPLOADED",
+      actionType: "POSTER_UPLOADED",
+      projectId,
+      projectName: projectTitle,
+      projectCode,
+      editorName: editor,
+      posterId,
+      version: version || null,
+      createdAt: uploadedAt.toISOString(),
+    },
+  };
+}
+
+export function buildPosterApprovedNotification({
+  projectId,
+  projectTitle,
+  projectCode,
+  posterId,
+  version,
+  approvedAt = new Date(),
+}) {
+  const when = formatFaDateTime(approvedAt);
+  return {
+    eventKey: `poster.approved:${posterId}`,
+    title: "پوستر پروژه تایید شد.",
+    body: [
+      `مدیر پوستر پروژه «${projectTitle}» را تأیید کرد.`,
+      projectCode ? `شناسه: ${projectCode}` : null,
+      version ? `نسخه: ${version}` : null,
+      `تاریخ: ${when}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    link: `/editor/tasks/${projectId}?workspace=poster`,
+    meta: {
+      type: "POSTER_APPROVED",
+      actionType: "POSTER_APPROVED",
+      projectId,
+      projectName: projectTitle,
+      projectCode,
+      posterId,
+      version: version || null,
+      createdAt: approvedAt.toISOString(),
+    },
+  };
+}
+
+export function buildPosterRejectedNotification({
+  projectId,
+  projectTitle,
+  projectCode,
+  posterId,
+  version,
+  reason,
+  rejectedAt = new Date(),
+}) {
+  const when = formatFaDateTime(rejectedAt);
+  const why = String(reason || "").trim();
+  return {
+    eventKey: `poster.rejected:${posterId}:${rejectedAt.toISOString()}`,
+    title: "پوستر پروژه رد شد.",
+    body: [
+      `پوستر پروژه «${projectTitle}» رد شد.`,
+      why ? `دلیل: ${why}` : null,
+      projectCode ? `شناسه: ${projectCode}` : null,
+      version ? `نسخه: ${version}` : null,
+      `تاریخ: ${when}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    link: `/editor/tasks/${projectId}?workspace=poster`,
+    meta: {
+      type: "POSTER_REJECTED",
+      actionType: "POSTER_REJECTED",
+      projectId,
+      projectName: projectTitle,
+      projectCode,
+      posterId,
+      version: version || null,
+      createdAt: rejectedAt.toISOString(),
+    },
+  };
+}
+
+export function buildPosterSentToCustomerNotification({
+  projectId,
+  projectTitle,
+  projectCode,
+  posterId,
+  version,
+  sentAt = new Date(),
+}) {
+  const when = formatFaDateTime(sentAt);
+  return {
+    eventKey: `poster.sent:${posterId}:${sentAt.toISOString()}`,
+    title: "پوستر جدید پروژه برای مشتری ارسال شد.",
+    body: [
+      `پوستر پروژه «${projectTitle}» برای شما ارسال شد.`,
+      projectCode ? `شناسه: ${projectCode}` : null,
+      version ? `نسخه: ${version}` : null,
+      `تاریخ: ${when}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    link: `/portal/projects/${projectId}?tab=poster`,
+    meta: {
+      type: "POSTER_SENT_TO_CUSTOMER",
+      actionType: "POSTER_SENT_TO_CUSTOMER",
+      projectId,
+      projectName: projectTitle,
+      projectCode,
+      posterId,
+      version: version || null,
+      createdAt: sentAt.toISOString(),
+    },
+  };
+}
+
 export function buildEditingReadyForCustomerNotification({
   projectId,
   projectTitle,
@@ -742,12 +938,16 @@ export function buildEditingCompletedNotification({
 }) {
   const when = formatFaDateTime(at);
   const name = (customerName || '').trim() || 'مشتری';
+  const titleName = projectTitle || 'پروژه';
   return {
     // Stable key — one completion notice per project per audience role.
     eventKey: `project.completed.clean-approval:${projectId}:${forEditor ? 'editor' : 'mgr'}`,
-    title: 'مشتری نسخه نهایی پروژه را تایید کرد و پروژه تکمیل شد',
+    title: `پروژه «${titleName}» تکمیل شد`,
     body: [
-      `${name} نسخه بدون واترمارک پروژه «${projectTitle}» را تأیید کرد.`,
+      `پروژه «${titleName}» با موفقیت تکمیل شد.`,
+      forEditor
+        ? null
+        : `${name} محصول نهایی را تأیید کرده است.`,
       projectCode ? `شناسه: ${projectCode}` : null,
       `تاریخ تکمیل: ${when}`,
     ]
@@ -762,7 +962,7 @@ export function buildEditingCompletedNotification({
       projectName: projectTitle,
       projectCode,
       customerName: name,
-      actionType: 'CLEAN_FINAL_APPROVED',
+      actionType: 'PROJECT_COMPLETED',
       createdAt: at.toISOString(),
     },
   };

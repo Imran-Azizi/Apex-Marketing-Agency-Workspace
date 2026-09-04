@@ -396,9 +396,6 @@ export function ProjectInfoTabContent({
   }
 
   if (tab === "brief") {
-    const proposedNarrator =
-      project.assignments?.find((a) => a.role === "PROPOSED_NARRATOR")
-        ?.teamProfile?.displayName || "";
     const customAspectRatio = asString(brief.customAspectRatio);
     const aspectValue = customAspectRatio
       ? customAspectRatio
@@ -466,14 +463,6 @@ export function ProjectInfoTabContent({
             ltr={Boolean(customAspectRatio || aspectValue)}
           />
           <FieldTile
-            label="فرمت"
-            value={
-              project.format
-                ? `${project.format.name}${project.format.ratio ? ` (${project.format.ratio})` : ""}`
-                : ""
-            }
-          />
-          <FieldTile
             label="زبان"
             value={
               project.language
@@ -488,7 +477,6 @@ export function ProjectInfoTabContent({
             label="لحن"
             value={asString(brief.tone) || project.tone || ""}
           />
-          <FieldTile label="گوینده پیشنهادی" value={proposedNarrator} />
           <TagList label="پلتفرم‌ها" items={platforms} />
         </SectionCard>
 

@@ -110,7 +110,7 @@ export const openAiService = {
         Object.assign(timeoutErr, formatAiError(timeoutErr, 'openai'));
         throw timeoutErr;
       }
-      if (err?.provider === 'openai' || err?.code) throw err;
+      if (err?.provider === 'openai' && err?.status) throw err;
       const wrapped = createAiError(err.message || 'OpenAI unavailable', {
         code: 'server_error',
         status: 503,

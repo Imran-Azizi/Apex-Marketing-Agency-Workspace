@@ -22,6 +22,12 @@ import {
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getMe } from "@/lib/auth";
+import {
+  financeDashboardQueryUrl,
+  financeKpisAvailable,
+  managerFinanceCardsFromKpis,
+} from "@/lib/finance-kpis";
+import type { FinanceDashboard } from "@/app/(dashboard)/finance/_components/types";
 import { cn, formatDate, formatTime } from "@/lib/utils";
 import {
   getProjectStatusLabel,
@@ -223,6 +229,11 @@ export function ManagerDashboard() {
     queryFn: () => apiGet<ManagerProject[]>("/projects"),
   });
 
+  const financeQuery = useQuery({
+    queryKey: ["finance-dashboard", "manager", range],
+    queryFn: () => apiGet<FinanceDashboard>(financeDashboardQueryUrl(range)),
+  });
+
   const metrics = useMemo(() => {
     if (!projects.data) return null;
     return computeManagerMetrics({
@@ -232,7 +243,14 @@ export function ManagerDashboard() {
     });
   }, [projects.data, summary.data, range]);
 
+  const financeCards = useMemo(() => {
+    const kpis = financeQuery.data?.kpis;
+    if (!kpis || !financeKpisAvailable(kpis)) return null;
+    return managerFinanceCardsFromKpis(kpis);
+  }, [financeQuery.data?.kpis]);
+
   const isLoading = projects.isLoading || summary.isLoading;
+  const financeLoading = financeQuery.isLoading;
   const isError = projects.isError && !projects.data;
 
   const managerName = me.data?.fullName || "مدیر";
@@ -284,7 +302,7 @@ export function ManagerDashboard() {
         </div>
       </header>
 
-      {isLoading ? (
+      {financeLoading ? (
         <SectionShell
           title="نمای مالی"
           description="خلاصه اجرایی درآمد، دریافت و سود"
@@ -295,14 +313,14 @@ export function ManagerDashboard() {
             ))}
           </div>
         </SectionShell>
-      ) : metrics?.finance?.available ? (
+      ) : financeCards ? (
         <SectionShell
           title="نمای مالی"
           description="خلاصه اجرایی درآمد، دریافت و سود — فقط پرداخت‌های تأییدشده"
           className="border-brand/15 bg-gradient-to-bl from-brand/[0.06] via-card to-card"
         >
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {metrics.finance.cards.map((card, i) => (
+            {financeCards.map((card, i) => (
               <KpiCard
                 key={card.key}
                 metric={card}

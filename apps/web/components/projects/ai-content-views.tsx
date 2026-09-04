@@ -91,12 +91,48 @@ function resolveStoryboardImageUrl(scene: StoryboardScene): string | null {
   return null;
 }
 
+export function resolveStoryboardCollage(value: unknown): {
+  src: string | null;
+  error: string | null;
+  sceneCount: number | null;
+} {
+  const obj = asRecord(value);
+  if (!obj) return { src: null, error: null, sceneCount: null };
+
+  const direct = obj.collageImageUrl || obj.collage_image_url;
+  let src: string | null = null;
+  if (typeof direct === "string" && direct.trim()) {
+    const value = direct.trim();
+    src = /^https?:\/\//i.test(value) ? value : filePreviewUrl(value);
+  }
+  const key = obj.collageImageStorageKey || obj.collage_image_storage_key;
+  if (!src && typeof key === "string" && key.trim()) {
+    src = filePreviewUrl(key.trim());
+  }
+
+  const layout = asRecord(obj.collageLayout);
+  const sceneCount =
+    typeof layout?.sceneCount === "number"
+      ? layout.sceneCount
+      : typeof obj.collageSceneCount === "number"
+        ? obj.collageSceneCount
+        : null;
+  const error =
+    typeof obj.collageImageError === "string" && obj.collageImageError.trim()
+      ? obj.collageImageError.trim()
+      : null;
+
+  return { src, error, sceneCount };
+}
+
 function StoryboardSceneImage({
   scene,
   sceneNo,
+  objectFit = "cover",
 }: {
   scene: StoryboardScene;
   sceneNo: number;
+  objectFit?: "cover" | "contain";
 }) {
   const src = resolveStoryboardImageUrl(scene);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
@@ -136,7 +172,8 @@ function StoryboardSceneImage({
           src={src}
           alt={scene.title || `صحنه ${sceneNo}`}
           className={cn(
-            "h-full w-full object-cover transition-opacity",
+            "h-full w-full transition-opacity",
+            objectFit === "contain" ? "object-contain" : "object-cover",
             status === "ready" ? "opacity-100" : "opacity-0",
           )}
           loading="lazy"
@@ -147,6 +184,52 @@ function StoryboardSceneImage({
         />
       )}
     </>
+  );
+}
+
+function StoryboardCollageImage({
+  src,
+  alt,
+}: {
+  src: string;
+  alt: string;
+}) {
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
+
+  return (
+    <div className="relative w-full bg-[#0f1115]">
+      {status === "loading" ? (
+        <div className="absolute inset-0 z-[1] flex min-h-[240px] items-center justify-center">
+          <Loader2
+            className="h-5 w-5 animate-spin text-muted-foreground"
+            aria-hidden
+          />
+        </div>
+      ) : null}
+      {status === "error" ? (
+        <div className="flex min-h-[220px] flex-col items-center justify-center gap-2 px-4 py-10 text-center text-muted-foreground">
+          <ImageOff className="h-5 w-5 opacity-50" aria-hidden />
+          <span className="text-xs">بارگذاری شیت استوری‌بورد ناموفق بود</span>
+        </div>
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={alt}
+          className={cn(
+            "mx-auto h-auto w-full max-h-[min(80vh,920px)] object-contain object-top transition-opacity",
+            status === "ready" ? "opacity-100" : "opacity-0",
+          )}
+          loading="lazy"
+          decoding="async"
+          sizes="(min-width: 768px) 70vw, 100vw"
+          onLoad={() => setStatus("ready")}
+          onError={() => setStatus("error")}
+        />
+      )}
+    </div>
   );
 }
 
@@ -307,6 +390,7 @@ export function StoryboardFinalView({
   dir?: "rtl" | "ltr";
   className?: string;
 }) {
+  const collage = resolveStoryboardCollage(value);
   const scenes = useMemo(() => {
     const obj = asRecord(value);
     const list = (
@@ -324,7 +408,11 @@ export function StoryboardFinalView({
     );
   }, [value]);
 
-  if (scenes.length === 0) {
+  const showLegacySceneImages =
+    !collage.src &&
+    scenes.some((scene) => Boolean(resolveStoryboardImageUrl(scene)));
+
+  if (scenes.length === 0 && !collage.src) {
     return (
       <p className="text-sm text-muted-foreground" dir={dir}>
         استوری‌بوردی ثبت نشده
@@ -333,74 +421,112 @@ export function StoryboardFinalView({
   }
 
   return (
-    <ol className={cn("space-y-4", className)} dir={dir}>
-      {scenes.map((scene, i) => {
-        const sceneNo = sceneNumberOf(scene, i);
-        const camera = scene.camera || scene.cameraAngle;
-        const action = scene.characterActions || scene.action;
-        const visual =
-          scene.visualDescription ||
-          scene.visual ||
-          scene.description ||
-          scene.notes ||
-          "—";
-        const imageError = scene.imageError || null;
+    <div className={cn("space-y-4", className)} dir={dir}>
+      {collage.src || collage.error ? (
+        <section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
+            <h4 className="text-sm font-semibold tracking-tight">
+              استوری‌بورد تصویری
+            </h4>
+            <p className="text-[11px] text-muted-foreground">
+              {faNum(collage.sceneCount || scenes.length)} صحنه در یک شیت
+            </p>
+          </div>
+          {collage.error && !collage.src ? (
+            <div className="flex min-h-[200px] flex-col items-center justify-center gap-2 px-4 py-10 text-center text-muted-foreground">
+              <ImageOff className="h-5 w-5 opacity-50" aria-hidden />
+              <span className="text-xs leading-6">{collage.error}</span>
+            </div>
+          ) : collage.src ? (
+            <StoryboardCollageImage
+              src={collage.src}
+              alt="شیت استوری‌بورد تصویری همه صحنه‌ها"
+            />
+          ) : null}
+        </section>
+      ) : null}
 
-        return (
-          <li
-            key={`${sceneNo}-${i}`}
-            className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm"
-          >
-            <div className="grid gap-0 md:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]">
-              <div className="relative bg-muted/30 md:min-h-[280px]">
-                <div className="relative aspect-video w-full overflow-hidden md:aspect-auto md:h-full md:min-h-[280px]">
-                  <StoryboardSceneImage
-                    key={`${sceneNo}-${resolveStoryboardImageUrl(scene) || "none"}`}
-                    scene={scene}
-                    sceneNo={sceneNo}
-                  />
-                </div>
-
-                <div className="absolute start-3 top-3 z-[2] flex h-8 w-8 items-center justify-center rounded-lg bg-background/90 text-xs font-semibold tabular-nums shadow-sm ring-1 ring-border/60">
-                  {faNum(sceneNo)}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 p-4 sm:p-5">
-                <div className="min-w-0 space-y-1">
-                  <h5 className="text-sm font-semibold tracking-tight">
-                    {scene.title?.trim() || `صحنه ${faNum(sceneNo)}`}
-                  </h5>
-                  {scene.duration ? (
-                    <p className="text-xs tabular-nums text-muted-foreground">
-                      مدت: {scene.duration}
-                    </p>
-                  ) : null}
-                </div>
-
-                {imageError ? (
-                  <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-6 text-destructive">
-                    {imageError}
+      <ol className="space-y-4">
+        {scenes.map((scene, i) => {
+          const sceneNo = sceneNumberOf(scene, i);
+          const camera = scene.camera || scene.cameraAngle;
+          const action = scene.characterActions || scene.action;
+          const visual =
+            scene.visualDescription ||
+            scene.visual ||
+            scene.description ||
+            scene.notes ||
+            "—";
+          const imageError = scene.imageError || null;
+          const details = (
+            <div className="flex flex-col gap-3 p-4 sm:p-5">
+              <div className="min-w-0 space-y-1">
+                <h5 className="text-sm font-semibold tracking-tight">
+                  {scene.title?.trim() || `صحنه ${faNum(sceneNo)}`}
+                </h5>
+                {scene.duration ? (
+                  <p className="text-xs tabular-nums text-muted-foreground">
+                    مدت: {scene.duration}
                   </p>
                 ) : null}
+              </div>
 
-                <p className="whitespace-pre-wrap text-sm leading-7">{visual}</p>
+              {imageError && showLegacySceneImages ? (
+                <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs leading-6 text-destructive">
+                  {imageError}
+                </p>
+              ) : null}
 
-                <div className="space-y-2">
-                  <Field label="عنوان صحنه" value={scene.title} />
-                  <Field label="نوع پلان / زاویه دوربین" value={camera} />
-                  <Field label="راهنمای بصری" value={scene.visualDirection} />
-                  <Field label="محیط" value={scene.environment} />
-                  <Field label="نورپردازی" value={scene.lighting} />
-                  <Field label="اکشن" value={action} />
-                  <Field label="انتقال" value={scene.transition} />
-                  <Field label="یادداشت تدوین" value={scene.editingNotes} />
-                </div>
+              <p className="whitespace-pre-wrap text-sm leading-7">{visual}</p>
+
+              <div className="space-y-2">
+                <Field label="عنوان صحنه" value={scene.title} />
+                <Field label="نوع پلان / زاویه دوربین" value={camera} />
+                <Field label="راهنمای بصری" value={scene.visualDirection} />
+                <Field label="محیط" value={scene.environment} />
+                <Field label="نورپردازی" value={scene.lighting} />
+                <Field label="اکشن" value={action} />
+                <Field label="انتقال" value={scene.transition} />
+                <Field label="یادداشت تدوین" value={scene.editingNotes} />
               </div>
             </div>
-          </li>
-        );
-      })}
-    </ol>
+          );
+
+          if (!showLegacySceneImages) {
+            return (
+              <li
+                key={`${sceneNo}-${i}`}
+                className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm"
+              >
+                {details}
+              </li>
+            );
+          }
+
+          return (
+            <li
+              key={`${sceneNo}-${i}`}
+              className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm"
+            >
+              <div className="grid gap-0 md:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]">
+                <div className="relative bg-muted/30 md:min-h-[280px]">
+                  <div className="relative aspect-video w-full overflow-hidden md:aspect-auto md:h-full md:min-h-[280px]">
+                    <StoryboardSceneImage
+                      key={`${sceneNo}-${resolveStoryboardImageUrl(scene) || "none"}`}
+                      scene={scene}
+                      sceneNo={sceneNo}
+                    />
+                  </div>
+                  <div className="absolute start-3 top-3 z-[2] flex h-8 w-8 items-center justify-center rounded-lg bg-background/90 text-xs font-semibold tabular-nums shadow-sm ring-1 ring-border/60">
+                    {faNum(sceneNo)}
+                  </div>
+                </div>
+                {details}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

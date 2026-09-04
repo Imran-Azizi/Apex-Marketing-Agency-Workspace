@@ -16,6 +16,7 @@ enum RoleCode {
   EDITOR
   NARRATOR
   FINANCE
+  PROJECT_MANAGER
   CUSTOMER
   AI_SERVICE
 }
@@ -28,11 +29,17 @@ enum SessionAudience {
 enum CrmPipelineStage {
   NEW_LEAD
   CONTACTED
-  INTERESTED
-  PRICE_SENT
+  INFORMATION_SENT
+  PROPOSAL_PRICE_SENT
+  WAITING_DECISION
   ORDER_CONFIRMED
-  COMPLETED
-  CANCELED
+  DEPOSIT_PENDING
+  DEPOSIT_CONFIRMED
+  PORTAL_INVITED
+  PROJECT_CREATED
+  DELIVERED
+  REPEAT_CUSTOMER
+  LOST_CANCELED
 }
 
 enum PortalStatus {
@@ -138,6 +145,16 @@ enum ExpenseCategory {
   COMPANY_GENERAL
 }
 
+enum CompensationType {
+  FIXED
+  PROJECT_SHARE
+}
+
+enum SalaryAdvanceStatus {
+  OPEN
+  SETTLED
+}
+
 enum AiAgentType {
   SCENARIO
   NARRATION
@@ -217,6 +234,14 @@ enum FileKind {
   OTHER
   RECEIPT
   ATTACHMENT
+  POSTER
+}
+
+enum PosterStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SENT_TO_CUSTOMER
 }
 
 enum PaymentSettlementStatus {
@@ -283,6 +308,7 @@ model User {
   auditLogs               AuditLog[]
   notifications           Notification[]
   assignedCustomers       CrmCustomer[]       @relation("SalesOwner")
+  crmActivities           CrmActivity[]       @relation("CrmActivityActor")
   managedProjects         Project[]           @relation("ProjectManager")
   verifiedPayments        Payment[]           @relation("PaymentVerifier")
   recordedPayments        Payment[]           @relation("PaymentRecorder")
@@ -298,6 +324,29 @@ model User {
   systemBackupsCreated    SystemBackup[]      @relation("BackupCreator")
   userPermissions         UserPermission[]
   portfolioItemsPublished PortfolioItem[]     @relation("PortfolioPublisher")
+  expensesPaid            Expense[]           @relation("ExpensePayer")
+  salaryPaymentsRecorded  SalaryPayment[]     @relation("SalaryPaymentRecorder")
+  salaryAdvancesRecorded  SalaryAdvance[]     @relation("SalaryAdvanceRecorder")
+  financePnlTargets       FinancePnlTarget[]  @relation("FinancePnlTargetCreator")
+  chatOrgSettingsUpdated  ChatOrgSettings[]   @relation("ChatOrgSettingsUpdater")
+  chatConversationsCreated ChatConversation[] @relation("ChatConversationCreator")
+  chatParticipations      ChatParticipant[]
+  chatMessagesSent        ChatMessage[]       @relation("ChatMessageSender")
+  chatMessageDeliveries   ChatMessageDelivery[]
+  chatMessageReactions    ChatMessageReaction[]
+  chatAllowPairsGranted   ChatEmployeeAllowPair[] @relation("ChatAllowPairGranter")
+  chatAllowPairsAsLow     ChatEmployeeAllowPair[] @relation("ChatAllowPairLow")
+  chatAllowPairsAsHigh    ChatEmployeeAllowPair[] @relation("ChatAllowPairHigh")
+  salesAssistantOwned     SalesAssistantRecommendation[] @relation("SalesAssistantOwner")
+  salesAssistantActed     SalesAssistantRecommendation[] @relation("SalesAssistantActor")
+  salesAssistantSettings  SalesAssistantSettings[]       @relation("SalesAssistantSettingsUpdater")
+  businessAssistantActed  BusinessAssistantInsight[]     @relation("BusinessAssistantActor")
+  businessAssistantSettings BusinessAssistantSettings[]  @relation("BusinessAssistantSettingsUpdater")
+  businessAssistantTargets BusinessAssistantMonthlyTarget[] @relation("BusinessAssistantTargetCreator")
+  businessAssistantChat   BusinessAssistantChatMessage[] @relation("BusinessAssistantChatter")
+  postersUploaded         ProjectPoster[]     @relation("PosterUploader")
+  postersReviewed         ProjectPoster[]     @relation("PosterReviewer")
+  postersDelivered        ProjectPoster[]     @relation("PosterDeliverer")
 
   @@index([deletedAt])
   @@index([roleId])
@@ -378,12 +427,16 @@ model Session {
 
 model CrmCustomer {
   id                 String           @id @default(cuid())
+  /// Public customer identity (APEX-00001). Survives lead → customer conversion.
+  customerCode       String           @unique
   personName         String
   companyName        String?
   jobTitle           String?
   phone              String?
   whatsappRaw        String
   normalizedWhatsapp String           @unique
+  phoneCountryIso    String?
+  previousWhatsapp   Json?
   city               String?
   address            String?
   email              String?
@@ -391,6 +444,9 @@ model CrmCustomer {
   salesOwnerId       String?
   salesOwner         User?            @relation("SalesOwner", fields: [salesOwnerId], references: [id])
   pipelineStage      CrmPipelineStage @default(NEW_LEAD)
+  /// Set when the lead is converted into Customer Management after deposit confirmation.
+  convertedAt        DateTime?
+  customerInfoSavedAt DateTime?
   portalStatus       PortalStatus     @default(NOT_ELIGIBLE)
   lastContactAt      DateTime?
   nextFollowUpAt     DateTime?
@@ -400,19 +456,51 @@ model CrmCustomer {
   updatedAt          DateTime         @updatedAt
   deletedAt          DateTime?
 
-  opportunities Opportunity[]
-  portalAccount PortalAccount?
-  clientAssets  ClientAsset[]
-  projects      Project[]
-  invoices      Invoice[]
-  payments      Payment[]
+  opportunities   Opportunity[]
+  portalAccount   PortalAccount?
+  clientAssets    ClientAsset[]
+  projects        Project[]
+  invoices        Invoice[]
+  payments        Payment[]
+  activities      CrmActivity[]
+  contactMessages ContactMessage[]
+  salesAssistantRecommendations SalesAssistantRecommendation[]
+  posters         ProjectPoster[]
 
   @@index([pipelineStage])
   @@index([portalStatus])
   @@index([deletedAt])
   @@index([salesOwnerId])
   @@index([nextFollowUpAt])
+  @@index([customerCode])
+  @@index([convertedAt])
+  @@index([lastContactAt])
   @@map("crm_customers")
+}
+
+/// Immutable CRM activity / status / interaction timeline
+model CrmActivity {
+  id             String      @id @default(cuid())
+  crmCustomerId  String
+  crmCustomer    CrmCustomer @relation(fields: [crmCustomerId], references: [id], onDelete: Cascade)
+  type           String
+  title          String
+  body           String?     @db.Text
+  previousStatus String?
+  newStatus      String?
+  actorId        String?
+  actor          User?       @relation("CrmActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorType      String      @default("SYSTEM")
+  source         String?
+  relatedType    String?
+  relatedId      String?
+  meta           Json?
+  createdAt      DateTime    @default(now())
+
+  @@index([crmCustomerId, createdAt])
+  @@index([type])
+  @@index([relatedType, relatedId])
+  @@map("crm_activities")
 }
 
 model Opportunity {
@@ -458,6 +546,8 @@ model PortalAccount {
   crmCustomer        CrmCustomer @relation(fields: [crmCustomerId], references: [id])
   normalizedWhatsapp String      @unique
   passwordHash       String?
+  /// AES-256-GCM recoverable copy for authorized manager assistance. Never log or return in public APIs.
+  passwordCipher     String?
   isActive           Boolean     @default(true)
   registeredAt       DateTime?
   createdAt          DateTime    @default(now())
@@ -480,6 +570,8 @@ model PortalInvite {
   portalAccountId String?
   portalAccount   PortalAccount? @relation(fields: [portalAccountId], references: [id])
   whatsappNumber  String
+  /// AES-256-GCM copy of the password the customer created. Null until registration.
+  passwordCipher  String?
   token           String         @unique
   maxAttempts     Int            @default(5)
   attempts        Int            @default(0)
@@ -609,12 +701,15 @@ model TeamProfile {
   updatedAt   DateTime           @updatedAt
   deletedAt   DateTime?
 
-  rates            Rate[]
-  audioSamples     AudioSample[]
-  assignments      ProjectAssignment[]
-  employeePayables EmployeePayable[]
-  narrationTasks   NarrationTask[]
-  editingTasks     EditingTask[]
+  rates                 Rate[]
+  audioSamples          AudioSample[]
+  assignments           ProjectAssignment[]
+  employeePayables      EmployeePayable[]
+  narrationTasks        NarrationTask[]
+  editingTasks          EditingTask[]
+  compensationProfile   EmployeeCompensationProfile?
+  salaryPayments        SalaryPayment[]
+  salaryAdvances        SalaryAdvance[]
 
   @@map("team_profiles")
 }
@@ -718,6 +813,7 @@ model Project {
   editingTasks       EditingTask[]
   editingResources   EditingResource[]
   portfolioItems     PortfolioItem[]
+  posters            ProjectPoster[]
 
   @@index([status])
   @@index([crmCustomerId])
@@ -789,6 +885,7 @@ model ProjectFile {
   editingWatermarkedFor   EditingTask[]   @relation("EditingWatermarkedFile")
   editingCleanFor         EditingTask[]   @relation("EditingCleanFile")
   portfolioItems          PortfolioItem[]
+  posters                 ProjectPoster[]
 
   @@index([projectId, kind])
   @@map("project_files")
@@ -845,6 +942,8 @@ model PortfolioItem {
   thumbnailKey  String?
   title         String
   description   String?
+  /// Manager-approved public case study / Success Story
+  successStory  String?         @db.Text
   slug          String          @unique
   status        PortfolioStatus @default(PUBLISHED)
   sortOrder     Int             @default(0)
@@ -969,6 +1068,37 @@ model EditingResource {
   @@index([projectId])
   @@index([editingTaskId])
   @@map("editing_resources")
+}
+
+/// Project poster versions — editor upload, manager review, customer delivery
+model ProjectPoster {
+  id              String       @id @default(cuid())
+  projectId       String
+  project         Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  crmCustomerId   String
+  crmCustomer     CrmCustomer  @relation(fields: [crmCustomerId], references: [id])
+  fileId          String       @unique
+  file            ProjectFile  @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  version         Int
+  notes           String?      @db.Text
+  status          PosterStatus @default(PENDING_REVIEW)
+  uploadedById    String?
+  uploadedBy      User?        @relation("PosterUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  reviewedById    String?
+  reviewedBy      User?        @relation("PosterReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  rejectionReason String?      @db.Text
+  deliveredAt     DateTime?
+  deliveredById   String?
+  deliveredBy     User?        @relation("PosterDeliverer", fields: [deliveredById], references: [id], onDelete: SetNull)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([projectId, version])
+  @@index([projectId, status])
+  @@index([crmCustomerId])
+  @@index([status])
+  @@map("project_posters")
 }
 
 model AssetReference {
@@ -1194,9 +1324,12 @@ model Invoice {
   discount      Decimal       @default(0) @db.Decimal(14, 2)
   total         Decimal       @default(0) @db.Decimal(14, 2)
   currency      String        @default("AFN")
-  notes         String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  notes             String?
+  videoCount        Int?
+  paymentMethod     PaymentMethod?
+  paymentMethodMeta Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   items    InvoiceItem[]
   payments Payment[]
@@ -1230,6 +1363,7 @@ model Payment {
   amount          Decimal            @db.Decimal(14, 2)
   paidAt          DateTime           @default(now())
   method          PaymentMethod
+  methodMeta      Json?
   reference       String?
   attachmentKey   String?
   /// Approval workflow: PENDING → VERIFIED (approved) | REJECTED
@@ -1263,12 +1397,21 @@ model Expense {
   amount        Decimal         @db.Decimal(14, 2)
   expenseDate   DateTime        @default(now())
   paymentMethod PaymentMethod?
+  /// What the expense was for
   description   String?
+  /// Who received the payment
+  recipient     String?
+  /// Account / payment basis label (e.g. office petty cash, bank)
+  accountLabel  String?
   receiptKey    String?
+  paidByUserId  String?
+  paidBy        User?           @relation("ExpensePayer", fields: [paidByUserId], references: [id])
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
   @@index([projectId])
+  @@index([category, expenseDate])
+  @@index([paidByUserId])
   @@map("expenses")
 }
 
@@ -1290,6 +1433,80 @@ model EmployeePayable {
   @@index([projectId])
   @@index([teamProfileId, status])
   @@map("employee_payables")
+}
+
+/// Fixed salary vs project-share compensation settings for a team member.
+model EmployeeCompensationProfile {
+  id                 String           @id @default(cuid())
+  teamProfileId      String           @unique
+  teamProfile        TeamProfile      @relation(fields: [teamProfileId], references: [id], onDelete: Cascade)
+  type               CompensationType @default(PROJECT_SHARE)
+  fixedMonthlyAmount Decimal          @default(0) @db.Decimal(14, 2)
+  currency           String           @default("AFN")
+  notes              String?
+  isActive           Boolean          @default(true)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@index([type, isActive])
+  @@map("employee_compensation_profiles")
+}
+
+/// Recorded salary / commission payouts to employees.
+model SalaryPayment {
+  id            String         @id @default(cuid())
+  teamProfileId String
+  teamProfile   TeamProfile    @relation(fields: [teamProfileId], references: [id], onDelete: Cascade)
+  amount        Decimal        @db.Decimal(14, 2)
+  paidAt        DateTime       @default(now())
+  method        PaymentMethod
+  notes         String?
+  recordedById  String?
+  recordedBy    User?          @relation("SalaryPaymentRecorder", fields: [recordedById], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([teamProfileId, paidAt])
+  @@index([recordedById])
+  @@map("salary_payments")
+}
+
+/// Salary advances (پیش‌پرداخت) visible to Finance.
+model SalaryAdvance {
+  id            String              @id @default(cuid())
+  teamProfileId String
+  teamProfile   TeamProfile         @relation(fields: [teamProfileId], references: [id], onDelete: Cascade)
+  amount        Decimal             @db.Decimal(14, 2)
+  paidAt        DateTime            @default(now())
+  method        PaymentMethod?
+  status        SalaryAdvanceStatus @default(OPEN)
+  notes         String?
+  recordedById  String?
+  recordedBy    User?               @relation("SalaryAdvanceRecorder", fields: [recordedById], references: [id])
+  settledAt     DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([teamProfileId, status])
+  @@index([recordedById])
+  @@map("salary_advances")
+}
+
+/// Monthly net-profit and advertising-budget targets for P&L.
+model FinancePnlTarget {
+  id                String         @id @default(cuid())
+  year              Int
+  month             Int
+  netProfitTarget   Decimal        @db.Decimal(14, 2)
+  advertisingBudget Decimal        @db.Decimal(14, 2)
+  createdById       String?
+  createdBy         User?          @relation("FinancePnlTargetCreator", fields: [createdById], references: [id])
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@unique([year, month])
+  @@index([createdById])
+  @@map("finance_pnl_targets")
 }
 
 // ─── Delivery ────────────────────────────────────────────
@@ -1400,25 +1617,28 @@ model ShowcaseCustomer {
 
 /// Public website Contact Us submissions (manager inbox)
 model ContactMessage {
-  id        String    @id @default(cuid())
-  name      String
-  email     String
-  phone     String
-  company   String?
-  subject   String
-  message   String    @db.Text
-  isRead    Boolean   @default(false)
-  readAt    DateTime?
-  ipAddress String?
-  userAgent String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  deletedAt DateTime?
+  id            String       @id @default(cuid())
+  name          String
+  email         String
+  phone         String
+  company       String?
+  subject       String
+  message       String       @db.Text
+  isRead        Boolean      @default(false)
+  readAt        DateTime?
+  ipAddress     String?
+  userAgent     String?
+  crmCustomerId String?
+  crmCustomer   CrmCustomer? @relation(fields: [crmCustomerId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
 
   @@index([isRead, createdAt])
   @@index([createdAt])
   @@index([deletedAt])
   @@index([email])
+  @@index([crmCustomerId])
   @@map("contact_messages")
 }
 
@@ -1488,4 +1708,414 @@ model SystemBackup {
   @@index([status])
   @@index([type])
   @@map("system_backups")
+}
+
+// ─── Internal Chat ───────────────────────────────────────
+
+enum ChatConversationType {
+  DIRECT
+  GROUP
+}
+
+enum ChatMessageType {
+  TEXT
+  VOICE
+  IMAGE
+  FILE
+  SYSTEM
+}
+
+enum ChatAttachmentKind {
+  IMAGE
+  DOCUMENT
+  VOICE
+  AUDIO
+  OTHER
+}
+
+/// Manager-controlled policy for employee ↔ employee messaging.
+/// Managers/Admins may always message anyone; employees may always message managers.
+enum ChatEmployeePolicy {
+  DISABLED
+  ALL_EMPLOYEES
+  SAME_TEAM
+  SELECTED
+}
+
+model ChatOrgSettings {
+  id             String             @id @default("default")
+  employeePolicy ChatEmployeePolicy @default(DISABLED)
+  updatedById    String?
+  updatedBy      User?              @relation("ChatOrgSettingsUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@map("chat_org_settings")
+}
+
+/// Explicit allow-list pairs when employeePolicy = SELECTED (unordered via userLow/userHigh).
+model ChatEmployeeAllowPair {
+  id          String   @id @default(cuid())
+  userLowId   String
+  userHighId  String
+  grantedById String
+  createdAt   DateTime @default(now())
+
+  userLow   User @relation("ChatAllowPairLow", fields: [userLowId], references: [id], onDelete: Cascade)
+  userHigh  User @relation("ChatAllowPairHigh", fields: [userHighId], references: [id], onDelete: Cascade)
+  grantedBy User @relation("ChatAllowPairGranter", fields: [grantedById], references: [id], onDelete: Cascade)
+
+  @@unique([userLowId, userHighId])
+  @@index([userLowId])
+  @@index([userHighId])
+  @@map("chat_employee_allow_pairs")
+}
+
+model ChatConversation {
+  id            String               @id @default(cuid())
+  type          ChatConversationType @default(DIRECT)
+  /// Sorted "userA:userB" for DIRECT uniqueness; null for GROUP.
+  directKey     String?              @unique
+  title         String?
+  createdById   String
+  createdBy     User                 @relation("ChatConversationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  lastMessageAt DateTime?
+  lastMessagePreview String?
+  archivedAt    DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  deletedAt     DateTime?
+
+  participants ChatParticipant[]
+  messages     ChatMessage[]
+
+  @@index([lastMessageAt])
+  @@index([deletedAt])
+  @@index([type])
+  @@map("chat_conversations")
+}
+
+model ChatParticipant {
+  id                String    @id @default(cuid())
+  conversationId    String
+  conversation      ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt          DateTime  @default(now())
+  lastReadAt        DateTime?
+  lastReadMessageId String?
+  mutedAt           DateTime?
+  pinnedAt          DateTime?
+  archivedAt        DateTime?
+  leftAt            DateTime?
+
+  @@unique([conversationId, userId])
+  @@index([userId, archivedAt])
+  @@index([userId, pinnedAt])
+  @@index([conversationId])
+  @@map("chat_participants")
+}
+
+model ChatMessage {
+  id              String          @id @default(cuid())
+  conversationId  String
+  conversation    ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId        String
+  sender          User            @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Restrict)
+  type            ChatMessageType @default(TEXT)
+  body            String?
+  /// Client-generated id for idempotent send/retry (unique per sender when set).
+  clientMessageId String?
+  replyToId       String?
+  replyTo         ChatMessage?    @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies         ChatMessage[]   @relation("ChatMessageReplies")
+  editedAt        DateTime?
+  deletedAt       DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  attachments ChatAttachment[]
+  reactions   ChatMessageReaction[]
+  deliveries  ChatMessageDelivery[]
+
+  @@unique([senderId, clientMessageId])
+  @@index([conversationId, createdAt])
+  @@index([conversationId, id])
+  @@index([senderId])
+  @@index([deletedAt])
+  @@map("chat_messages")
+}
+
+model ChatAttachment {
+  id         String             @id @default(cuid())
+  messageId  String
+  message    ChatMessage        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  storageKey String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  kind       ChatAttachmentKind @default(OTHER)
+  durationMs Int?
+  createdAt  DateTime           @default(now())
+
+  @@index([messageId])
+  @@index([storageKey])
+  @@map("chat_attachments")
+}
+
+model ChatMessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@map("chat_message_reactions")
+}
+
+model ChatMessageDelivery {
+  id          String    @id @default(cuid())
+  messageId   String
+  message     ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveredAt DateTime?
+  readAt      DateTime?
+
+  @@unique([messageId, userId])
+  @@index([userId, readAt])
+  @@index([messageId])
+  @@map("chat_message_deliveries")
+}
+
+// ─── Sales Assistant Agent ────────────────────────────────
+
+model SalesAssistantSettings {
+  id                       String   @id @default("default")
+  enabled                  Boolean  @default(true)
+  decisionWaitingDays      Int      @default(2)
+  pendingDepositDays       Int      @default(1)
+  repeatOrderMinDays       Int      @default(45)
+  repeatOrderMaxDays       Int      @default(180)
+  skipIfActiveHours        Int      @default(18)
+  dailyReportEnabled       Boolean  @default(true)
+  dailyReportHour          Int      @default(8)
+  dailyReportMinute        Int      @default(0)
+  notifyRepOnHigh          Boolean  @default(true)
+  notifyManagerOnHigh      Boolean  @default(true)
+  highValueMinOrders       Int      @default(2)
+  scanIntervalHours        Int      @default(6)
+  priorityRules            Json?
+  updatedAt                DateTime @updatedAt
+  updatedById              String?
+  updatedBy                User?    @relation("SalesAssistantSettingsUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("sales_assistant_settings")
+}
+
+model SalesAssistantRecommendation {
+  id              String      @id @default(cuid())
+  crmCustomerId   String
+  crmCustomer     CrmCustomer @relation(fields: [crmCustomerId], references: [id], onDelete: Cascade)
+  salesOwnerId    String?
+  salesOwner      User?       @relation("SalesAssistantOwner", fields: [salesOwnerId], references: [id], onDelete: SetNull)
+  kind            String
+  category        String
+  priority        String
+  actionState     String      @default("NEW")
+  fingerprint     String
+  title           String
+  reason          String      @db.Text
+  whatHappened    String?     @db.Text
+  customerWants   String?     @db.Text
+  whatsStopping   String?     @db.Text
+  recommendedAction String    @db.Text
+  suggestedMessage String?    @db.Text
+  salesApproach   String?     @db.Text
+  closeHelp       String?     @db.Text
+  facts           Json?
+  interpretations Json?
+  evidence        Json?
+  pipelineStage   String
+  daysInStage     Decimal?    @db.Decimal(8, 2)
+  lastInteractionAt DateTime?
+  intentLevel     String?
+  aiModel         String?
+  aiPromptVersion String?
+  usedAi          Boolean     @default(false)
+  actedAt         DateTime?
+  actedById       String?
+  actedBy         User?       @relation("SalesAssistantActor", fields: [actedById], references: [id], onDelete: SetNull)
+  actionTaken     String?
+  actionNotes     String?     @db.Text
+  viewedAt        DateTime?
+  supersededAt    DateTime?
+  supersededById  String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([crmCustomerId, actionState])
+  @@index([crmCustomerId, kind])
+  @@index([salesOwnerId, actionState])
+  @@index([category, priority])
+  @@index([fingerprint])
+  @@index([createdAt])
+  @@index([supersededAt])
+  @@map("sales_assistant_recommendations")
+}
+
+model SalesAssistantDailyReport {
+  id          String   @id @default(cuid())
+  reportDate  DateTime @db.Date
+  generatedAt DateTime @default(now())
+  summary     Json
+  snapshot    Json
+  createdAt   DateTime @default(now())
+
+  @@unique([reportDate])
+  @@index([reportDate])
+  @@map("sales_assistant_daily_reports")
+}
+
+model SalesAssistantRun {
+  id          String    @id @default(cuid())
+  trigger     String
+  eventType   String?
+  customerId  String?
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  status      String    @default("RUNNING")
+  stats       Json?
+  error       String?   @db.Text
+
+  @@index([startedAt])
+  @@index([trigger, startedAt])
+  @@map("sales_assistant_runs")
+}
+
+// ─── Business Assistant Agent ─────────────────────────────
+
+model BusinessAssistantSettings {
+  id                  String   @id @default("default")
+  enabled             Boolean  @default(true)
+  weeklyReportEnabled Boolean  @default(true)
+  weeklyReportDay     Int      @default(1)
+  weeklyReportHour    Int      @default(8)
+  weeklyReportMinute  Int      @default(0)
+  receivableAlertPct  Int      @default(30)
+  overdueProjectDays  Int      @default(3)
+  profitTargetGapPct  Int      @default(15)
+  pipelineStuckDays   Int      @default(7)
+  notifyManagerOnHigh Boolean  @default(true)
+  updatedAt           DateTime @updatedAt
+  updatedById         String?
+  updatedBy           User?    @relation("BusinessAssistantSettingsUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("business_assistant_settings")
+}
+
+model BusinessAssistantInsight {
+  id                String    @id @default(cuid())
+  kind              String
+  category          String
+  scope             String    @default("COMPANY")
+  priority          String
+  actionState       String    @default("NEW")
+  fingerprint       String
+  title             String
+  reason            String    @db.Text
+  strengthOrWeakness String?
+  recommendedAction String    @db.Text
+  actionPlan        String?   @db.Text
+  weeklyStrategy    String?   @db.Text
+  monthlyStrategy   String?   @db.Text
+  facts             Json?
+  evidence          Json?
+  aiModel           String?
+  aiPromptVersion   String?
+  usedAi            Boolean   @default(false)
+  actedAt           DateTime?
+  actedById         String?
+  actedBy           User?     @relation("BusinessAssistantActor", fields: [actedById], references: [id], onDelete: SetNull)
+  actionTaken       String?
+  actionNotes       String?   @db.Text
+  viewedAt          DateTime?
+  supersededAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([actionState, priority])
+  @@index([category, priority])
+  @@index([kind])
+  @@index([fingerprint])
+  @@index([createdAt])
+  @@index([supersededAt])
+  @@map("business_assistant_insights")
+}
+
+model BusinessAssistantWeeklyReport {
+  id          String   @id @default(cuid())
+  weekStart   DateTime @db.Date
+  generatedAt DateTime @default(now())
+  summary     Json
+  snapshot    Json
+  strategies  Json?
+  createdAt   DateTime @default(now())
+
+  @@unique([weekStart])
+  @@index([weekStart])
+  @@map("business_assistant_weekly_reports")
+}
+
+model BusinessAssistantMonthlyTarget {
+  id               String    @id @default(cuid())
+  year             Int
+  month            Int
+  status           String    @default("DRAFT")
+  targets          Json
+  aiRecommendation Json?
+  managerNotes     String?   @db.Text
+  progress         Json?
+  createdById      String
+  createdBy        User      @relation("BusinessAssistantTargetCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  finalizedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([year, month])
+  @@index([year, month])
+  @@map("business_assistant_monthly_targets")
+}
+
+model BusinessAssistantChatMessage {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation("BusinessAssistantChatter", fields: [userId], references: [id], onDelete: Cascade)
+  role            String
+  content         String   @db.Text
+  contextSnapshot Json?
+  usedAi          Boolean  @default(false)
+  aiModel         String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("business_assistant_chat_messages")
+}
+
+model BusinessAssistantRun {
+  id         String    @id @default(cuid())
+  trigger    String
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  status     String    @default("RUNNING")
+  stats      Json?
+  error      String?   @db.Text
+
+  @@index([startedAt])
+  @@index([trigger, startedAt])
+  @@map("business_assistant_runs")
 }

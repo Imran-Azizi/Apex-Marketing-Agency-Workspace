@@ -1,14 +1,12 @@
 import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
-import { env } from '../../config/env.js';
 import { AppError } from '../../utils/response.js';
 import { hashPassword, verifyPassword } from '../../utils/passwords.js';
-import { hashToken, randomToken, signAccessToken, signRefreshToken, verifyRefreshToken, generateOtp } from '../../utils/tokens.js';
+import { hashToken, randomToken, signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/tokens.js';
 import { writeAudit } from '../../middleware/audit.js';
-import { normalizeWhatsapp } from '../../utils/whatsappNormalize.js';
+import { getWhatsappLookupKeys, parseInternationalPhone, WHATSAPP_VALIDATION_MESSAGE } from '../../utils/whatsappNormalize.js';
 import { roleToPanel } from '../../config/cookies.js';
 import { effectiveFromUser } from '../../services/permissions/effective.js';
-import bcrypt from 'bcryptjs';
 
 function parseExpiryToDate(expiresIn) {
   const match = /^(\d+)([smhd])$/.exec(expiresIn || '7d');
@@ -98,9 +96,9 @@ export const authService = {
   },
 
   async loginPortal({ whatsapp, password }, req) {
-    const normalized = normalizeWhatsapp(whatsapp);
+    const lookupKeys = getWhatsappLookupKeys(whatsapp);
     const account = await prisma.portalAccount.findFirst({
-      where: { normalizedWhatsapp: normalized, deletedAt: null },
+      where: { normalizedWhatsapp: { in: lookupKeys }, deletedAt: null },
       include: { crmCustomer: true },
     });
     if (!account?.passwordHash || !(await verifyPassword(password, account.passwordHash))) {
@@ -153,6 +151,16 @@ export const authService = {
       throw new AppError('Session revoked or expired', 401, 'SESSION_INVALID');
     }
     if (session.refreshTokenHash !== hashToken(refreshToken)) {
+      const rotatedRecently =
+        session.updatedAt &&
+        Date.now() - new Date(session.updatedAt).getTime() < 15_000;
+      if (rotatedRecently) {
+        throw new AppError(
+          'Refresh token was already rotated',
+          401,
+          'TOKEN_ROTATED',
+        );
+      }
       await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
       throw new AppError('Refresh token reuse detected', 401, 'TOKEN_REUSE');
     }
@@ -236,90 +244,6 @@ export const authService = {
       permissions: auth.permissions,
     };
   },
-
-  /** Spec §7.2 — Forgot Password with OTP + attempt limits */
-  async requestPasswordReset({ whatsapp }, req) {
-    const normalized = normalizeWhatsapp(whatsapp);
-    const account = await prisma.portalAccount.findFirst({
-      where: { normalizedWhatsapp: normalized, deletedAt: null, isActive: true },
-    });
-    // Always return generic success to avoid account enumeration
-    if (!account) {
-      return { message: 'در صورت وجود حساب، کد بازیابی ارسال می‌شود', expiresInMinutes: 15 };
-    }
-
-    const otp = generateOtp(6);
-    const codeHash = await bcrypt.hash(otp, 10);
-    await prisma.otpCode.create({
-      data: {
-        codeHash,
-        portalAccountId: account.id,
-        purpose: 'FORGOT_PASSWORD',
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-        maxAttempts: 5,
-      },
-    });
-
-    await writeAudit({
-      action: 'PORTAL_PASSWORD_RESET_REQUEST',
-      entityType: 'PortalAccount',
-      entityId: account.id,
-      req,
-    });
-
-    return {
-      message: 'کد بازیابی تولید شد. آن را وارد کنید یا از طریق واتساپ دریافت کنید.',
-      otpDev: env.portalExposeOtp ? otp : undefined,
-      expiresInMinutes: 15,
-    };
-  },
-
-  async resetPassword({ whatsapp, otp, password }, req) {
-    if (!password || password.length < 8) {
-      throw new AppError('رمز عبور حداقل ۸ کاراکتر باشد', 400, 'WEAK_PASSWORD');
-    }
-    const normalized = normalizeWhatsapp(whatsapp);
-    const account = await prisma.portalAccount.findFirst({
-      where: { normalizedWhatsapp: normalized, deletedAt: null },
-    });
-    if (!account) throw new AppError('حساب یافت نشد', 404, 'NOT_FOUND');
-
-    const otpRow = await prisma.otpCode.findFirst({
-      where: { portalAccountId: account.id, usedAt: null, purpose: 'FORGOT_PASSWORD' },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!otpRow || otpRow.expiresAt < new Date()) {
-      throw new AppError('کد OTP منقضی یا نامعتبر است', 400, 'OTP_INVALID');
-    }
-    if (otpRow.attempts >= otpRow.maxAttempts) {
-      throw new AppError('حداکثر تلاش OTP', 429, 'OTP_MAX_ATTEMPTS');
-    }
-
-    const okOtp = await bcrypt.compare(otp, otpRow.codeHash);
-    if (!okOtp) {
-      await prisma.otpCode.update({ where: { id: otpRow.id }, data: { attempts: { increment: 1 } } });
-      throw new AppError('کد OTP نادرست است', 400, 'OTP_INVALID');
-    }
-
-    const passwordHash = await hashPassword(password);
-    await prisma.$transaction([
-      prisma.portalAccount.update({ where: { id: account.id }, data: { passwordHash } }),
-      prisma.otpCode.update({ where: { id: otpRow.id }, data: { usedAt: new Date() } }),
-      prisma.session.updateMany({
-        where: { portalAccountId: account.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-    ]);
-
-    await writeAudit({
-      action: 'PORTAL_PASSWORD_RESET',
-      entityType: 'PortalAccount',
-      entityId: account.id,
-      req,
-    });
-
-    return { reset: true };
-  },
 };
 
 export const loginSchema = z.object({
@@ -327,19 +251,21 @@ export const loginSchema = z.object({
   password: z.string().min(6),
 });
 
+const whatsappFieldSchema = z
+  .string()
+  .min(1, WHATSAPP_VALIDATION_MESSAGE)
+  .refine((value) => {
+    try {
+      parseInternationalPhone(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, WHATSAPP_VALIDATION_MESSAGE);
+
 export const portalLoginSchema = z.object({
-  whatsapp: z.string().min(8),
+  whatsapp: whatsappFieldSchema,
   password: z.string().min(6),
-});
-
-export const forgotPasswordSchema = z.object({
-  whatsapp: z.string().min(8),
-});
-
-export const resetPasswordSchema = z.object({
-  whatsapp: z.string().min(8),
-  otp: z.string().length(6),
-  password: z.string().min(8),
 });
 
 export { hashPassword };

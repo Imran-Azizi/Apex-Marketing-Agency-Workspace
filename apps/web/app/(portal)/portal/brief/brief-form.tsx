@@ -9,6 +9,8 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WhatsAppPhoneInput } from "@/components/shared/whatsapp-phone-input";
+import { isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE } from "@/lib/phone";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -255,7 +257,6 @@ export default function PortalBriefForm() {
   const [customAspectRatio, setCustomAspectRatio] = useState<string | undefined>();
   const [language, setLanguage] = useState("fa");
   const [tone, setTone] = useState("");
-  const [narratorProfileId, setNarratorProfileId] = useState("");
   const [platforms, setPlatforms] = useState<string[]>([]);
   const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
   const [assetUploadState, setAssetUploadState] = useState<AssetUploadState>(
@@ -279,24 +280,6 @@ export default function PortalBriefForm() {
   const { data: formats } = useQuery({
     queryKey: ["formats"],
     queryFn: () => apiGet<Array<{ id: string; name: string; ratio: string }>>("/public/formats"),
-  });
-
-  const {
-    data: narrators = [],
-    isLoading: narratorsLoading,
-    isError: narratorsError,
-  } = useQuery({
-    queryKey: ["public-narrators"],
-    queryFn: () =>
-      apiGet<
-        Array<{
-          id: string;
-          displayName: string;
-          languages?: unknown;
-          gender?: string | null;
-          tone?: string | null;
-        }>
-      >("/public/narrators"),
   });
 
   const { data: assets, refetch: refetchAssets } = useQuery({
@@ -328,14 +311,6 @@ export default function PortalBriefForm() {
     setProductName((current) => current || selectedOrder.service!.name);
   }, [selectedOrder]);
 
-  // Drop a stale selection if that narrator was removed/deactivated since load.
-  useEffect(() => {
-    if (!narratorProfileId) return;
-    if (narratorsLoading) return;
-    const stillValid = narrators.some((n) => n.id === narratorProfileId);
-    if (!stillValid) setNarratorProfileId("");
-  }, [narrators, narratorsLoading, narratorProfileId]);
-
   const currentStep = WIZARD_STEPS[stepIndex];
   const StepIcon = currentStep.icon;
   const isFirstStep = stepIndex === 0;
@@ -349,8 +324,8 @@ export default function PortalBriefForm() {
         return "نام، سمت، شرکت و آدرس الزامی هستند.";
       }
       const trimmedPhone = phone.trim();
-      if (!trimmedPhone || trimmedPhone.length < 5) {
-        return "شماره تماس الزامی است (حداقل ۵ کاراکتر).";
+      if (!isValidWhatsAppNumber(trimmedPhone)) {
+        return WHATSAPP_VALIDATION_MESSAGE;
       }
       const trimmedEmail = email.trim();
       if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
@@ -455,7 +430,6 @@ export default function PortalBriefForm() {
         customAspectRatio: customAspectRatio || undefined,
         language: language.trim() || undefined,
         tone: tone.trim() || undefined,
-        narratorProfileId: narratorProfileId || undefined,
         platforms,
         clientAssetIds: selectedAssets,
         title: `${companyName.trim() || personName.trim()} — ${productName.trim() || "پروژه"}`,
@@ -607,14 +581,11 @@ export default function PortalBriefForm() {
                   <FieldLabel htmlFor="phone" required>
                     شماره تماس
                   </FieldLabel>
-                  <Input
+                  <WhatsAppPhoneInput
                     id="phone"
-                    dir="ltr"
-                    type="tel"
-                    placeholder="0700123456"
                     value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value);
+                    onChange={(value) => {
+                      setPhone(value);
                       setStepError(null);
                     }}
                   />
@@ -842,41 +813,6 @@ export default function PortalBriefForm() {
                     value={tone}
                     onChange={(e) => setTone(e.target.value)}
                   />
-                </Field>
-
-                <Field>
-                  <FieldLabel>نریتور (گوینده)</FieldLabel>
-                  <Select
-                    value={narratorProfileId || undefined}
-                    onValueChange={setNarratorProfileId}
-                    disabled={narratorsLoading || narratorsError || narrators.length === 0}
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          narratorsLoading
-                            ? "در حال بارگذاری نریتورها…"
-                            : narratorsError
-                              ? "خطا در دریافت نریتورها"
-                              : narrators.length === 0
-                                ? "نریتور فعالی ثبت نشده است"
-                                : "انتخاب نریتور"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {narrators.map((narrator) => (
-                        <SelectItem key={narrator.id} value={narrator.id}>
-                          {narrator.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {narratorsError ? (
-                    <p className="text-xs text-destructive">
-                      فهرست نریتورها بارگذاری نشد. صفحه را تازه کنید.
-                    </p>
-                  ) : null}
                 </Field>
 
                 <Field className="sm:col-span-2">

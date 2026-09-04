@@ -163,6 +163,8 @@ export function CrmCurrencyField({
   onChange,
   placeholder = "0",
   readOnly = false,
+  disabled = false,
+  invalid = false,
   hint,
 }: {
   id: string;
@@ -171,8 +173,11 @@ export function CrmCurrencyField({
   onChange?: (value: string) => void;
   placeholder?: string;
   readOnly?: boolean;
+  disabled?: boolean;
+  invalid?: boolean;
   hint?: string;
 }) {
+  const locked = readOnly || disabled;
   return (
     <div className="space-y-2" dir="rtl">
       <Label htmlFor={id} className="block text-xs font-medium text-start">
@@ -187,15 +192,19 @@ export function CrmCurrencyField({
           placeholder={placeholder}
           value={value}
           readOnly={readOnly}
-          tabIndex={readOnly ? -1 : undefined}
+          disabled={disabled}
+          aria-invalid={invalid || undefined}
+          tabIndex={locked ? -1 : undefined}
           onChange={
-            readOnly || !onChange ? undefined : (e) => onChange(e.target.value)
+            locked || !onChange ? undefined : (e) => onChange(e.target.value)
           }
           className={cn(
             "h-11 rounded-xl pe-14 ps-3 text-right tabular-nums shadow-sm",
             readOnly
               ? "cursor-default bg-muted/40 text-foreground"
               : "bg-background hover:border-brand/30",
+            disabled && "cursor-not-allowed opacity-70",
+            invalid && "border-destructive focus-visible:ring-destructive",
           )}
         />
         <span className="pointer-events-none absolute inset-y-0 end-0 flex items-center pe-3">

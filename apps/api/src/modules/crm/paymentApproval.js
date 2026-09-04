@@ -5,6 +5,7 @@
  */
 
 import { AppError } from '../../utils/response.js';
+import { formatCustomerNameWithCompany } from '../../utils/crmCustomerName.js';
 import { formatPaymentMethod } from './paymentMethods.js';
 import { formatFaDateTime } from '../portal/helpers.js';
 
@@ -206,11 +207,7 @@ export async function resolvePaymentContext(db, payment) {
 
   const project = opportunity?.project || null;
   const projectTitle = project?.title || opportunity?.title || null;
-  const customerName = customer
-    ? (customer.companyName
-      ? `${customer.personName} — ${customer.companyName}`
-      : customer.personName)
-    : null;
+  const customerName = customer ? formatCustomerNameWithCompany(customer) : null;
 
   return {
     customer,

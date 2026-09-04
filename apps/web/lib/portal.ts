@@ -9,7 +9,7 @@ export const PORTAL_STATUS_LABELS = CUSTOMER_FACING_STATUS_LABELS;
 export { getCustomerFacingStatusLabel };
 
 export const CREATE_PROJECT_DENIED_MESSAGE =
-  "شما بدون مجوز نمی‌توانید پروژه جدید ایجاد کنید. لطفاً با مدیر یا کارشناس فروش تماس بگیرید.";
+  "شما اجازه ساخت پروژه جدید را ندارید، با مسئول این سیستم تماس بگیرید";
 
 export type PortalProjectSummary = {
   id: string;
@@ -42,6 +42,7 @@ export type PortalDashboard = {
   };
   canCreateProject: boolean;
   pendingBriefsCount: number;
+  pipelineStage?: string | null;
   projects: PortalProjectSummary[];
   recentProjects: PortalProjectSummary[];
   pendingApprovals: Array<{
@@ -72,6 +73,7 @@ export type PortalProjectsList = {
   totalPages: number;
   canCreateProject: boolean;
   pendingBriefsCount: number;
+  pipelineStage?: string | null;
 };
 
 export function projectThumbnailUrl(

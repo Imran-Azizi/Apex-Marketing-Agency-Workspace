@@ -6,6 +6,7 @@
 export const UPLOAD_PURPOSE = {
   PORTAL_ASSET: "portal-asset",
   PRODUCTION_FINAL: "production-final",
+  PRODUCTION_POSTER: "production-poster",
   NARRATION_AUDIO: "narration-audio",
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
@@ -14,6 +15,7 @@ export const UPLOAD_PURPOSE = {
   CUSTOMER_IMAGE: "customer-image",
   PORTFOLIO_VIDEO: "portfolio-video",
   PORTFOLIO_THUMBNAIL: "portfolio-thumbnail",
+  CHAT_ATTACHMENT: "chat-attachment",
   GENERIC: "generic",
 } as const;
 
@@ -144,6 +146,7 @@ export function getMediaFolderLabel(
     if (path.includes("/final/watermarked")) {
       return "ویدیوی نهایی (واترمارک)";
     }
+    if (path.includes("/posters")) return "پوستر پروژه";
     if (path.startsWith("projects/")) return "دارایی‌های پروژه";
     if (path.startsWith("users/")) return "پروفایل کاربر";
   }
@@ -156,6 +159,7 @@ export function getMediaFolderLabel(
     if (key.includes("/final/watermarked")) {
       return "ویدیوی نهایی (واترمارک)";
     }
+    if (key.includes("/posters")) return "پوستر پروژه";
     return "دارایی‌های پروژه";
   }
 

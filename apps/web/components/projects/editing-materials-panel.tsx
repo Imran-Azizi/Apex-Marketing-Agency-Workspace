@@ -104,7 +104,12 @@ export type EditingMaterialsData = {
   }>;
 };
 
-export type ProductionWorkspaceTab = "customer" | "ai" | "narration" | "final";
+export type ProductionWorkspaceTab =
+  | "customer"
+  | "ai"
+  | "narration"
+  | "final"
+  | "poster";
 
 export const PRODUCTION_WORKSPACE_TABS: Array<{
   id: ProductionWorkspaceTab;
@@ -115,6 +120,7 @@ export const PRODUCTION_WORKSPACE_TABS: Array<{
   { id: "ai", label: "تولید شده هوش مصنوعی", shortLabel: "AI" },
   { id: "narration", label: "فایل صوتی نریشن", shortLabel: "نریشن" },
   { id: "final", label: "محصول نهایی", shortLabel: "نهایی" },
+  { id: "poster", label: "اپلود پوستر", shortLabel: "پوستر" },
 ];
 
 const CUSTOMER_INFO_TABS: Array<{
@@ -225,7 +231,7 @@ function useMaterialsDerived({ materials }: MaterialsCtx) {
 
 export function getProductionTabBadges(
   ctx: MaterialsCtx,
-  extras?: { finalCount?: number },
+  extras?: { finalCount?: number; posterCount?: number },
 ): Partial<Record<ProductionWorkspaceTab, number>> {
   const assets = ctx.materials.clientAssets?.length || 0;
   const narrationAudioCount =
@@ -240,11 +246,13 @@ export function getProductionTabBadges(
     (ctx.materials.approvedContent?.narration ? 1 : 0) +
     (scenes > 0 ? 1 : 0);
   const finalCount = extras?.finalCount || 0;
+  const posterCount = extras?.posterCount || 0;
   return {
     customer: assets || undefined,
     ai: aiCount || undefined,
     narration: narrationAudioCount || undefined,
     final: finalCount || undefined,
+    poster: posterCount || undefined,
   };
 }
 

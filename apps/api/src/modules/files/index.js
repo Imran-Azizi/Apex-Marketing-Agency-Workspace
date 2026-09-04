@@ -52,7 +52,7 @@ async function assertMediaAccess(file, auth) {
     throw new AppError("فایل یافت نشد", 404, "NOT_FOUND");
   }
 
-  if (auth.audience === "PORTAL") {
+    if (auth.audience === "PORTAL") {
     const project = await prisma.project.findFirst({
       where: {
         id: file.projectId,
@@ -65,6 +65,25 @@ async function assertMediaAccess(file, auth) {
 
     const { isSentToCustomer, asMeta } =
       await import("../production/finalProduct.js");
+
+    if (file.kind === "POSTER") {
+      const poster = await prisma.projectPoster.findFirst({
+        where: {
+          fileId: file.id,
+          projectId: project.id,
+          status: "SENT_TO_CUSTOMER",
+        },
+        select: { id: true },
+      });
+      if (!poster) {
+        throw new AppError(
+          "این پوستر هنوز برای شما ارسال نشده است",
+          403,
+          "NOT_SENT",
+        );
+      }
+      return;
+    }
 
     if (file.kind === "WATERMARKED_FINAL" || file.kind === "THUMBNAIL") {
       if (
@@ -113,6 +132,17 @@ async function assertMediaAccess(file, auth) {
   // Internal roles
   if (auth.roleCode === "MANAGER" || auth.roleCode === "ADMIN") return;
 
+  if (auth.roleCode === "PROJECT_MANAGER") {
+    const perms = auth.permissions || [];
+    if (!perms.includes("projects.view")) {
+      throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+    }
+    if (file.kind === "CLEAN_FINAL" && !perms.includes("delivery.allow")) {
+      throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+    }
+    return;
+  }
+
   if (auth.roleCode === "EDITOR") {
     const assigned = await prisma.projectAssignment.findFirst({
       where: {
@@ -130,6 +160,7 @@ async function assertMediaAccess(file, auth) {
         "WORKING",
         "AUDIO",
         "THUMBNAIL",
+        "POSTER",
       ].includes(file.kind)
     ) {
       throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");

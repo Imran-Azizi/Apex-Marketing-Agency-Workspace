@@ -71,23 +71,26 @@ const DATE_OPTIONS = [
   { value: "custom", label: "بازه سفارشی" },
 ];
 
-const PRIORITY_OPTIONS = [
-  { value: "all", label: "همه اولویت‌ها" },
-  { value: "high", label: "فوری / مهلت گذشته" },
-  { value: "medium", label: "متوسط" },
-  { value: "low", label: "عادی" },
-];
-
 function TaskCard({ task }: { task: EditorTaskSummary }) {
+  const projectCompleted = task.projectStatus === "COMPLETED";
+  const statusLabel = projectCompleted
+    ? "تکمیل‌شده"
+    : EDITING_STATUS_LABEL[task.status] || task.status;
+  const statusVariant = projectCompleted
+    ? "success"
+    : editingStatusVariant(task.status);
+
   return (
     <article
       className={cn(
         "flex h-full flex-col gap-3 rounded-2xl border bg-card p-4 shadow-sm transition-all hover:border-brand/35 hover:shadow-md",
-        task.status === "REVISION_REQUESTED"
-          ? ALERT_CARD_BORDER
-          : task.overdue
-            ? "border-destructive/30"
-            : "border-border/70",
+        projectCompleted
+          ? "border-emerald-500/25"
+          : task.status === "REVISION_REQUESTED"
+            ? ALERT_CARD_BORDER
+            : task.overdue
+              ? "border-destructive/30"
+              : "border-border/70",
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -102,10 +105,10 @@ function TaskCard({ task }: { task: EditorTaskSummary }) {
           )}
         </div>
         <Badge
-          variant={editingStatusVariant(task.status)}
+          variant={statusVariant}
           className="shrink-0 font-normal"
         >
-          {EDITING_STATUS_LABEL[task.status] || task.status}
+          {statusLabel}
         </Badge>
       </div>
 
@@ -157,24 +160,14 @@ export default function EditorProjectsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [date, setDate] = useState("all");
-  const [priority, setPriority] = useState("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
   const [view, setView] = useState<"grid" | "list">("grid");
 
   const queryKey = useMemo(
-    () => [
-      "editor-projects",
-      search,
-      status,
-      date,
-      priority,
-      from,
-      to,
-      page,
-    ],
-    [search, status, date, priority, from, to, page],
+    () => ["editor-projects", search, status, date, from, to, page],
+    [search, status, date, from, to, page],
   );
 
   const { data, isLoading, error, isFetching } = useQuery({
@@ -185,7 +178,6 @@ export default function EditorProjectsPage() {
         pageSize: "12",
         status,
         date,
-        priority,
       });
       if (search) params.set("q", search);
       if (date === "custom") {
@@ -238,7 +230,7 @@ export default function EditorProjectsPage() {
           </Button>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="space-y-1.5">
             <Label>وضعیت</Label>
             <Select
@@ -275,28 +267,6 @@ export default function EditorProjectsPage() {
               </SelectTrigger>
               <SelectContent>
                 {DATE_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>اولویت</Label>
-            <Select
-              value={priority}
-              onValueChange={(v) => {
-                setPriority(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PRIORITY_OPTIONS.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
                     {o.label}
                   </SelectItem>
@@ -415,10 +385,16 @@ export default function EditorProjectsPage() {
                   {task.instructionsPreview || "—"}
                 </p>
                 <Badge
-                  variant={editingStatusVariant(task.status)}
+                  variant={
+                    task.projectStatus === "COMPLETED"
+                      ? "success"
+                      : editingStatusVariant(task.status)
+                  }
                   className="w-fit font-normal"
                 >
-                  {EDITING_STATUS_LABEL[task.status] || task.status}
+                  {task.projectStatus === "COMPLETED"
+                    ? "تکمیل‌شده"
+                    : EDITING_STATUS_LABEL[task.status] || task.status}
                 </Badge>
                 <span className="hidden text-sm tabular-nums text-muted-foreground md:inline">
                   {task.deadline ? formatDate(task.deadline) : "—"}

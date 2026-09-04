@@ -8,6 +8,9 @@ import {
   buildContactMessageNotification,
 } from "../../services/notifications.js";
 import { getWhatsappNumber } from "../../services/whatsapp.js";
+import { formatE164Display, whatsappDigitsForLink } from "../../utils/whatsappNormalize.js";
+import { withContactVisibility } from "./visibility.js";
+import { formatCustomerNameWithCompany } from "../../utils/crmCustomerName.js";
 
 export const CONTACT_SUBJECTS = [
   { value: "CONSULTATION", label: "مشاوره پروژه" },
@@ -94,32 +97,17 @@ function settingString(value, keys) {
 }
 
 function formatPhoneDisplay(raw) {
-  const digits = phoneDigits(raw);
-  if (/^07\d{8}$/.test(digits)) {
-    return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
-  }
-  if (/^93\d{9}$/.test(digits)) {
-    return `+93 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
-  }
-  if (/^\d{10,15}$/.test(digits)) return `+${digits}`;
-  return raw || "";
+  return formatE164Display(raw);
 }
 
 function whatsappDigits(raw) {
-  let digits = phoneDigits(raw);
-  if (digits.startsWith("00")) digits = digits.slice(2);
-  if (/^07\d{8}$/.test(digits)) return `93${digits.slice(1)}`;
-  if (/^7\d{8}$/.test(digits)) return `93${digits}`;
-  return digits;
+  return whatsappDigitsForLink(raw) || phoneDigits(raw);
 }
 
 function telHref(raw) {
-  const digits = phoneDigits(raw);
+  const digits = whatsappDigitsForLink(raw) || phoneDigits(raw);
   if (!digits) return "";
-  if (/^07\d{8}$/.test(digits)) return `tel:+93${digits.slice(1)}`;
-  if (/^93\d{9}$/.test(digits)) return `tel:+${digits}`;
-  if (digits.startsWith("00")) return `tel:+${digits.slice(2)}`;
-  return digits.startsWith("+") ? `tel:${raw}` : `tel:+${digits}`;
+  return `tel:+${digits.replace(/^\+/, "")}`;
 }
 
 export function subjectLabel(code) {
@@ -128,6 +116,7 @@ export function subjectLabel(code) {
 
 function serialize(row) {
   if (!row) return null;
+  const customer = row.crmCustomer;
   return {
     id: row.id,
     name: row.name,
@@ -141,7 +130,36 @@ function serialize(row) {
     readAt: row.readAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    crmCustomerId: row.crmCustomerId || null,
+    crmCustomer: customer
+      ? {
+          id: customer.id,
+          customerCode: customer.customerCode || null,
+          displayName: formatCustomerNameWithCompany(customer),
+        }
+      : null,
   };
+}
+
+const contactInclude = {
+  crmCustomer: {
+    select: {
+      id: true,
+      customerCode: true,
+      personName: true,
+      companyName: true,
+      salesOwnerId: true,
+    },
+  },
+};
+
+async function findAccessibleMessage(id, auth) {
+  const row = await prisma.contactMessage.findFirst({
+    where: withContactVisibility({ id, deletedAt: null }, auth),
+    include: contactInclude,
+  });
+  if (!row) throw new AppError("پیام یافت نشد", 404, "NOT_FOUND");
+  return row;
 }
 
 function previewOf(message, max = 140) {
@@ -239,6 +257,29 @@ export const contactService = {
       },
     });
 
+    let crmCustomerId = null;
+    try {
+      const { ingestWebsiteContact } = await import("../crm/ingestion.js");
+      const ingested = await ingestWebsiteContact({
+        name,
+        email,
+        phone,
+        company,
+        subject: subjectLabel(row.subject),
+        message,
+        contactMessageId: row.id,
+      });
+      crmCustomerId = ingested?.customer?.id || null;
+      if (crmCustomerId) {
+        await prisma.contactMessage.update({
+          where: { id: row.id },
+          data: { crmCustomerId },
+        });
+      }
+    } catch (err) {
+      console.error("[contact] CRM lead ingest failed", err?.message || err);
+    }
+
     await notifyManagersOnce(
       buildContactMessageNotification({
         messageId: row.id,
@@ -248,7 +289,7 @@ export const contactService = {
       }),
     );
 
-    return { id: row.id };
+    return { id: row.id, crmCustomerId };
   },
 
   async list({
@@ -258,6 +299,7 @@ export const contactService = {
     pageSize = 20,
     sort = "newest",
     subject,
+    auth,
   } = {}) {
     const safePage = Math.max(1, Number(page) || 1);
     const safeSize = Math.min(50, Math.max(1, Number(pageSize) || 20));
@@ -302,11 +344,17 @@ export const contactService = {
             ? [{ isRead: "asc" }, { createdAt: "desc" }]
             : [{ createdAt: "desc" }];
 
+    const scopedWhere = withContactVisibility(where, auth);
+    const unreadBase = withContactVisibility({ deletedAt: null }, auth);
+
     const [total, unreadCount, items] = await Promise.all([
-      prisma.contactMessage.count({ where }),
-      prisma.contactMessage.count({ where: { deletedAt: null, isRead: false } }),
+      prisma.contactMessage.count({ where: scopedWhere }),
+      prisma.contactMessage.count({
+        where: { ...unreadBase, isRead: false },
+      }),
       prisma.contactMessage.findMany({
-        where,
+        where: scopedWhere,
+        include: contactInclude,
         orderBy,
         skip: (safePage - 1) * safeSize,
         take: safeSize,
@@ -323,13 +371,14 @@ export const contactService = {
     };
   },
 
-  async unreadCount() {
+  async unreadCount(auth) {
+    const baseWhere = withContactVisibility({ deletedAt: null }, auth);
     const [unreadCount, total] = await Promise.all([
       prisma.contactMessage.count({
-        where: { deletedAt: null, isRead: false },
+        where: { ...baseWhere, isRead: false },
       }),
       prisma.contactMessage.count({
-        where: { deletedAt: null },
+        where: baseWhere,
       }),
     ]);
     return {
@@ -339,25 +388,20 @@ export const contactService = {
     };
   },
 
-  async getById(id) {
-    const row = await prisma.contactMessage.findFirst({
-      where: { id, deletedAt: null },
-    });
-    if (!row) throw new AppError("پیام یافت نشد", 404, "NOT_FOUND");
+  async getById(id, auth) {
+    const row = await findAccessibleMessage(id, auth);
     return serialize(row);
   },
 
   async markRead(id, auth, req) {
-    const existing = await prisma.contactMessage.findFirst({
-      where: { id, deletedAt: null },
-    });
-    if (!existing) throw new AppError("پیام یافت نشد", 404, "NOT_FOUND");
+    const existing = await findAccessibleMessage(id, auth);
 
     if (existing.isRead) return serialize(existing);
 
     const row = await prisma.contactMessage.update({
       where: { id },
       data: { isRead: true, readAt: new Date() },
+      include: contactInclude,
     });
     await writeAudit({
       userId: auth?.userId,
@@ -372,16 +416,14 @@ export const contactService = {
   },
 
   async markUnread(id, auth, req) {
-    const existing = await prisma.contactMessage.findFirst({
-      where: { id, deletedAt: null },
-    });
-    if (!existing) throw new AppError("پیام یافت نشد", 404, "NOT_FOUND");
+    const existing = await findAccessibleMessage(id, auth);
 
     if (!existing.isRead) return serialize(existing);
 
     const row = await prisma.contactMessage.update({
       where: { id },
       data: { isRead: false, readAt: null },
+      include: contactInclude,
     });
     await writeAudit({
       userId: auth?.userId,
@@ -396,10 +438,7 @@ export const contactService = {
   },
 
   async remove(id, auth, req) {
-    const existing = await prisma.contactMessage.findFirst({
-      where: { id, deletedAt: null },
-    });
-    if (!existing) throw new AppError("پیام یافت نشد", 404, "NOT_FOUND");
+    const existing = await findAccessibleMessage(id, auth);
 
     await prisma.contactMessage.update({
       where: { id },

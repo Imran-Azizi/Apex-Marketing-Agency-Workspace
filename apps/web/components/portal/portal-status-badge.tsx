@@ -13,13 +13,13 @@ export function PortalStatusBadge({
 }) {
   const variant =
     status === "COMPLETED"
-      ? "secondary"
+      ? "success"
       : status === "WAITING_YOUR_APPROVAL" || status === "FINAL_REVIEW"
         ? "brand"
         : "outline";
 
   return (
-    <Badge variant={variant as "secondary" | "brand" | "outline"} className={cn(className)}>
+    <Badge variant={variant as "success" | "brand" | "outline"} className={cn(className)}>
       {getCustomerFacingStatusLabel(status)}
     </Badge>
   );

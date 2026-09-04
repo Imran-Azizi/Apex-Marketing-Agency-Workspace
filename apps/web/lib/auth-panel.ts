@@ -8,6 +8,7 @@ export type AuthPanel =
   | "editor"
   | "sales"
   | "narrator"
+  | "project_manager"
   | "portal";
 
 export const AUTH_PANEL_HEADER = "X-APEX-Panel";
@@ -18,6 +19,7 @@ const PANELS: AuthPanel[] = [
   "editor",
   "sales",
   "narrator",
+  "project_manager",
   "portal",
 ];
 
@@ -38,11 +40,18 @@ export function roleToPanel(role: string | null | undefined): AuthPanel | null {
       return "sales";
     case "NARRATOR":
       return "narrator";
+    case "PROJECT_MANAGER":
+      return "project_manager";
     case "CUSTOMER":
       return "portal";
     default:
       return null;
   }
+}
+
+/** True for `/prefix` or `/prefix/...`, but not `/prefix-other`. */
+function pathIsUnder(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
 /**
@@ -51,17 +60,20 @@ export function roleToPanel(role: string | null | undefined): AuthPanel | null {
  */
 export function panelFromPathname(pathname: string | null | undefined): AuthPanel | null {
   if (!pathname) return null;
-  if (pathname === "/portal" || pathname.startsWith("/portal/")) return "portal";
+  if (pathIsUnder(pathname, "/portal")) return "portal";
   if (
-    pathname.startsWith("/manager") ||
-    pathname.startsWith("/employees") ||
-    pathname.startsWith("/settings")
+    pathIsUnder(pathname, "/manager") ||
+    pathIsUnder(pathname, "/employees") ||
+    pathIsUnder(pathname, "/settings")
   ) {
+    // Shared inbox — keep the tab's sales/manager panel cookie.
+    if (pathIsUnder(pathname, "/manager/messages")) return null;
     return "manager";
   }
-  if (pathname.startsWith("/editor")) return "editor";
-  if (pathname.startsWith("/sales")) return "sales";
-  if (pathname.startsWith("/narrator")) return "narrator";
+  if (pathIsUnder(pathname, "/editor")) return "editor";
+  if (pathIsUnder(pathname, "/sales")) return "sales";
+  if (pathIsUnder(pathname, "/narrator")) return "narrator";
+  if (pathIsUnder(pathname, "/project-manager")) return "project_manager";
   return null;
 }
 

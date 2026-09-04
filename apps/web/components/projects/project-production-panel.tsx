@@ -38,10 +38,13 @@ import {
   type ProductionWorkspaceTab,
 } from "@/components/projects/editing-materials-panel";
 import { ProjectFinalProductPanel } from "@/components/projects/project-final-product-panel";
+import { ProjectPosterPanel } from "@/components/projects/project-poster-panel";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FinalProductsPayload } from "@/lib/final-product";
+import type { PostersPayload } from "@/lib/poster";
 import {
   Film,
+  ImageIcon,
   Loader2,
   Mic2,
   PackageCheck,
@@ -155,6 +158,7 @@ type EditorProfile = {
   displayName: string;
   user: { id: string; fullName: string; email: string };
   rates?: Array<{ amount: string | number; isActive?: boolean }>;
+  hasMonthlySalary?: boolean;
 };
 
 export function ProjectProductionPanel({
@@ -209,6 +213,13 @@ export function ProjectProductionPanel({
     staleTime: 15_000,
   });
 
+  const postersQ = useQuery({
+    queryKey: ["project-posters", projectId],
+    queryFn: () =>
+      apiGet<PostersPayload>(`/production/projects/${projectId}/posters`),
+    staleTime: 15_000,
+  });
+
   const editorsQ = useQuery({
     queryKey: ["production-editors"],
     queryFn: () => apiGet<EditorProfile[]>("/production/editors"),
@@ -219,6 +230,7 @@ export function ProjectProductionPanel({
     qc.invalidateQueries({ queryKey: ["production-task", projectId] });
     qc.invalidateQueries({ queryKey: ["project", projectId] });
     qc.invalidateQueries({ queryKey: ["final-products", projectId] });
+    qc.invalidateQueries({ queryKey: ["project-posters", projectId] });
     qc.invalidateQueries({ queryKey: ["production-my-tasks"] });
     qc.invalidateQueries({ queryKey: ["editor-dashboard"] });
     qc.invalidateQueries({ queryKey: ["editor-projects"] });
@@ -231,17 +243,27 @@ export function ProjectProductionPanel({
       if (!canAssignEditor) {
         throw new Error("شما اجازه تغییر ادیتور را ندارید");
       }
-      const costError = validateCurrencyInput(editingCost, "هزینه ادیت");
-      if (costError) {
-        setEditingCostError(costError);
-        throw new Error(costError);
-      }
-      return apiPost(`/production/projects/${projectId}/assign`, {
+      const selected = (editorsQ.data || []).find((e) => e.id === editorId);
+      const hasMonthlySalary = Boolean(selected?.hasMonthlySalary);
+      const payload: {
+        editorProfileId: string;
+        deadline?: string;
+        instructions?: string;
+        editingCost?: string;
+      } = {
         editorProfileId: editorId,
         deadline: deadline || undefined,
         instructions: instructions || undefined,
-        editingCost: editingCost.replace(/,/g, "").trim(),
-      });
+      };
+      if (!hasMonthlySalary) {
+        const costError = validateCurrencyInput(editingCost, "هزینه ادیت");
+        if (costError) {
+          setEditingCostError(costError);
+          throw new Error(costError);
+        }
+        payload.editingCost = editingCost.replace(/,/g, "").trim();
+      }
+      return apiPost(`/production/projects/${projectId}/assign`, payload);
     },
     onSuccess: () => {
       toast.success("ادیتور ارجاع شد");
@@ -268,6 +290,8 @@ export function ProjectProductionPanel({
 
   const payload = dataQ.data;
   const task = payload?.task;
+  const selectedEditor = (editorsQ.data || []).find((e) => e.id === editorId);
+  const editorHasMonthlySalary = Boolean(selectedEditor?.hasMonthlySalary);
 
   if (dataQ.isLoading) {
     return <EditingMaterialsSkeleton />;
@@ -301,7 +325,10 @@ export function ProjectProductionPanel({
     (payload.productionFiles?.watermarked?.length || 0) +
       (payload.productionFiles?.clean?.length || 0);
 
-  const tabBadges = getProductionTabBadges(materialsCtx, { finalCount });
+  const tabBadges = getProductionTabBadges(materialsCtx, {
+    finalCount,
+    posterCount: postersQ.data?.counts.total,
+  });
 
   const showAssign = canAssignEditor;
   const showStart =
@@ -314,6 +341,7 @@ export function ProjectProductionPanel({
     ai: Sparkles,
     narration: Mic2,
     final: PackageCheck,
+    poster: ImageIcon,
   };
 
   return (
@@ -424,6 +452,16 @@ export function ProjectProductionPanel({
             />
           ) : null}
         </TabsContent>
+
+        <TabsContent
+          value="poster"
+          className="mt-0 text-start focus-visible:ring-0"
+          dir="rtl"
+        >
+          {workspaceTab === "poster" ? (
+            <ProjectPosterPanel projectId={projectId} roleCode={roleCode} />
+          ) : null}
+        </TabsContent>
       </Tabs>
 
       {canAssignEditor ? (
@@ -432,7 +470,9 @@ export function ProjectProductionPanel({
           <DialogHeader className="text-start sm:text-start">
             <DialogTitle>ارجاع ادیتور</DialogTitle>
             <DialogDescription>
-              ادیتور، هزینه ادیت، مهلت و دستورالعمل را مشخص کنید.
+              {editorHasMonthlySalary
+                ? "ادیتور، مهلت و دستورالعمل را مشخص کنید. این ادیتور معاش ماهانه دارد و هزینه ادیت جداگانه ثبت نمی‌شود."
+                : "ادیتور، هزینه ادیت، مهلت و دستورالعمل را مشخص کنید."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 text-start">
@@ -445,10 +485,18 @@ export function ProjectProductionPanel({
                   const profile = (editorsQ.data || []).find(
                     (e) => e.id === value,
                   );
+                  if (profile?.hasMonthlySalary) {
+                    setEditingCost("");
+                    setEditingCostError(undefined);
+                    return;
+                  }
                   const rate = profile?.rates?.[0]?.amount;
                   if (rate != null && rate !== "") {
                     setEditingCost(String(rate));
+                  } else {
+                    setEditingCost("");
                   }
+                  setEditingCostError(undefined);
                 }}
               >
                 <SelectTrigger dir="rtl">
@@ -463,20 +511,22 @@ export function ProjectProductionPanel({
                 </SelectContent>
               </Select>
             </div>
-            <CurrencyField
-              id="editing-cost"
-              label="هزینه ادیت"
-              value={editingCost}
-              onChange={(v) => {
-                setEditingCost(v);
-                if (editingCostError) {
-                  setEditingCostError(validateCurrencyInput(v, "هزینه ادیت"));
-                }
-              }}
-              error={editingCostError}
-              required
-              hint="مبلغ پرداختی به ادیتور برای این پروژه"
-            />
+            {!editorHasMonthlySalary ? (
+              <CurrencyField
+                id="editing-cost"
+                label="هزینه ادیت"
+                value={editingCost}
+                onChange={(v) => {
+                  setEditingCost(v);
+                  if (editingCostError) {
+                    setEditingCostError(validateCurrencyInput(v, "هزینه ادیت"));
+                  }
+                }}
+                error={editingCostError}
+                required
+                hint="مبلغ پرداختی به ادیتور برای این پروژه"
+              />
+            ) : null}
             <div className="space-y-2">
               <Label>مهلت ادیت</Label>
               <Input
@@ -505,7 +555,11 @@ export function ProjectProductionPanel({
             </Button>
             <Button
               variant="brand"
-              disabled={!editorId || !editingCost.trim() || assignMut.isPending}
+              disabled={
+                !editorId ||
+                (!editorHasMonthlySalary && !editingCost.trim()) ||
+                assignMut.isPending
+              }
               onClick={() => assignMut.mutate()}
             >
               {assignMut.isPending ? "در حال ارجاع..." : "ارجاع"}

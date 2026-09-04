@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { PortfolioDetails } from "@/components/public/portfolio/portfolio-details";
 import {
   fetchPublicPortfolioDetail,
+  portfolioMetaDescription,
   portfolioWorkPath,
 } from "@/lib/portfolio";
 
@@ -15,9 +16,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     if (!item) {
       return { title: "نمونه‌کار یافت نشد — اپیکس" };
     }
-    const description =
-      item.description ||
-      `نمونه‌کار ${item.title} در بخش نمونه های کاری اپیکس`;
+    const description = portfolioMetaDescription(item);
     return {
       title: `${item.title} — نمونه های کاری`,
       description,

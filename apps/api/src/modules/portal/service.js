@@ -2,8 +2,10 @@ import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../utils/response.js";
-import { hashPassword } from "../../utils/passwords.js";
+import { getCustomerPersonName } from "../../utils/crmCustomerName.js";
+import { buildPortalPasswordRecord } from "./credentials.js";
 import { generateOtp, hashToken } from "../../utils/tokens.js";
+import { normalizeWhatsapp, whatsappNumbersMatch, getWhatsappLookupKeys } from "../../utils/whatsappNormalize.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { rebuildProjectContext } from "../../services/projectContext.js";
 import { buildManagerContact } from "../../services/whatsapp.js";
@@ -107,7 +109,7 @@ export const portalService = {
     };
   },
 
-  async register(token, { password, otp }, req) {
+  async register(token, { password, otp, whatsapp }, req) {
     const invite = await getValidInvite(token);
     const otpRow = await prisma.otpCode.findFirst({
       where: { portalInviteId: invite.id, usedAt: null, purpose: "REGISTER" },
@@ -133,11 +135,25 @@ export const portalService = {
       throw new AppError("رمز عبور حداقل ۸ کاراکتر باشد", 400, "WEAK_PASSWORD");
     }
 
-    const passwordHash = await hashPassword(password);
+    let registeredWhatsapp = invite.whatsappNumber;
+    if (whatsapp) {
+      if (!whatsappNumbersMatch(whatsapp, invite.whatsappNumber)) {
+        throw new AppError(
+          "شماره واتساپ باید همان شماره دعوت‌شده باشد",
+          400,
+          "WHATSAPP_MISMATCH",
+        );
+      }
+      registeredWhatsapp = normalizeWhatsapp(whatsapp);
+    }
+
+    const { passwordHash, passwordCipher } =
+      await buildPortalPasswordRecord(password);
 
     const result = await prisma.$transaction(async (tx) => {
-      let account = await tx.portalAccount.findUnique({
-        where: { normalizedWhatsapp: invite.whatsappNumber },
+      const inviteKeys = getWhatsappLookupKeys(invite.whatsappNumber);
+      let account = await tx.portalAccount.findFirst({
+        where: { normalizedWhatsapp: { in: inviteKeys } },
       });
 
       if (account) {
@@ -145,7 +161,9 @@ export const portalService = {
         account = await tx.portalAccount.update({
           where: { id: account.id },
           data: {
+            normalizedWhatsapp: registeredWhatsapp,
             passwordHash,
+            passwordCipher,
             isActive: true,
             registeredAt: account.registeredAt || new Date(),
           },
@@ -154,8 +172,9 @@ export const portalService = {
         account = await tx.portalAccount.create({
           data: {
             crmCustomerId: invite.crmCustomerId,
-            normalizedWhatsapp: invite.whatsappNumber,
+            normalizedWhatsapp: registeredWhatsapp,
             passwordHash,
+            passwordCipher,
             isActive: true,
             registeredAt: new Date(),
           },
@@ -168,7 +187,21 @@ export const portalService = {
       });
       await tx.portalInvite.update({
         where: { id: invite.id },
-        data: { usedAt: new Date(), portalAccountId: account.id },
+        data: {
+          usedAt: new Date(),
+          portalAccountId: account.id,
+          whatsappNumber: registeredWhatsapp,
+          passwordCipher,
+        },
+      });
+      // Keep sibling invites in sync so the manager tab can recover the
+      // password the customer actually created, even on older invite rows.
+      await tx.portalInvite.updateMany({
+        where: {
+          crmCustomerId: invite.crmCustomerId,
+          id: { not: invite.id },
+        },
+        data: { passwordCipher },
       });
       await tx.crmCustomer.update({
         where: { id: invite.crmCustomerId },
@@ -182,7 +215,7 @@ export const portalService = {
       action: "PORTAL_REGISTER",
       entityType: "PortalAccount",
       entityId: result.id,
-      after: { whatsapp: invite.whatsappNumber },
+      after: { whatsapp: registeredWhatsapp },
       req,
     });
 
@@ -412,7 +445,7 @@ export const portalService = {
         },
         files: {
           where: {
-            kind: { in: ["WATERMARKED_FINAL", "CLEAN_FINAL"] },
+            kind: { in: ["WATERMARKED_FINAL", "CLEAN_FINAL", "POSTER"] },
             deletedAt: null,
           },
           orderBy: { createdAt: "desc" },
@@ -469,18 +502,34 @@ export const portalService = {
     const assetRefs = project.assetRefs || [];
     const snap = deliverySnapshot(evalResult);
 
-    const { isSentToCustomer, serializeFinalVideo } =
-      await import("../production/finalProduct.js");
+    const {
+      isSentToCustomer,
+      serializeFinalVideo,
+      sortPortalFinalVideos,
+    } = await import("../production/finalProduct.js");
 
     // Always surface every sent final video. Access control is exposed as
     // flags (canPlay / canDownload / accessLocked) — never hide CLEAN files.
     const visibleFinals = (project.files || []).filter((f) =>
       isSentToCustomer(f, project.status),
     );
-    const watermarkedVisible = visibleFinals.filter(
-      (f) => f.kind === "WATERMARKED_FINAL",
+    const watermarkedVisible = sortPortalFinalVideos(
+      visibleFinals.filter((f) => f.kind === "WATERMARKED_FINAL"),
+      project.status,
     );
-    const cleanVisible = visibleFinals.filter((f) => f.kind === "CLEAN_FINAL");
+    const cleanVisible = sortPortalFinalVideos(
+      visibleFinals.filter((f) => f.kind === "CLEAN_FINAL"),
+      project.status,
+    );
+    const allVisibleSorted = sortPortalFinalVideos(
+      visibleFinals,
+      project.status,
+    );
+
+    const { listDeliveredPostersForPortal } = await import(
+      "../production/posterService.js"
+    );
+    const posters = await listDeliveredPostersForPortal(project.id);
 
     const mapPortalFinal = (f) => {
       const serialized = serializeFinalVideo(f, {
@@ -516,6 +565,8 @@ export const portalService = {
         status: serialized.status,
         statusLabel: serialized.statusLabel,
         sentAt: serialized.sentAt,
+        viewedAt: serialized.viewedAt,
+        isNewForCustomer: serialized.isNewForCustomer === true,
         allowDownload:
           unlocked && isClean
             ? true
@@ -525,6 +576,7 @@ export const portalService = {
         accessLocked: isClean && !unlocked,
         accessStatus,
         accessMessage,
+        revisionNotes: serialized.revisionNotes || null,
         // storageKey intentionally omitted — play via /files/media/:id
       };
     };
@@ -574,7 +626,11 @@ export const portalService = {
       contentVersions: project.contentVersions,
       watermarkedFiles: watermarkedVisible.map(mapPortalFinal),
       cleanFiles: cleanVisible.map(mapPortalFinal),
-      finalVideos: [...watermarkedVisible, ...cleanVisible].map(mapPortalFinal),
+      finalVideos: allVisibleSorted.map(mapPortalFinal),
+      newFinalVideoCount: allVisibleSorted
+        .map(mapPortalFinal)
+        .filter((v) => v.isNewForCustomer).length,
+      posters,
       assets: assetRefs
         .filter((ref) => ref.clientAsset && !ref.clientAsset.deletedAt)
         .map((ref) => serializePortalAsset(ref.clientAsset))
@@ -644,28 +700,6 @@ export const portalService = {
     if (!manager)
       throw new AppError("مدیر سیستم تعریف نشده", 500, "NO_MANAGER");
 
-    let resolvedNarratorProfileId = null;
-    if (brief.narratorProfileId) {
-      const narratorProfile = await prisma.teamProfile.findFirst({
-        where: {
-          id: brief.narratorProfileId,
-          kind: "NARRATOR",
-          status: "ACTIVE",
-          deletedAt: null,
-          user: { isActive: true, deletedAt: null },
-        },
-        select: { id: true },
-      });
-      if (!narratorProfile) {
-        throw new AppError(
-          "نریتور انتخاب‌شده معتبر نیست یا در سیستم فعال نیست",
-          400,
-          "INVALID_NARRATOR",
-        );
-      }
-      resolvedNarratorProfileId = narratorProfile.id;
-    }
-
     const year = new Date().getFullYear();
     const count = await prisma.project.count();
     const code = `APX-${year}-${String(count + 1).padStart(4, "0")}`;
@@ -711,7 +745,6 @@ export const portalService = {
             allowedClaims: brief.allowedClaims,
             mandatoryTexts: brief.mandatoryTexts,
             brandLimits: brief.brandLimits,
-            narratorProfileId: resolvedNarratorProfileId,
             customAspectRatio: brief.customAspectRatio || null,
           },
           contentRevisionMax: opp.service?.revisionCount || 2,
@@ -775,16 +808,6 @@ export const portalService = {
         data: { projectId: p.id },
       });
 
-      if (resolvedNarratorProfileId) {
-        await tx.projectAssignment.create({
-          data: {
-            projectId: p.id,
-            role: "PROPOSED_NARRATOR",
-            teamProfileId: resolvedNarratorProfileId,
-          },
-        });
-      }
-
       await tx.projectAssignment.create({
         data: {
           projectId: p.id,
@@ -809,11 +832,33 @@ export const portalService = {
 
       await rebuildProjectContext(p.id, tx);
 
+      const otherProjects = await tx.project.count({
+        where: {
+          crmCustomerId: auth.customerId,
+          deletedAt: null,
+          id: { not: p.id },
+        },
+      });
+
+      const { applyCrmEvent } = await import("../crm/sync.js");
+      const { CRM_EVENTS } = await import("../crm/pipeline.js");
+      await applyCrmEvent(tx, {
+        customerId: auth.customerId,
+        opportunityId: opp.id,
+        event: CRM_EVENTS.PROJECT_CREATED,
+        source: "PORTAL",
+        relatedType: "Project",
+        relatedId: p.id,
+        isRepeat: otherProjects > 0,
+        title: otherProjects > 0 ? "سفارش تکراری / پروژه جدید" : "پروژه ایجاد شد",
+      });
+
       const customerName =
-        brief.companyName ||
-        brief.personName ||
-        opp.crmCustomer?.companyName ||
-        opp.crmCustomer?.personName ||
+        getCustomerPersonName({
+          personName: brief.personName,
+          companyName: brief.companyName,
+        }) ||
+        getCustomerPersonName(opp.crmCustomer) ||
         "مشتری";
 
       // Exactly one manager notification per project (idempotent per recipient).
@@ -1073,6 +1118,11 @@ export const portalService = {
   },
 
   async approveFinal(projectId, auth, req) {
+    const fileId = String(req?.body?.fileId || "").trim();
+    if (!fileId) {
+      throw new AppError("شناسه ویدیو الزامی است", 400, "VALIDATION");
+    }
+
     const videoType = String(req?.body?.videoType || req?.body?.type || "")
       .trim()
       .toUpperCase();
@@ -1093,26 +1143,64 @@ export const portalService = {
     });
     if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
 
-    if (project.status === "COMPLETED" && project.completedAt) {
+    const {
+      isSentToCustomer,
+      asMeta,
+      isCustomerApprovedFile,
+      resolveVideoStatus,
+      markCustomerApprovedMeta,
+      allSentFilesCustomerApproved,
+      VIDEO_TYPE_LABELS,
+    } = await import("../production/finalProduct.js");
+
+    const file = (project.files || []).find((f) => f.id === fileId);
+    if (!file) throw new AppError("ویدیو یافت نشد", 404, "NOT_FOUND");
+    if (!isSentToCustomer(file, project.status)) {
+      throw new AppError(
+        "این ویدیو هنوز برای شما ارسال نشده است",
+        400,
+        "FINAL_NOT_SENT",
+      );
+    }
+
+    // Completed projects may still receive additional deliveries — allow
+    // per-file confirmation for those pending videos instead of short-circuiting.
+    if (
+      project.status === "COMPLETED" &&
+      project.completedAt &&
+      isCustomerApprovedFile(file)
+    ) {
       return {
         approved: true,
         completed: true,
         alreadyCompleted: true,
         status: "COMPLETED",
         completedAt: project.completedAt,
+        fileId,
       };
     }
 
-    const { isSentToCustomer, asMeta } =
-      await import("../production/finalProduct.js");
+    const fileVideoType = file.kind === "CLEAN_FINAL" ? "CLEAN" : "WATERMARKED";
+    if (videoType && videoType !== fileVideoType) {
+      throw new AppError("نوع ویدیو با فایل انتخاب‌شده مطابقت ندارد", 400, "VALIDATION");
+    }
+
+    if (isCustomerApprovedFile(file)) {
+      throw new AppError("این ویدیو قبلاً تأیید شده است", 409, "ALREADY_APPROVED");
+    }
+
+    const currentStatus = resolveVideoStatus(file.meta);
+    if (currentStatus === "REVISION_REQUESTED") {
+      throw new AppError(
+        "این ویدیو در انتظار اصلاح است و قابل تأیید نیست",
+        400,
+        "REVISION_PENDING",
+      );
+    }
+
     const sentFinals = (project.files || []).filter((f) =>
       isSentToCustomer(f, project.status),
     );
-    const cleanSent = sentFinals.filter((f) => f.kind === "CLEAN_FINAL");
-    const watermarkedSent = sentFinals.filter(
-      (f) => f.kind === "WATERMARKED_FINAL",
-    );
-
     if (!sentFinals.length) {
       throw new AppError(
         "محصول نهایی هنوز برای شما ارسال نشده است",
@@ -1123,6 +1211,7 @@ export const portalService = {
 
     const { evaluateDeliveryAccess, syncProjectDeliveryFields } =
       await import("../../services/deliveryAccess.js");
+    const cleanSent = sentFinals.filter((f) => f.kind === "CLEAN_FINAL");
     const access = evaluateDeliveryAccess({
       projectStatus: project.status,
       finance: project.finance,
@@ -1138,108 +1227,49 @@ export const portalService = {
       cleanSent.length > 0 && (access.cleanDownloadAllowed || fileAllowsPlay);
     const awaitingClientDecision =
       project.status === "WAITING_CLIENT_FINAL_APPROVAL";
+    const pendingStatuses = new Set([
+      "SENT_TO_CUSTOMER",
+      "VIEWED_BY_CUSTOMER",
+      "UPLOADED",
+      "APPROVED",
+    ]);
+    const fileNeedsDecision = pendingStatuses.has(currentStatus);
 
-    // Path A — clean unlocked: confirming the clean file completes the project.
-    if (cleanUnlocked) {
-      if (videoType && videoType !== "CLEAN") {
+    if (file.kind === "CLEAN_FINAL" && !cleanUnlocked) {
+      throw new AppError(
+        access.message ||
+          "نسخه بدون واترمارک هنوز در دسترس نیست. پس از تسویه می‌توانید تأیید نهایی را ثبت کنید.",
+        403,
+        "CLEAN_LOCKED",
+      );
+    }
+
+    const videoTypeLabel = VIDEO_TYPE_LABELS[fileVideoType] || fileVideoType;
+    const approvedAt = new Date();
+    const { isPaymentFullySettled, tryAutoCompleteProject } =
+      await import("../../services/projectCompletion.js");
+    const paymentSettled = isPaymentFullySettled(project.finance);
+
+    // Clean unlock (payment or manager override) is required to approve the clean file.
+    // Watermarked files can be approved while awaiting client decision — and also
+    // when the manager sends additional pending deliveries after later statuses.
+    if (file.kind !== "CLEAN_FINAL") {
+      if (cleanUnlocked) {
         throw new AppError(
           "فقط تأیید نسخه بدون واترمارک پروژه را تکمیل می‌کند",
           400,
           "CLEAN_REQUIRED",
         );
       }
-
-      const completedAt = new Date();
-      const fileId = req?.body?.fileId || cleanSent[0]?.id || null;
-
-      await prisma.$transaction(async (tx) => {
-        await tx.approval.create({
-          data: {
-            projectId,
-            type: "CLIENT_FINAL",
-            decision: "APPROVED",
-            comment: fileId
-              ? `تأیید نسخه بدون واترمارک (${fileId})`
-              : "تأیید نسخه بدون واترمارک",
-            actorType: "CUSTOMER",
-            actorId: auth.portalAccountId,
-          },
-        });
-
-        const { markSentFinalsApprovedByCustomer } =
-          await import("../production/finalProduct.js");
-        await markSentFinalsApprovedByCustomer(tx, projectId, {
-          approvedAt: completedAt,
-        });
-      });
-
-      const { markProjectCompleted } =
-        await import("../../services/projectCompletion.js");
-      const result = await markProjectCompleted(prisma, {
-        projectId,
-        crmCustomerId: project.crmCustomerId,
-        previousStatus: project.status,
-        completedAt,
-        timelineType: "CLEAN_FINAL_APPROVED",
-        timelineTitle: "تأیید نسخه بدون واترمارک — پروژه تکمیل شد",
-        timelineBody: "مشتری نسخه نهایی بدون واترمارک را تأیید کرد",
-        notifyProgress: false,
-      });
-
-      try {
-        await syncProjectDeliveryFields(prisma, projectId, {
-          projectPatch: {
-            deliveryStatus: "COMPLETED",
-            cleanFileAccess: "AVAILABLE",
-          },
-        });
-      } catch (err) {
-        console.error("[delivery] sync after clean approve", err.message);
+      if (!awaitingClientDecision && !fileNeedsDecision) {
+        throw new AppError(
+          access.message ||
+            "در حال حاضر امکان تأیید این ویدیو وجود ندارد.",
+          403,
+          "APPROVAL_NOT_ALLOWED",
+        );
       }
-
-      if (!result.alreadyCompleted) {
-        try {
-          const { productionService } =
-            await import("../production/service.js");
-          await productionService.onCustomerApprove(projectId, { completedAt });
-        } catch (err) {
-          console.error("[production] onCustomerApprove", err.message);
-        }
-      }
-
-      await writeAudit({
-        action: "CLIENT_CLEAN_FINAL_APPROVE",
-        entityType: "Project",
-        entityId: projectId,
-        after: { videoType: "CLEAN", status: "COMPLETED", completedAt },
-        req,
-      });
-
-      return {
-        approved: true,
-        completed: true,
-        alreadyCompleted: result.alreadyCompleted,
-        status: "COMPLETED",
-        completedAt: result.completedAt,
-      };
     }
-
-    // Path B — awaiting client decision while clean is still locked:
-    // accept the final product and advance to payment / delivery unlock.
-    if (!awaitingClientDecision) {
-      throw new AppError(
-        access.message ||
-          "نسخه بدون واترمارک هنوز در دسترس نیست. پس از تسویه و فعال‌سازی تحویل می‌توانید تأیید نهایی را ثبت کنید.",
-        403,
-        "CLEAN_LOCKED",
-      );
-    }
-
-    const approvedAt = new Date();
-    const fileId =
-      req?.body?.fileId || cleanSent[0]?.id || watermarkedSent[0]?.id || null;
-    const balance = access.balance;
-    const paymentSettled = balance != null && balance <= 0;
 
     await prisma.$transaction(async (tx) => {
       await tx.approval.create({
@@ -1247,18 +1277,134 @@ export const portalService = {
           projectId,
           type: "CLIENT_FINAL",
           decision: "APPROVED",
-          comment: fileId
-            ? `تأیید محصول نهایی توسط مشتری (${fileId})`
-            : "تأیید محصول نهایی توسط مشتری",
+          comment: `تأیید ${videoTypeLabel} — نسخه ${file.version} (${fileId})`,
           actorType: "CUSTOMER",
           actorId: auth.portalAccountId,
         },
       });
 
-      const { markSentFinalsApprovedByCustomer } =
-        await import("../production/finalProduct.js");
-      await markSentFinalsApprovedByCustomer(tx, projectId, { approvedAt });
+      await tx.projectFile.update({
+        where: { id: file.id },
+        data: { meta: markCustomerApprovedMeta(file.meta, approvedAt) },
+      });
+    });
 
+    const refreshedFiles = await prisma.projectFile.findMany({
+      where: {
+        projectId,
+        kind: { in: ["CLEAN_FINAL", "WATERMARKED_FINAL"] },
+        deletedAt: null,
+      },
+    });
+
+    // Clean approval counts as package confirmation; watermarked needs all sent files.
+    const packageApproved =
+      file.kind === "CLEAN_FINAL" ||
+      allSentFilesCustomerApproved(refreshedFiles, project.status);
+
+    if (!packageApproved) {
+      await writeAudit({
+        action: "CLIENT_FINAL_FILE_APPROVE",
+        entityType: "ProjectFile",
+        entityId: fileId,
+        after: { videoType: fileVideoType, approvedAt, projectAdvanced: false },
+        req,
+      });
+
+      return {
+        approved: true,
+        fileApproved: true,
+        completed: false,
+        projectAdvanced: false,
+        status: project.status,
+        fileId,
+      };
+    }
+
+    // Both gates: customer approval (just satisfied) + full payment → COMPLETED.
+    const auto = await tryAutoCompleteProject(prisma, projectId, {
+      completedAt: approvedAt,
+      customerApprovedOverride: true,
+      timelineType:
+        file.kind === "CLEAN_FINAL"
+          ? "CLEAN_FINAL_APPROVED"
+          : "CLIENT_FINAL_APPROVED",
+      timelineTitle: paymentSettled
+        ? "تأیید محصول نهایی و تسویه پرداخت — پروژه تکمیل شد"
+        : "تأیید محصول نهایی توسط مشتری",
+      timelineBody: `مشتری ${videoTypeLabel} — نسخه ${file.version} را تأیید کرد`,
+      notifyProgress: true,
+    });
+
+    if (auto.completed) {
+      try {
+        const { productionService } = await import("../production/service.js");
+        await productionService.onCustomerApprove(projectId, {
+          completedAt: approvedAt,
+        });
+      } catch (err) {
+        console.error("[production] onCustomerApprove", err.message);
+      }
+
+      await writeAudit({
+        action:
+          file.kind === "CLEAN_FINAL"
+            ? "CLIENT_CLEAN_FINAL_APPROVE"
+            : "CLIENT_FINAL_APPROVE",
+        entityType: "Project",
+        entityId: projectId,
+        after: {
+          videoType: fileVideoType,
+          status: "COMPLETED",
+          paymentSettled: true,
+          fileId,
+          completed: true,
+        },
+        req,
+      });
+
+      return {
+        approved: true,
+        fileApproved: true,
+        completed: true,
+        alreadyCompleted: auto.alreadyCompleted,
+        status: "COMPLETED",
+        completedAt: auto.completedAt,
+        fileId,
+      };
+    }
+
+    // Already completed (or payment wait already set) — only record file approval.
+    if (
+      project.status === "COMPLETED" ||
+      project.status === "WAITING_PAYMENT" ||
+      project.status === "READY_TO_DOWNLOAD"
+    ) {
+      await writeAudit({
+        action: "CLIENT_FINAL_FILE_APPROVE",
+        entityType: "ProjectFile",
+        entityId: fileId,
+        after: {
+          videoType: fileVideoType,
+          approvedAt,
+          projectAdvanced: false,
+          preservedStatus: project.status,
+        },
+        req,
+      });
+      return {
+        approved: true,
+        fileApproved: true,
+        completed: project.status === "COMPLETED",
+        alreadyCompleted: project.status === "COMPLETED",
+        projectAdvanced: false,
+        status: project.status,
+        fileId,
+      };
+    }
+
+    // Customer approved but payment not fully settled — wait for payment.
+    await prisma.$transaction(async (tx) => {
       await tx.project.update({
         where: { id: projectId },
         data: {
@@ -1272,9 +1418,7 @@ export const portalService = {
           projectId,
           type: "CLIENT_FINAL_APPROVED",
           title: "تأیید محصول نهایی توسط مشتری",
-          body: paymentSettled
-            ? "مشتری محصول نهایی را تأیید کرد — در انتظار فعال‌سازی تحویل"
-            : "مشتری محصول نهایی را تأیید کرد — در انتظار تسویه پرداخت",
+          body: "مشتری محصول نهایی را تأیید کرد — در انتظار تسویه کامل پرداخت",
           actorId: auth.portalAccountId,
         },
       });
@@ -1310,9 +1454,7 @@ export const portalService = {
       body: [
         `مشتری محصول نهایی پروژه «${project.title}» را تأیید کرد.`,
         project.code ? `شناسه: ${project.code}` : null,
-        paymentSettled
-          ? "پرداخت تسویه است — در صورت آمادگی، تحویل نسخه پاک را فعال کنید."
-          : "پروژه در انتظار تسویه پرداخت است.",
+        "پروژه در انتظار تسویه کامل پرداخت است.",
       ]
         .filter(Boolean)
         .join("\n"),
@@ -1332,41 +1474,135 @@ export const portalService = {
       entityType: "Project",
       entityId: projectId,
       after: {
-        videoType: videoType || null,
+        videoType: fileVideoType,
         status: "WAITING_PAYMENT",
-        paymentSettled,
+        paymentSettled: false,
         fileId,
+        projectAdvanced: true,
       },
       req,
     });
 
     return {
       approved: true,
+      fileApproved: true,
       completed: false,
-      awaitingPayment: !paymentSettled,
-      awaitingDeliveryUnlock: paymentSettled,
+      projectAdvanced: true,
+      awaitingPayment: true,
+      awaitingDeliveryUnlock: false,
       status: "WAITING_PAYMENT",
       customerFacingStatus: "WAITING_PAYMENT",
+      fileId,
     };
   },
 
-  async requestFinalChanges(projectId, { body }, auth, req) {
-    if (!body?.trim())
-      throw new AppError("توضیح تغییرات الزامی است", 400, "FEEDBACK_REQUIRED");
+  /** Customer opened a delivered final video — clears the portal "جدید" badge. */
+  async markFinalVideoViewed(projectId, fileId, auth) {
     const project = await prisma.project.findFirst({
       where: { id: projectId, crmCustomerId: auth.customerId, deletedAt: null },
+      select: { id: true },
     });
     if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
+
+    const { productionService } = await import("../production/service.js");
+    const file = await productionService.markFinalVideoViewed(
+      projectId,
+      fileId,
+      auth,
+    );
+    return {
+      id: file.id,
+      status: file.status,
+      viewedAt: file.viewedAt,
+      isNewForCustomer: false,
+    };
+  },
+
+  async requestFinalChanges(projectId, { body, fileId }, auth, req) {
+    const notes = String(body || "").trim();
+    if (!notes) {
+      throw new AppError("توضیح تغییرات الزامی است", 400, "FEEDBACK_REQUIRED");
+    }
+    const targetFileId = String(fileId || "").trim();
+    if (!targetFileId) {
+      throw new AppError("شناسه ویدیو الزامی است", 400, "VALIDATION");
+    }
+
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, crmCustomerId: auth.customerId, deletedAt: null },
+      include: {
+        files: {
+          where: {
+            kind: { in: ["CLEAN_FINAL", "WATERMARKED_FINAL"] },
+            deletedAt: null,
+          },
+        },
+      },
+    });
+    if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
+
+    const {
+      isSentToCustomer,
+      isCustomerApprovedFile,
+      resolveVideoStatus,
+      markRevisionRequestedMeta,
+      resolveVideoType,
+      VIDEO_TYPE_LABELS,
+    } = await import("../production/finalProduct.js");
+
+    const file = (project.files || []).find((f) => f.id === targetFileId);
+    if (!file) throw new AppError("ویدیو یافت نشد", 404, "NOT_FOUND");
+    if (!isSentToCustomer(file, project.status)) {
+      throw new AppError(
+        "این ویدیو هنوز برای شما ارسال نشده است",
+        400,
+        "FINAL_NOT_SENT",
+      );
+    }
+    if (isCustomerApprovedFile(file)) {
+      throw new AppError(
+        "نسخه تأییدشده قابل درخواست اصلاح نیست",
+        409,
+        "ALREADY_APPROVED",
+      );
+    }
+    if (resolveVideoStatus(file.meta) === "REVISION_REQUESTED") {
+      throw new AppError(
+        "برای این نسخه درخواست اصلاح ثبت شده است",
+        409,
+        "REVISION_ALREADY_REQUESTED",
+      );
+    }
 
     const max = project.videoRevisionMax + (project.extraVideoRevision ? 1 : 0);
     if (project.videoRevisionUsed >= max) {
       throw new AppError("سقف اصلاح ویدیو تکمیل شده", 403, "REVISION_LIMIT");
     }
 
+    const videoType = resolveVideoType(file.kind, file.meta);
+    const videoTypeLabel = VIDEO_TYPE_LABELS[videoType] || videoType;
+    const requestedAt = new Date();
+
     await prisma.$transaction(async (tx) => {
       await tx.clientFeedback.create({
-        data: { projectId, scope: "FINAL_VIDEO", body },
+        data: {
+          projectId,
+          scope: "FINAL_VIDEO",
+          body: `${videoTypeLabel} — نسخه ${file.version} (${targetFileId}): ${notes}`,
+        },
       });
+
+      await tx.projectFile.update({
+        where: { id: file.id },
+        data: {
+          meta: markRevisionRequestedMeta(file.meta, {
+            notes,
+            requestedAt,
+            reviewedBy: auth.portalAccountId,
+          }),
+        },
+      });
+
       await tx.project.update({
         where: { id: projectId },
         data: {
@@ -1375,65 +1611,137 @@ export const portalService = {
           customerFacingStatus: "FINAL_REVIEW",
         },
       });
-      const editor = await tx.projectAssignment.findFirst({
-        where: { projectId, role: "EDITOR", isActive: true },
+
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId,
+          type: "FINAL_REVISION",
+          title: "اصلاح نهایی درخواستی مشتری",
+          body: `${videoTypeLabel} — نسخه ${file.version}: ${notes}`,
+          actorId: auth.portalAccountId,
+        },
       });
-      if (editor) {
-        await tx.projectTimelineEvent.create({
-          data: {
-            projectId,
-            type: "FINAL_REVISION",
-            title: "اصلاح نهایی درخواستی مشتری",
-            body,
-          },
-        });
-      }
     });
 
     try {
       const { productionService } = await import("../production/service.js");
-      await productionService.onCustomerRevision(projectId, body);
+      await productionService.onCustomerRevision(projectId, notes, {
+        fileId: targetFileId,
+        videoType,
+        version: file.version,
+      });
     } catch (err) {
       console.error("[production] onCustomerRevision", err.message);
     }
 
     await writeAudit({
       action: "CLIENT_FINAL_CHANGES",
-      entityType: "Project",
-      entityId: projectId,
-      after: { body },
+      entityType: "ProjectFile",
+      entityId: targetFileId,
+      after: { body: notes, videoType, version: file.version },
       req,
     });
-    return { requested: true };
+    return { requested: true, fileId: targetFileId };
   },
 
   async newOrder({ serviceId, goal, durationSec, description }, auth, req) {
     const customer = await prisma.crmCustomer.findUnique({
       where: { id: auth.customerId },
+      include: { portalAccount: { select: { id: true } } },
     });
-    const opp = await prisma.opportunity.create({
-      data: {
-        crmCustomerId: auth.customerId,
-        title: `سفارش جدید پورتال — ${customer.companyName || customer.personName}`,
-        pipelineStage: "NEW_LEAD",
-        serviceId: serviceId || null,
-      },
-    });
-    await prisma.crmCustomer.update({
-      where: { id: auth.customerId },
-      data: { pipelineStage: "NEW_LEAD" },
+    if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
+
+    const { canonicalizeStage, CRM_EVENTS } = await import("../crm/pipeline.js");
+    const { openFreshCycleOpportunity, snapshotCustomerProfile } = await import(
+      "../crm/repeatCycle.js"
+    );
+    const stage = canonicalizeStage(customer.pipelineStage);
+
+    if (stage === "DELIVERED") {
+      throw new AppError(
+        "شما اجازه ساخت پروژه جدید را ندارید، با مسئول این سیستم تماس بگیرید",
+        403,
+        "REPEAT_REQUIRED",
+      );
+    }
+    if (stage === "LOST_CANCELED") {
+      throw new AppError(
+        "حساب لغوشده امکان ثبت سفارش جدید ندارد",
+        403,
+        "LEAD_CLOSED",
+      );
+    }
+    if (stage !== "REPEAT_CUSTOMER") {
+      throw new AppError(
+        "شما اجازه ساخت پروژه جدید را ندارید، با مسئول این سیستم تماس بگیرید",
+        403,
+        "REPEAT_REQUIRED",
+      );
+    }
+
+    const profile = snapshotCustomerProfile(customer);
+    const { applyCrmEvent } = await import("../crm/sync.js");
+
+    const cycle = await prisma.$transaction(async (tx) => {
+      const { opportunity, created } = await openFreshCycleOpportunity(tx, customer, {
+        pipelineStage: "REPEAT_CUSTOMER",
+        title: `سفارش جدید پورتال — ${getCustomerPersonName(customer)}`,
+      });
+
+      // Attach service without locking contract or copying finance.
+      if (serviceId) {
+        await tx.opportunity.update({
+          where: { id: opportunity.id },
+          data: { serviceId },
+        });
+      }
+
+      await applyCrmEvent(tx, {
+        customerId: auth.customerId,
+        opportunityId: opportunity.id,
+        event: CRM_EVENTS.REPEAT_ORDER,
+        source: "PORTAL",
+        relatedType: "Opportunity",
+        relatedId: opportunity.id,
+        title: "درخواست پروژه جدید از پورتال مشتری",
+        note: description || goal || null,
+        meta: {
+          serviceId: serviceId || null,
+          goal: goal || null,
+          durationSec: durationSec || null,
+          profile,
+          portalInviteCreated: false,
+          opportunityCreated: created,
+        },
+        touchLastContact: true,
+      });
+
+      return { opportunity, created };
     });
 
     await writeAudit({
       action: "PORTAL_NEW_ORDER",
       entityType: "Opportunity",
-      entityId: opp.id,
-      after: { serviceId, goal },
+      entityId: cycle.opportunity.id,
+      after: {
+        serviceId,
+        goal,
+        pipelineStage: stage,
+        opportunityCreated: cycle.created,
+        portalAccountId: customer.portalAccount?.id || null,
+        portalInviteCreated: false,
+      },
       req,
     });
 
-    // AC-23: Opportunity only, no Project
-    return { opportunityId: opp.id, projectCreated: false };
+    // Same portal account; independent opportunity with blank contract/finance.
+    return {
+      opportunityId: cycle.opportunity.id,
+      projectCreated: false,
+      opportunityCreated: cycle.created,
+      portalInviteCreated: false,
+      profile,
+    };
   },
 
   async getDownload(projectId, auth, req) {
@@ -1502,16 +1810,13 @@ export const portalService = {
       },
     });
 
-    // Fallback: first clean download can still complete if customer never used Confirm.
-    // Approval path is preferred; this stays idempotent and does not re-notify staff.
+    // Auto-complete only when customer already confirmed finals AND payment is settled.
+    // Download itself does not force completion without both gates.
     let justCompleted = false;
     if (project.status !== "COMPLETED") {
-      const { markProjectCompleted } =
+      const { tryAutoCompleteProject } =
         await import("../../services/projectCompletion.js");
-      const completion = await markProjectCompleted(prisma, {
-        projectId,
-        crmCustomerId: project.crmCustomerId,
-        previousStatus: project.status,
+      const completion = await tryAutoCompleteProject(prisma, projectId, {
         completedAt: now,
         timelineType: "CLEAN_DELIVERED",
         timelineTitle: "تحویل نسخه پاک — پروژه تکمیل شد",
@@ -1581,7 +1886,7 @@ export const portalService = {
         crmCustomerId: auth.customerId,
         deletedAt: null,
         projectId: null,
-        pipelineStage: { notIn: ["CANCELED", "COMPLETED"] },
+        pipelineStage: { notIn: ["LOST_CANCELED", "DELIVERED"] },
       },
       include: { service: true },
       orderBy: { createdAt: "desc" },
@@ -1638,6 +1943,7 @@ export const portalService = {
 export const registerSchema = z.object({
   password: z.string().min(8),
   otp: z.string().length(6),
+  whatsapp: z.string().min(8).optional(),
 });
 
 export const briefSchema = z.object({
@@ -1676,7 +1982,6 @@ export const briefSchema = z.object({
   ),
   language: z.string().optional(),
   tone: z.string().optional(),
-  narratorProfileId: z.string().optional(),
   platforms: z.array(z.string()).optional(),
   clientAssetIds: z.array(z.string()).optional(),
   files: z

@@ -5,6 +5,7 @@
  */
 
 import { env } from '../../config/env.js';
+import { resolveModelsForAgent } from './models.config.js';
 import { openRouterService } from './openrouter.service.js';
 import { openAiService } from './openai.service.js';
 import { anthropicService } from './anthropic.service.js';
@@ -26,6 +27,49 @@ export function listProviders() {
 
 export function getProviderById(id) {
   return PROVIDERS[id] || null;
+}
+
+/**
+ * Primary provider first, then any other configured backends.
+ * Lets content generation survive OpenRouter outages/quota by using Gemini or OpenAI.
+ */
+export function listConfiguredLlmProviders(override) {
+  const primaryId = String(override || env.aiProvider || 'openrouter').toLowerCase();
+  const ordered = [primaryId, 'openrouter', 'gemini', 'openai', 'anthropic'];
+  const seen = new Set();
+  const list = [];
+  for (const id of ordered) {
+    if (seen.has(id) || id === 'mock') continue;
+    seen.add(id);
+    const provider = PROVIDERS[id];
+    if (provider?.isConfigured()) list.push(provider);
+  }
+  return list;
+}
+
+/**
+ * Native models for a provider — never send OpenRouter slugs to Gemini/OpenAI.
+ */
+export function modelsForProvider(providerId, agentType, modelOverride) {
+  if (providerId === 'openrouter') {
+    return resolveModelsForAgent(agentType, modelOverride);
+  }
+  if (providerId === 'gemini') {
+    return [...new Set([
+      env.geminiModelReasoning || env.geminiModel,
+      env.geminiModelLight,
+    ].filter(Boolean))];
+  }
+  if (providerId === 'openai') {
+    return [...new Set([
+      env.openaiModelReasoning || env.openaiModel,
+      env.openaiModelLight,
+    ].filter(Boolean))];
+  }
+  if (providerId === 'anthropic') {
+    return [env.anthropicModel].filter(Boolean);
+  }
+  return [];
 }
 
 /**

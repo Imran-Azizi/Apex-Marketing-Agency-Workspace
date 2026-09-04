@@ -2,6 +2,8 @@ import { SCENARIO_PROMPT } from './scenario.prompt.js';
 import { NARRATION_PROMPT } from './narration.prompt.js';
 import { STORYBOARD_PROMPT } from './storyboard.prompt.js';
 import { PORTFOLIO_PROMPT } from './portfolio.prompt.js';
+import { SALES_ASSISTANT_PROMPT } from './sales-assistant.prompt.js';
+import { BUSINESS_ASSISTANT_PROMPT } from './business-assistant.prompt.js';
 import { PROMPT_VERSION } from '../models.config.js';
 
 export const AGENT_PROMPTS = {
@@ -9,6 +11,8 @@ export const AGENT_PROMPTS = {
   NARRATION: NARRATION_PROMPT,
   STORYBOARD: STORYBOARD_PROMPT,
   PORTFOLIO: PORTFOLIO_PROMPT,
+  SALES_ASSISTANT: SALES_ASSISTANT_PROMPT,
+  BUSINESS_ASSISTANT: BUSINESS_ASSISTANT_PROMPT,
 };
 
 export function getAgentPrompt(agentType) {
@@ -21,4 +25,4 @@ export function getAgentPrompt(agentType) {
 }
 
 export { PROMPT_VERSION };
-export { SCENARIO_PROMPT, NARRATION_PROMPT, STORYBOARD_PROMPT, PORTFOLIO_PROMPT };
+export { SCENARIO_PROMPT, NARRATION_PROMPT, STORYBOARD_PROMPT, PORTFOLIO_PROMPT, SALES_ASSISTANT_PROMPT, BUSINESS_ASSISTANT_PROMPT };

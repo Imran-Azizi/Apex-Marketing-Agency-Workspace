@@ -9,6 +9,7 @@ export {
   generatePipeline,
   sanitizeAiInput,
   formatAiError,
+  completeWithModelFallback,
 } from './ai.service.js';
 
 export {
@@ -34,6 +35,7 @@ export {
   normalizePipelineOutputs,
   validateAgentOutput,
   extractJson,
+  synthesizeStoryboardFromInput,
 } from './validate.js';
 
 export { getLlmProvider, getActiveProviderInfo, listProviders } from './provider.factory.js';

@@ -102,7 +102,7 @@ function SidebarGroup({
         <span className="min-w-0 flex-1 truncate">{item.label}</span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 shrink-0 opacity-70 transition-transform duration-200",
+            "h-4 w-4 shrink-0 opacity-70 transition-transform duration-300 ease-in-out",
             open && "rotate-180",
           )}
           aria-hidden
@@ -111,11 +111,17 @@ function SidebarGroup({
       <div
         id={panelId}
         className={cn(
-          "grid transition-[grid-template-rows] duration-200 ease-out",
+          "grid transition-[grid-template-rows] duration-300 ease-in-out",
           open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
         )}
       >
-        <div className="min-h-0 overflow-hidden" inert={!open || undefined}>
+        <div
+          className={cn(
+            "min-h-0 overflow-hidden transition-opacity duration-300 ease-in-out",
+            open ? "opacity-100" : "opacity-0",
+          )}
+          inert={!open || undefined}
+        >
           <ul
             className="ms-3 mt-1 space-y-0.5 border-s border-sidebar-border/80 ps-2"
             role="list"

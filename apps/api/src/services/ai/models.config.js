@@ -55,8 +55,18 @@ export function getModelConfig() {
       },
       PORTFOLIO: {
         temperature: 0.55,
-        maxTokens: 1024,
+        maxTokens: 2560,
         model: env.aiModelPortfolio || null,
+      },
+      SALES_ASSISTANT: {
+        temperature: 0.25,
+        maxTokens: 2048,
+        model: env.aiModelSalesAssistant || null,
+      },
+      BUSINESS_ASSISTANT: {
+        temperature: 0.3,
+        maxTokens: 3072,
+        model: env.aiModelBusinessAssistant || null,
       },
     },
   };

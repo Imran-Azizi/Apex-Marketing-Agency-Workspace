@@ -21,7 +21,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="fa-AF" dir="rtl" suppressHydrationWarning>
+    <html lang="fa-AF" dir="rtl" suppressHydrationWarning data-scroll-behavior="smooth">
       {/* suppressHydrationWarning: theme class + browser extensions may differ
           between server HTML and client hydration. */}
       <body

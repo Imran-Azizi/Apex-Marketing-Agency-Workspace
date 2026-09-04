@@ -371,3 +371,32 @@
     }
   }
 }
+
+.whatsapp-phone-input {
+  direction: ltr;
+}
+
+.whatsapp-phone-input .PhoneInputCountry {
+  margin: 0;
+  align-self: stretch;
+  border-inline-end: 1px solid hsl(var(--border) / 0.7);
+}
+
+.whatsapp-phone-input .PhoneInputCountryIcon,
+.whatsapp-phone-input .PhoneInputCountrySelectArrow {
+  display: none;
+}
+
+.whatsapp-phone-input .PhoneInputInput {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.whatsapp-phone-input .PhoneInputCountryIcon--border {
+  box-shadow: none;
+  background: transparent;
+}

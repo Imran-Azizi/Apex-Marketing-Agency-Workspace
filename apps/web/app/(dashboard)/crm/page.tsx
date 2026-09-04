@@ -1,11 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  useQuery,
-  keepPreviousData,
-} from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { formatDate, formatPhoneDisplay } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
@@ -45,19 +43,27 @@ import {
   Search,
   SlidersHorizontal,
   X,
+  ArrowUpRight,
 } from "lucide-react";
-import { useHasPermission } from "@/lib/permissions";
+import { useHasPermission, useMeQuery } from "@/lib/permissions";
 import { CustomerFormDialog } from "./_components/customer-form-dialog";
 import { DeleteCustomerDialog } from "./_components/delete-customer-dialog";
 import { CustomerActions } from "./_components/customer-actions";
+import { CustomerPipelineStatusBadge } from "./_components/customer-pipeline-status-badge";
 import { formatLeadSource } from "./_components/constants";
-import type { CrmCustomer, CrmFormOptions, CrmListResponse } from "./_components/types";
+import type {
+  CrmCustomer,
+  CrmFormOptions,
+  CrmListResponse,
+} from "./_components/types";
 
 const PAGE_SIZE = 20;
 const ALL = "ALL";
 
 export default function CrmPage() {
   const router = useRouter();
+  const { data: me } = useMeQuery();
+  const isSalesUser = me?.role === "SALES";
   const canCreate = useHasPermission("crm.create");
   const canEdit = useHasPermission("crm.edit");
   const canDelete = useHasPermission("crm.delete");
@@ -70,10 +76,10 @@ export default function CrmPage() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CrmCustomer | null>(
-    null
+    null,
   );
   const [deletingCustomer, setDeletingCustomer] = useState<CrmCustomer | null>(
-    null
+    null,
   );
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -92,6 +98,7 @@ export default function CrmPage() {
     if (search) params.set("q", search);
     if (source !== ALL) params.set("source", source);
     if (salesOwnerId !== ALL) params.set("salesOwnerId", salesOwnerId);
+    params.set("scope", "management");
     return params.toString();
   }, [page, search, source, salesOwnerId]);
 
@@ -102,17 +109,14 @@ export default function CrmPage() {
   });
 
   const { data, isLoading, isFetching, error } = useQuery({
-    queryKey: ["crm-customers", { search, source, salesOwnerId, page }],
+    queryKey: ["crm-customers", "management", { search, source, salesOwnerId, page }],
     queryFn: () => apiGet<CrmListResponse>(`/crm/customers?${listParams}`),
     placeholderData: keepPreviousData,
   });
 
   const activeDropdownFilters =
     (source !== ALL ? 1 : 0) + (salesOwnerId !== ALL ? 1 : 0);
-  const hasFilters =
-    search !== "" ||
-    source !== ALL ||
-    salesOwnerId !== ALL;
+  const hasFilters = search !== "" || source !== ALL || salesOwnerId !== ALL;
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   const openCreate = () => {
@@ -169,6 +173,7 @@ export default function CrmPage() {
   }
 
   function renderSalesOwnerSelect(triggerClassName?: string) {
+    if (isSalesUser) return null;
     return (
       <Select
         value={salesOwnerId}
@@ -222,17 +227,19 @@ export default function CrmPage() {
       <PageHeader
         inline
         title="مدیریت مشتری"
-        subtitle="لیست مشتریان و سرنخ‌های فروش"
+        subtitle="فقط مشتریان فعال که از CRM و فروش منتقل شده‌اند — پس از تحویل پروژه از فهرست فعال خارج می‌شوند"
         actions={
           canCreate ? (
-          <Button
-            variant="brand"
-            onClick={openCreate}
-            className="h-9 shrink-0 gap-1.5 px-3 text-sm sm:h-10 sm:px-4"
-          >
-            <Plus className="h-4 w-4" />
-            <span className="whitespace-nowrap">مشتری جدید</span>
-          </Button>
+            <Button
+              variant="brand"
+              asChild
+              className="h-9 shrink-0 gap-1.5 px-3 text-sm sm:h-10 sm:px-4"
+            >
+              <Link href="/crm-sales">
+                <ArrowUpRight className="h-4 w-4" />
+                <span className="whitespace-nowrap">ثبت سرنخ در CRM و فروش</span>
+              </Link>
+            </Button>
           ) : undefined
         }
       />
@@ -256,7 +263,8 @@ export default function CrmPage() {
           <SheetHeader className="text-start">
             <SheetTitle>فیلترها</SheetTitle>
             <SheetDescription>
-              منبع ورود و مسئول فروش را انتخاب کنید. فیلترها بلافاصله اعمال می‌شوند.
+              منبع ورود و مسئول فروش را انتخاب کنید. فیلترها بلافاصله اعمال
+              می‌شوند.
             </SheetDescription>
           </SheetHeader>
 
@@ -322,7 +330,8 @@ export default function CrmPage() {
 
         {data && (
           <p className="text-sm text-muted-foreground md:hidden">
-            {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })} مشتری
+            {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })}{" "}
+            مشتری
           </p>
         )}
 
@@ -344,12 +353,13 @@ export default function CrmPage() {
           )}
           {data && (
             <p className="text-sm text-muted-foreground ms-auto">
-              {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })} مشتری
+              {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })}{" "}
+              مشتری
             </p>
           )}
         </div>
 
-        {isLoading && <LoadingTable columns={6} />}
+        {isLoading && <LoadingTable columns={7} />}
 
         {error && (
           <EmptyState
@@ -364,7 +374,7 @@ export default function CrmPage() {
             description={
               hasFilters
                 ? "با معیارهای جستجو یا فیلتر انتخاب‌شده مشتری‌ای پیدا نشد."
-                : "اولین مشتری یا سرنخ خود را ثبت کنید تا اینجا نمایش داده شود."
+                : "هنوز مشتریی در دسته «مشتریان ما» ثبت نشده است. پس از تأیید پرداخت در CRM و فروش، مشتری اینجا نمایش داده می‌شود."
             }
             action={
               hasFilters ? (
@@ -373,9 +383,11 @@ export default function CrmPage() {
                   حذف فیلترها
                 </Button>
               ) : canCreate ? (
-                <Button variant="brand" onClick={openCreate}>
-                  <Plus className="h-4 w-4" />
-                  مشتری جدید
+                <Button variant="brand" asChild>
+                  <Link href="/crm-sales">
+                    <ArrowUpRight className="h-4 w-4" />
+                    CRM و فروش
+                  </Link>
                 </Button>
               ) : undefined
             }
@@ -389,107 +401,120 @@ export default function CrmPage() {
                 isFetching ? "opacity-70 transition-opacity" : undefined
               }
             >
-              <Table className="min-w-[40rem]">
-                  <TableHeader>
-                    <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                        مشتری
-                      </TableHead>
-                      <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                        تماس
-                      </TableHead>
-                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                        منبع ورود
-                      </TableHead>
-                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                        مسئول فروش
-                      </TableHead>
-                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                        تاریخ ایجاد
-                      </TableHead>
-                      <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                        عملیات
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.items.map((customer) => (
-                      <TableRow
-                        key={customer.id}
-                        role="link"
-                        tabIndex={0}
-                        className="cursor-pointer"
-                        onClick={() => router.push(`/crm/${customer.id}`)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            router.push(`/crm/${customer.id}`);
-                          }
-                        }}
-                      >
-                        <TableCell>
-                          <div className="min-w-[8rem] font-medium">
-                            {customer.personName}
-                            {customer.companyName && (
-                              <span className="block text-xs font-normal text-muted-foreground">
-                                {customer.companyName}
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-[9rem] space-y-0.5">
+              <Table className="min-w-[46rem]">
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      مشتری
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      تماس
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      وضعیت
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      منبع ورود
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      مسئول فروش
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      تاریخ ایجاد
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      عملیات
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {data.items.map((customer) => (
+                    <TableRow
+                      key={customer.id}
+                      role="link"
+                      tabIndex={0}
+                      className="cursor-pointer"
+                      onClick={() => router.push(`/crm/${customer.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          router.push(`/crm/${customer.id}`);
+                        }
+                      }}
+                    >
+                      <TableCell>
+                        <div className="min-w-[8rem] font-medium">
+                          {customer.personName}
+                          {customer.companyName && (
+                            <span className="block text-xs font-normal text-muted-foreground">
+                              {customer.companyName}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="min-w-[9rem] space-y-0.5">
+                          <span
+                            dir="ltr"
+                            className="block text-right text-sm font-medium tabular-nums tracking-wide text-foreground"
+                            title={customer.whatsappRaw}
+                          >
+                            {formatPhoneDisplay(customer.whatsappRaw)}
+                          </span>
+                          {customer.email && (
                             <span
                               dir="ltr"
-                              className="block text-right text-sm font-medium tabular-nums tracking-wide text-foreground"
-                              title={customer.whatsappRaw}
+                              className="block max-w-[200px] truncate text-right text-xs text-muted-foreground"
+                              title={customer.email}
                             >
-                              {formatPhoneDisplay(customer.whatsappRaw)}
+                              {customer.email}
                             </span>
-                            {customer.email && (
-                              <span
-                                dir="ltr"
-                                className="block max-w-[200px] truncate text-right text-xs text-muted-foreground"
-                                title={customer.email}
-                              >
-                                {customer.email}
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-sm">
-                          {formatLeadSource(customer.source)}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-sm">
-                          {customer.salesOwner?.fullName || "—"}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                          {formatDate(customer.createdAt)}
-                        </TableCell>
-                        <TableCell
-                          className="text-center"
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                        >
-                          <CustomerActions
-                            customer={customer}
-                            onEdit={openEdit}
-                            onDelete={openDelete}
-                            canEdit={canEdit}
-                            canDelete={canDelete}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <CustomerPipelineStatusBadge
+                          stage={customer.pipelineStage}
+                          label={customer.pipelineStageLabel}
+                          showControlHint
+                        />
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {formatLeadSource(customer.source)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">
+                        {customer.salesOwner?.fullName || "—"}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                        {formatDate(customer.createdAt)}
+                      </TableCell>
+                      <TableCell
+                        className="text-center"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <CustomerActions
+                          customer={customer}
+                          onEdit={openEdit}
+                          onDelete={openDelete}
+                          canEdit={canEdit}
+                          canDelete={canDelete}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </HorizontalScroll>
 
             {totalPages > 1 && (
               <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
                 <p className="text-sm text-muted-foreground">
-                  صفحه {page.toLocaleString("fa-AF", { numberingSystem: "latn" })} از{" "}
-                  {totalPages.toLocaleString("fa-AF", { numberingSystem: "latn" })}
+                  صفحه{" "}
+                  {page.toLocaleString("fa-AF", { numberingSystem: "latn" })} از{" "}
+                  {totalPages.toLocaleString("fa-AF", {
+                    numberingSystem: "latn",
+                  })}
                 </p>
                 <div className="flex items-center gap-2">
                   <Button
@@ -504,9 +529,7 @@ export default function CrmPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() =>
-                      setPage((p) => Math.min(totalPages, p + 1))
-                    }
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={page >= totalPages || isFetching}
                   >
                     بعدی

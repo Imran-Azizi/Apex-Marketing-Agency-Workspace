@@ -4,7 +4,11 @@ import { Mail, MessageCircle, Phone } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { ContactChannel, PublicContactInfo } from "@/lib/contact";
+import {
+  CONTACT_HOURS_TEXT,
+  type ContactChannel,
+  type PublicContactInfo,
+} from "@/lib/contact";
 
 const CHANNEL_ICONS: Record<ContactChannel["id"], LucideIcon> = {
   whatsapp: MessageCircle,
@@ -104,7 +108,7 @@ export function ContactInfoPanel({
       </div>
 
       <div className="mt-8 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-4 text-sm leading-7 text-muted-foreground dark:bg-brand/10">
-        ساعات پاسخگویی: همه‌روزه از ۹ صبح تا ۶ عصر
+        {CONTACT_HOURS_TEXT}
       </div>
     </aside>
   );

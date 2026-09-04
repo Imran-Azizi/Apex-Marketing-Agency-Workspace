@@ -13,10 +13,10 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 
 export const AUTH_INPUT_CLASS =
-  "h-12 rounded-xl border-border/80 bg-background/90 text-[15px] shadow-sm shadow-black/[0.03] transition-[border-color,box-shadow,background-color] duration-200 placeholder:text-muted-foreground/65 focus-visible:border-brand/55 focus-visible:ring-2 focus-visible:ring-brand/20 focus-visible:ring-offset-0 dark:bg-background/70 dark:shadow-black/20";
+  "h-11 rounded-xl border-border/70 bg-background/95 text-[15px] shadow-sm shadow-black/[0.025] transition-[border-color,box-shadow,background-color] duration-200 placeholder:text-muted-foreground/65 hover:border-border focus-visible:border-brand/55 focus-visible:ring-2 focus-visible:ring-brand/20 focus-visible:ring-offset-0 dark:bg-background/70 dark:shadow-black/20";
 
 export const AUTH_SUBMIT_CLASS =
-  "h-12 rounded-xl text-[15px] font-semibold shadow-md shadow-brand/20 transition-all duration-200 hover:shadow-lg hover:shadow-brand/30 hover:brightness-[1.03] focus-visible:ring-brand/40 motion-safe:active:scale-[0.99]";
+  "h-11 rounded-xl text-[15px] font-semibold shadow-md shadow-brand/25 transition-all duration-200 hover:-translate-y-px hover:shadow-lg hover:shadow-brand/35 hover:brightness-[1.03] focus-visible:ring-brand/40 motion-safe:active:translate-y-0 motion-safe:active:scale-[0.99]";
 
 interface AuthFieldFrameProps {
   id: string;
@@ -41,8 +41,8 @@ function AuthFieldFrame({
   const hintId = `${id}-hint`;
 
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-[13px] font-medium text-foreground/90">
+    <div className="space-y-1">
+      <Label htmlFor={id} className="text-[12.5px] font-medium text-foreground/90">
         {label}
       </Label>
       <div className="relative" dir={dir}>
@@ -190,7 +190,7 @@ export function AuthFormError({ message }: { message: string }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2.5 rounded-xl border border-destructive/25 bg-destructive/10 px-3.5 py-3 text-sm text-destructive"
+      className="flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/10 px-3 py-2.5 text-[13px] text-destructive"
     >
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
       <p className="leading-relaxed">{message}</p>

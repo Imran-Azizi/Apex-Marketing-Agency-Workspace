@@ -24,11 +24,31 @@ export type CustomerPayment = {
   invoice?: { id: string; invoiceNumber: string } | null;
 };
 
+export type PaymentMethodMetaRow = {
+  label: string;
+  value: string;
+};
+
+export type PaymentReceiptFinance = {
+  totalAmount: number;
+  previouslyPaid: number;
+  currentPayment: number;
+  totalPaid: number;
+  remainingBalance: number;
+};
+
 export type PaymentReceipt = {
   receiptTitle: string;
-  company: { name: string; tagline: string };
+  company: {
+    name: string;
+    tagline: string;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  };
   customer: {
     id: string;
+    customerCode?: string | null;
     personName: string;
     companyName: string | null;
     phone: string | null;
@@ -37,12 +57,30 @@ export type PaymentReceipt = {
     address: string | null;
   };
   contract: {
+    id?: string;
     title: string;
     agreedPrice: number;
     advancePayment: number;
     remainingBalance: number;
     agreedTerms: string | null;
   } | null;
+  invoice: {
+    id: string;
+    invoiceNumber: string;
+    projectReference: string | null;
+    videoCount: number | null;
+    total: number;
+    previouslyPaid: number;
+    currentPayment: number;
+    totalPaid: number;
+    remaining: number;
+    status: string;
+    statusLabel: string;
+    issuedAt: string;
+    notes: string | null;
+  } | null;
+  videoCount?: number | null;
+  finance: PaymentReceiptFinance;
   payment: {
     id: string;
     paymentNumber: string;
@@ -51,7 +89,13 @@ export type PaymentReceipt = {
     createdAt: string;
     method: string | null;
     methodLabel?: string | null;
+    methodMetaRows?: PaymentMethodMetaRow[];
+    reference?: string | null;
+    notes?: string | null;
     verification: string;
+    receiptStatus: string;
+    receiptStatusLabel: string;
+    invoiceId?: string | null;
     invoiceNumber: string | null;
     recordedByName: string | null;
   };

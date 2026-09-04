@@ -23,6 +23,8 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE } from "@/lib/phone";
+import { WhatsAppPhoneInput } from "@/components/shared/whatsapp-phone-input";
 import { useHasPermission } from "@/lib/permissions";
 import { PermissionsPanel } from "./_components/permissions-panel";
 
@@ -214,11 +216,11 @@ export default function SettingsPage() {
   }
 
   function submit() {
-    const digits = draft.number.replace(/\D/g, "");
-    if (digits.length < 8) {
-      setFormError("شماره واتساپ معتبر نیست");
+    if (!isValidWhatsAppNumber(draft.number)) {
+      setFormError(WHATSAPP_VALIDATION_MESSAGE);
       return;
     }
+    const digits = draft.number.replace(/\D/g, "");
     if (!draft.message.trim()) {
       setFormError("پیام پیش‌فرض نمی‌تواند خالی باشد");
       return;
@@ -254,15 +256,15 @@ export default function SettingsPage() {
 
   function submitContact() {
     const email = contactDraft.email.trim();
-    const digits = contactDraft.phone.replace(/\D/g, "");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setContactError("ایمیل معتبر وارد کنید");
       return;
     }
-    if (digits.length < 8) {
-      setContactError("شماره تماس معتبر نیست");
+    if (!isValidWhatsAppNumber(contactDraft.phone)) {
+      setContactError(WHATSAPP_VALIDATION_MESSAGE);
       return;
     }
+    const digits = contactDraft.phone.replace(/\D/g, "");
     setContactError(null);
     saveContactMut.mutate({ email, phone: digits });
   }
@@ -466,15 +468,12 @@ export default function SettingsPage() {
           <div className="space-y-4 py-1">
             <div className="space-y-2">
               <Label htmlFor="wa-number">شماره واتساپ</Label>
-              <Input
+              <WhatsAppPhoneInput
                 id="wa-number"
-                dir="ltr"
-                inputMode="tel"
                 value={draft.number}
-                onChange={(e) =>
-                  setDraft((prev) => ({ ...prev, number: e.target.value }))
+                onChange={(value) =>
+                  setDraft((prev) => ({ ...prev, number: value }))
                 }
-                placeholder="93700000000"
               />
             </div>
             <div className="space-y-2">
@@ -547,15 +546,12 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="contact-phone-setting">شماره تماس</Label>
-              <Input
+              <WhatsAppPhoneInput
                 id="contact-phone-setting"
-                dir="ltr"
-                inputMode="tel"
                 value={contactDraft.phone}
-                onChange={(e) =>
-                  setContactDraft((prev) => ({ ...prev, phone: e.target.value }))
+                onChange={(value) =>
+                  setContactDraft((prev) => ({ ...prev, phone: value }))
                 }
-                placeholder="93700000000"
               />
             </div>
             {contactError ? (

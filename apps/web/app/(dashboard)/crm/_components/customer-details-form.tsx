@@ -21,6 +21,7 @@ import {
 } from "@/lib/payment-methods";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -211,6 +212,7 @@ interface CustomerDetailsFormProps {
   onPaymentCreated?: (payment: {
     id: string;
     isFirstPayment?: boolean;
+    customerConverted?: boolean;
     portalInviteUnlocked?: boolean;
     receiptGenerated?: boolean;
     finance?: OpportunityFinance;
@@ -230,7 +232,13 @@ export function CustomerDetailsForm({
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentMethod, setPaymentMethod] =
     useState<CustomerPaymentMethod | null>(null);
+  const [hesabPayAccount, setHesabPayAccount] = useState("");
+  const [officeAddress, setOfficeAddress] = useState("");
+  const [responsiblePhone, setResponsiblePhone] = useState("");
+  const [bankCardNumber, setBankCardNumber] = useState("");
+  const [bankInfo, setBankInfo] = useState("");
   const [paymentMethodError, setPaymentMethodError] = useState("");
+  const [paymentMetaError, setPaymentMetaError] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
     agreedPrice?: string;
@@ -271,6 +279,7 @@ export function CustomerDetailsForm({
       apiPost<{
         id: string;
         isFirstPayment?: boolean;
+        customerConverted?: boolean;
         portalInviteUnlocked?: boolean;
         receiptGenerated?: boolean;
         paymentNumber?: string;
@@ -283,6 +292,13 @@ export function CustomerDetailsForm({
         opportunityId: opportunity.id,
         amount: Number(paymentAmount),
         method: paymentMethod,
+        paymentMethodMeta: {
+          hesabPayAccount: hesabPayAccount.trim() || undefined,
+          officeAddress: officeAddress.trim() || undefined,
+          responsiblePhone: responsiblePhone.trim() || undefined,
+          bankCardNumber: bankCardNumber.trim() || undefined,
+          bankInfo: bankInfo.trim() || undefined,
+        },
       }),
     onSuccess: async (res) => {
       const unlocked =
@@ -299,7 +315,13 @@ export function CustomerDetailsForm({
       setPaymentOpen(false);
       setPaymentAmount("");
       setPaymentMethod(null);
+      setHesabPayAccount("");
+      setOfficeAddress("");
+      setResponsiblePhone("");
+      setBankCardNumber("");
+      setBankInfo("");
       setPaymentMethodError("");
+      setPaymentMetaError("");
       setPaymentError("");
       if (onPaymentCreated) {
         await onPaymentCreated(res);
@@ -329,7 +351,13 @@ export function CustomerDetailsForm({
   const openPaymentModal = () => {
     setPaymentAmount("");
     setPaymentMethod(null);
+    setHesabPayAccount("");
+    setOfficeAddress("");
+    setResponsiblePhone("");
+    setBankCardNumber("");
+    setBankInfo("");
     setPaymentMethodError("");
+    setPaymentMetaError("");
     setPaymentError("");
     setPaymentOpen(true);
   };
@@ -337,6 +365,27 @@ export function CustomerDetailsForm({
   const submitPayment = () => {
     if (!paymentMethod) {
       setPaymentMethodError("لطفاً روش پرداخت را انتخاب کنید.");
+      return;
+    }
+    setPaymentMethodError("");
+    setPaymentMetaError("");
+
+    if (paymentMethod === "HESAB_PAY" && !hesabPayAccount.trim()) {
+      setPaymentMetaError("شماره حساب پی الزامی است.");
+      return;
+    }
+    if (paymentMethod === "CASH") {
+      if (!officeAddress.trim()) {
+        setPaymentMetaError("آدرس دفتر الزامی است.");
+        return;
+      }
+      if (!responsiblePhone.trim()) {
+        setPaymentMetaError("شماره تماس مسئول دفتر الزامی است.");
+        return;
+      }
+    }
+    if (paymentMethod === "BANK_TRANSFER" && !bankCardNumber.trim()) {
+      setPaymentMetaError("شماره کارت بانکی الزامی است.");
       return;
     }
     const amt = Number(paymentAmount);
@@ -582,7 +631,13 @@ export function CustomerDetailsForm({
           if (!open) {
             setPaymentAmount("");
             setPaymentMethod(null);
+            setHesabPayAccount("");
+            setOfficeAddress("");
+            setResponsiblePhone("");
+            setBankCardNumber("");
+            setBankInfo("");
             setPaymentMethodError("");
+            setPaymentMetaError("");
             setPaymentError("");
           }
         }}
@@ -633,7 +688,7 @@ export function CustomerDetailsForm({
               aria-describedby={
                 paymentMethodError ? "payment-method-error" : undefined
               }
-              className="grid grid-cols-3 gap-1.5 rounded-xl border border-border/70 bg-muted/30 p-1.5"
+              className="grid grid-cols-2 gap-1.5 rounded-xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-4"
             >
               {CUSTOMER_PAYMENT_METHODS.map((option) => {
                 const selected = paymentMethod === option.value;
@@ -659,6 +714,7 @@ export function CustomerDetailsForm({
                       onChange={() => {
                         setPaymentMethod(option.value);
                         setPaymentMethodError("");
+                        setPaymentMetaError("");
                       }}
                       className="sr-only"
                     />
@@ -677,6 +733,107 @@ export function CustomerDetailsForm({
               </p>
             ) : null}
           </fieldset>
+
+          {paymentMethod === "HESAB_PAY" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="payment-hesab" className="text-xs">
+                شماره حساب پی <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="payment-hesab"
+                dir="ltr"
+                disabled={paymentMut.isPending}
+                className="h-11 rounded-xl text-end"
+                value={hesabPayAccount}
+                onChange={(e) => {
+                  setHesabPayAccount(e.target.value);
+                  setPaymentMetaError("");
+                }}
+              />
+            </div>
+          ) : null}
+
+          {paymentMethod === "CASH" ? (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="payment-office" className="text-xs">
+                  آدرس دفتر <span className="text-destructive">*</span>
+                </Label>
+                <Textarea
+                  id="payment-office"
+                  disabled={paymentMut.isPending}
+                  className="min-h-[4rem] resize-none rounded-xl"
+                  value={officeAddress}
+                  onChange={(e) => {
+                    setOfficeAddress(e.target.value);
+                    setPaymentMetaError("");
+                  }}
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="payment-rep-phone" className="text-xs">
+                  شماره تماس مسئول دفتر <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="payment-rep-phone"
+                  dir="ltr"
+                  disabled={paymentMut.isPending}
+                  className="h-11 rounded-xl text-end"
+                  value={responsiblePhone}
+                  onChange={(e) => {
+                    setResponsiblePhone(e.target.value);
+                    setPaymentMetaError("");
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {paymentMethod === "BANK_TRANSFER" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="payment-card" className="text-xs">
+                شماره کارت بانکی <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="payment-card"
+                dir="ltr"
+                disabled={paymentMut.isPending}
+                className="h-11 rounded-xl text-end"
+                value={bankCardNumber}
+                onChange={(e) => {
+                  setBankCardNumber(e.target.value);
+                  setPaymentMetaError("");
+                }}
+              />
+            </div>
+          ) : null}
+
+          {paymentMethod === "HAWALA" ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="payment-hawala" className="text-xs">
+                جزئیات حواله
+              </Label>
+              <Textarea
+                id="payment-hawala"
+                disabled={paymentMut.isPending}
+                className="min-h-[4rem] resize-none rounded-xl"
+                placeholder="نام صرافی، شماره حواله یا سایر جزئیات"
+                value={bankInfo}
+                onChange={(e) => {
+                  setBankInfo(e.target.value);
+                  setPaymentMetaError("");
+                }}
+                rows={2}
+              />
+            </div>
+          ) : null}
+
+          {paymentMetaError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {paymentMetaError}
+            </p>
+          ) : null}
 
           <div className="space-y-2">
             <CrmCurrencyField

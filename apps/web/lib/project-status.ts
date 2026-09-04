@@ -33,6 +33,20 @@ export const CUSTOMER_FACING_STATUS_LABELS: Record<string, string> = {
   COMPLETED: "تکمیل‌شده",
 };
 
+/** Delivery / completion workflow labels (Project.deliveryStatus). */
+export const DELIVERY_STATUS_LABELS: Record<string, string> = {
+  NOT_READY: "آماده نیست",
+  AWAITING_PAYMENT: "منتظر پرداخت",
+  AWAITING_MANAGER_APPROVAL: "منتظر تأیید مدیر",
+  READY_FOR_DOWNLOAD: "آماده دانلود",
+  DELIVERED: "تحویل‌شده",
+  COMPLETED: "تکمیل و تحویل",
+};
+
+export const DELIVERY_STATUS_FILTER_OPTIONS = Object.entries(
+  DELIVERY_STATUS_LABELS,
+).map(([value, label]) => ({ value, label }));
+
 /** Progress % fallback for manager UI based on internal workflow status.
  * Kept in sync with apps/api/src/services/projectProgress.js.
  * Prefer `project.progress` from the API when available.
@@ -68,6 +82,13 @@ export function getCustomerFacingStatusLabel(
 ): string {
   if (!status) return UNKNOWN;
   return CUSTOMER_FACING_STATUS_LABELS[status] || UNKNOWN;
+}
+
+export function getDeliveryStatusLabel(
+  status: string | null | undefined,
+): string {
+  if (!status) return UNKNOWN;
+  return DELIVERY_STATUS_LABELS[status] || UNKNOWN;
 }
 
 export function getProjectProgress(status: string | null | undefined): number {

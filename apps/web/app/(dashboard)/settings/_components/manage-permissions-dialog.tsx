@@ -64,6 +64,7 @@ const ROLE_LABELS: Record<string, string> = {
   EDITOR: "ادیتور",
   NARRATOR: "نریتور",
   FINANCE: "مالی",
+  PROJECT_MANAGER: "مدیر پروژه",
 };
 
 interface ManagePermissionsDialogProps {

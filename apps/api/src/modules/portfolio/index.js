@@ -4,9 +4,11 @@ import { requireInternal, requirePermission } from '../../middleware/rbac.js';
 import { requireCsrf } from '../../middleware/csrf.js';
 import { validate } from '../../middleware/validate.js';
 import { ok, created } from '../../utils/response.js';
+import { aiLimiter } from '../../middleware/rateLimit.js';
 import {
   portfolioService,
   publishPortfolioSchema,
+  generatePortfolioSchema,
   updatePortfolioSchema,
   streamPortfolioVideo,
 } from './service.js';
@@ -134,10 +136,12 @@ router.get(
 router.post(
   '/projects/:projectId/generate',
   requireCsrf,
+  aiLimiter,
   requirePermission('portfolio.publish'),
+  validate(generatePortfolioSchema),
   async (req, res, next) => {
     try {
-      ok(res, await portfolioService.generateCopy(req.params.projectId));
+      ok(res, await portfolioService.generateCopy(req.params.projectId, req.body));
     } catch (e) {
       next(e);
     }

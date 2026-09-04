@@ -27,6 +27,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 type FormState = {
   title: string;
   description: string;
+  successStory: string;
   storageKey: string | null;
   thumbnailKey: string | null;
   thumbnailUrl: string | null;
@@ -40,6 +41,7 @@ function emptyForm(): FormState {
   return {
     title: "",
     description: "",
+    successStory: "",
     storageKey: null,
     thumbnailKey: null,
     thumbnailUrl: null,
@@ -54,6 +56,7 @@ function fromItem(item: PortfolioAdminItem): FormState {
   return {
     title: item.title,
     description: item.description || "",
+    successStory: item.successStory || "",
     storageKey: item.storageKey,
     thumbnailKey: item.thumbnailKey,
     thumbnailUrl: item.thumbnailUrl,
@@ -93,6 +96,7 @@ export function PortfolioVideoForm({
       const payload = {
         title: form.title.trim(),
         description: form.description.trim() || null,
+        successStory: form.successStory.trim() || null,
         thumbnailKey: form.thumbnailKey,
         categoryIds: form.categoryIds,
         status: form.isPublished ? "PUBLISHED" : "UNPUBLISHED",
@@ -222,6 +226,22 @@ export function PortfolioVideoForm({
                 setForm((prev) => ({ ...prev, description: e.target.value }))
               }
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="portfolio-success-story">داستان موفقیت (اختیاری)</Label>
+            <Textarea
+              id="portfolio-success-story"
+              rows={8}
+              maxLength={4000}
+              value={form.successStory}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, successStory: e.target.value }))
+              }
+              placeholder="متن نمایش‌داده‌شده در صفحهٔ عمومی نمونه‌کار"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {form.successStory.trim().length}/4000
+            </p>
           </div>
 
           <div className="space-y-2">

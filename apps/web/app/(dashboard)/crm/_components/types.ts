@@ -17,6 +17,8 @@ export interface CrmCustomer {
   createdAt: string;
   updatedAt: string;
   salesOwner: { id: string; fullName: string } | null;
+  pipelineStage?: string;
+  pipelineStageLabel?: string;
 }
 
 export interface CrmListResponse {

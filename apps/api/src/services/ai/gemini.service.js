@@ -115,7 +115,7 @@ export const geminiService = {
         Object.assign(timeoutErr, formatAiError(timeoutErr, 'gemini'));
         throw timeoutErr;
       }
-      if (err?.provider === 'gemini' || err?.code) throw err;
+      if (err?.provider === 'gemini' && err?.status) throw err;
       const wrapped = createAiError(err.message || 'Gemini unavailable', {
         code: 'server_error',
         status: 503,

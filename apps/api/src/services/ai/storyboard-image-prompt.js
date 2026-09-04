@@ -3,10 +3,16 @@
  * Scene action / shot type lead the prompt so image models cannot ignore them.
  */
 
+import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
+
 export const STORYBOARD_IMAGE_SIZE = '1920x1080';
+export const STORYBOARD_COLLAGE_SIZE = '1920x1080';
 
 const QUALITY_SUFFIX =
-  'Premium commercial cinematography still, 16:9 widescreen, shot on 35mm cinema camera, ARRI Alexa look, sharp focus, rich texture, cinematic color grade, photoreal, professional lighting, no illustration, no sci-fi, no anime, no fashion portrait, no watermark, no unreadable text.';
+  'Premium commercial cinematography still, 16:9 widescreen, shot on 35mm cinema camera, ARRI Alexa look, sharp focus, high detail, well-lit and clearly readable, not underexposed, not muddy, rich texture, cinematic color grade, photoreal, professional lighting, unique to this scene, no illustration, no sci-fi, no anime, no fashion portrait, no watermark, no unreadable text.';
+
+const COLLAGE_QUALITY_SUFFIX =
+  'Photoreal commercial frames inside a professional cinematic storyboard sheet, matching color grade, lens language, wardrobe, and lighting across every panel, clean equal gutters, dark slate mount, no messy photo dump, no overlapping panels, no watermark, no unreadable in-world text.';
 
 const FA_EN_HINTS = [
   [/سرک|جاده|راه/g, 'road'],
@@ -219,7 +225,7 @@ export function extractProjectBrandContext(project = {}) {
     durationSec: project.durationSec || null,
     language: str(project.language),
     tone: str(project.tone || brief.tone),
-    customerName: str(customer.companyName || customer.personName),
+    customerName: str(getCustomerPersonName(customer, '')),
     productName: pickBriefField(brief, 'productName', 'brandName', 'product'),
     productDescription: pickBriefField(
       brief,
@@ -330,6 +336,129 @@ export function validateImagePrompt(prompt, scene = {}) {
   return { ok: true };
 }
 
+export function validateCollagePrompt(prompt, sceneCount = 1) {
+  const text = str(prompt);
+  if (text.length < 80) {
+    return { ok: false, error: 'پرامپت شیت استوری‌بورد کافی نیست' };
+  }
+  const n = Math.max(1, Number(sceneCount) || 1);
+  if (n > 1 && !/panel|grid|sheet|storyboard/i.test(text)) {
+    return { ok: false, error: 'پرامپت شیت استوری‌بورد باید همه صحنه‌ها را در یک تصویر توصیف کند' };
+  }
+  return { ok: true };
+}
+
+/**
+ * Balanced panel grid for a single storyboard sheet.
+ * Always one image; scene count only changes columns/rows.
+ */
+export function collageGrid(sceneCount) {
+  const n = Math.max(1, Number(sceneCount) || 1);
+  if (n === 1) return { cols: 1, rows: 1 };
+  if (n === 2) return { cols: 2, rows: 1 };
+  if (n === 3) return { cols: 3, rows: 1 };
+  if (n === 4) return { cols: 2, rows: 2 };
+  if (n <= 6) return { cols: 3, rows: 2 };
+  if (n <= 8) return { cols: 4, rows: 2 };
+  if (n <= 9) return { cols: 3, rows: 3 };
+  if (n <= 12) return { cols: 4, rows: 3 };
+  const cols = 4;
+  return { cols, rows: Math.ceil(n / cols) };
+}
+
+function compactPanelLine(scene, ctx, sceneIndex, totalScenes) {
+  const brand = ctx.projectContext || {};
+  const sceneNo = Number(scene.sceneNumber ?? scene.scene_number ?? sceneIndex + 1);
+  const shot = resolveShotType(scene);
+  const visual = str(scene.visualDescription || scene.visual || scene.description);
+  const action = str(scene.characterActions || scene.action || scene.motion);
+  const environment = str(scene.environment);
+  const blob = [
+    scene.title,
+    visual,
+    action,
+    environment,
+    brand.productName,
+    brand.projectTitle,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const hints = persianHints(blob);
+  const subject =
+    expandConcreteSubject(hints, blob, brand) ||
+    toAscii(visual) ||
+    toAscii(environment) ||
+    toAscii(action) ||
+    toAscii(scene.title) ||
+    `the exact subject of scene ${sceneNo}`;
+  const lighting = toAscii(scene.lighting || scene.visualDirection);
+  const narrationHint = toAscii(
+    extractSceneNarrationHint(ctx.narration, sceneIndex, totalScenes),
+  );
+  return [
+    `Panel ${sceneNo} (${shot.key}): ${clip(subject, 160)}`,
+    toAscii(environment) ? `location ${clip(toAscii(environment), 70)}` : null,
+    toAscii(action) ? `action ${clip(toAscii(action), 80)}` : null,
+    lighting ? `light ${clip(lighting, 60)}` : null,
+    narrationHint ? `beat ${clip(narrationHint, 60)}` : null,
+  ]
+    .filter(Boolean)
+    .join('; ')
+    .concat('.');
+}
+
+/**
+ * One English prompt that asks the image model for a complete storyboard sheet.
+ */
+export function buildCollageImagePrompt(
+  scenes,
+  {
+    styleGuide,
+    projectContext,
+    scenarioContext,
+    narration,
+  } = {},
+) {
+  const list = Array.isArray(scenes) ? scenes.filter(Boolean) : [];
+  const n = Math.max(1, list.length);
+  const grid = collageGrid(n);
+  const brand = projectContext || {};
+  const scenario = scenarioContext || {};
+  const bible = buildProductionBible(brand, scenario, styleGuide);
+  const ctx = { projectContext: brand, narration };
+
+  const layout =
+    n === 1
+      ? 'The sheet is a single full-bleed cinematic still of scene 1.'
+      : `Layout: exactly one ${grid.cols}-column by ${grid.rows}-row grid of equal 16:9 panels on a dark slate storyboard mount. Place scenes in order left-to-right, then top-to-bottom. Panel 1 is top-left. Unused cells stay empty dark gutter. Even thin spacing between panels. Small SCENE number in each panel gutter only.`;
+
+  const panels = list.map((scene, index) =>
+    compactPanelLine(scene, ctx, index, n),
+  );
+
+  const prompt = [
+    `ONE professional cinematic storyboard SHEET in a single 16:9 image containing all ${n} scenes as organized panels. Do not output ${n} separate pictures.`,
+    layout,
+    'Keep characters, product, wardrobe, locations language, lighting recipe, and art direction consistent across every panel.',
+    toAscii(brand.productName)
+      ? `Brand/product: ${toAscii(brand.productName)}.`
+      : null,
+    toAscii(brand.projectTitle)
+      ? `Project: ${clip(toAscii(brand.projectTitle), 80)}.`
+      : null,
+    toAscii(scenario.concept)
+      ? `Concept: ${clip(toAscii(scenario.concept), 120)}.`
+      : null,
+    bible,
+    ...panels,
+    COLLAGE_QUALITY_SUFFIX,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return clip(toAscii(prompt) || prompt, 1800);
+}
+
 /**
  * English-only visual prompt. Image models ignore Persian and then fall back
  * to a generic cinematic portrait — so never send non-ASCII scene text.
@@ -412,6 +541,7 @@ export function buildSceneImagePrompt(
     toAscii(brand.mainMessage) ? `Campaign message: ${clip(toAscii(brand.mainMessage), 90)}.` : null,
     bible,
     `Unique storyboard frame ${sceneNo} of ${totalScenes}.`,
+    'ONE full-frame 16:9 cinema still of THIS scene only. Do not draw a grid, comic page, storyboard sheet, filmstrip, or any other scene.',
     allowPerson
       ? 'Person must match the role in this scene, realistic documentary, not a fashion model.'
       : 'No portrait, no woman close-up, no sci-fi character, no random face. Show the location and action of THIS scene only.',

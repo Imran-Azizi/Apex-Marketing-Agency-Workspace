@@ -643,7 +643,7 @@ export function EmployeeFormDialog({
                   <Input
                     id="phone"
                     dir="ltr"
-                    placeholder="07XX XXX XXXX"
+                    placeholder="+1234567890"
                     className="h-11 rounded-xl"
                     {...register("phone")}
                   />

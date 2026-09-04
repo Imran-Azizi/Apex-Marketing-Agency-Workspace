@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 type DashboardHeaderProps = {
   customerName: string;
   canCreateProject: boolean;
+  pendingBriefsCount?: number;
+  pipelineStage?: string | null;
   accountStatus?: string;
   className?: string;
 };
@@ -15,6 +17,8 @@ type DashboardHeaderProps = {
 export function DashboardHeader({
   customerName,
   canCreateProject,
+  pendingBriefsCount = 0,
+  pipelineStage = null,
   accountStatus = "حساب فعال",
   className,
 }: DashboardHeaderProps) {
@@ -55,6 +59,8 @@ export function DashboardHeader({
 
         <CreateProjectButton
           canCreate={canCreateProject}
+          pendingBriefsCount={pendingBriefsCount}
+          pipelineStage={pipelineStage}
           size="lg"
           className="h-11 shrink-0 px-5 text-sm font-semibold shadow-md shadow-brand/20"
         />

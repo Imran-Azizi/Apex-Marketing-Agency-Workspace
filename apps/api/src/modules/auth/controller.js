@@ -17,8 +17,6 @@ import {
   authService,
   loginSchema,
   portalLoginSchema,
-  forgotPasswordSchema,
-  resetPasswordSchema,
 } from './service.js';
 import { verifyAccessToken } from '../../utils/tokens.js';
 import crypto from 'crypto';
@@ -69,28 +67,6 @@ export const authController = {
     },
   ],
 
-  forgotPassword: [
-    validate(forgotPasswordSchema),
-    async (req, res, next) => {
-      try {
-        return ok(res, await authService.requestPasswordReset(req.body, req));
-      } catch (err) {
-        next(err);
-      }
-    },
-  ],
-
-  resetPassword: [
-    validate(resetPasswordSchema),
-    async (req, res, next) => {
-      try {
-        return ok(res, await authService.resetPassword(req.body, req));
-      } catch (err) {
-        next(err);
-      }
-    },
-  ],
-
   refresh: async (req, res, next) => {
     const requestedPanel = resolveAuthPanel(req);
     try {
@@ -106,10 +82,14 @@ export const authController = {
       bindPanelCookies(res, tokens, panel);
       return ok(res, { refreshed: true, panel });
     } catch (err) {
-      if (requestedPanel && isAuthPanel(requestedPanel)) {
-        clearPanelAuthCookies(res, requestedPanel);
+      const recoverable =
+        err instanceof AppError && err.code === 'TOKEN_ROTATED';
+      if (!recoverable) {
+        if (requestedPanel && isAuthPanel(requestedPanel)) {
+          clearPanelAuthCookies(res, requestedPanel);
+        }
+        clearLegacyAuthCookies(res);
       }
-      clearLegacyAuthCookies(res);
       next(err);
     }
   },

@@ -4,8 +4,10 @@ import { AppError } from '../../utils/response.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { rebuildProjectContext } from '../../services/projectContext.js';
 import {
-  parseAssignmentAmount,
+  resolveAssignmentAmount,
+  teamProfileHasMonthlySalary,
   upsertLaborPayable,
+  clearLaborPayable,
   syncProjectLaborCosts,
 } from '../../services/assignmentFinance.js';
 import {
@@ -257,7 +259,7 @@ function statusFilterMap(status) {
 
 export const narrationService = {
   async listAvailableNarrators() {
-    return prisma.teamProfile.findMany({
+    const narrators = await prisma.teamProfile.findMany({
       where: {
         kind: 'NARRATOR',
         status: 'ACTIVE',
@@ -268,6 +270,14 @@ export const narrationService = {
       include: {
         user: { select: { id: true, fullName: true, email: true, isActive: true } },
         rates: { where: { isActive: true }, take: 3 },
+        compensationProfile: {
+          select: {
+            type: true,
+            fixedMonthlyAmount: true,
+            isActive: true,
+            currency: true,
+          },
+        },
         audioSamples: {
           where: { isPublished: true, deletedAt: null },
           take: 2,
@@ -275,6 +285,11 @@ export const narrationService = {
         },
       },
     });
+
+    return narrators.map((narrator) => ({
+      ...narrator,
+      hasMonthlySalary: teamProfileHasMonthlySalary(narrator),
+    }));
   },
 
   async listMyTasks(auth) {
@@ -484,7 +499,7 @@ export const narrationService = {
       narratorTeamProfileId = null,
       deadline = null,
       contentVersionId = null,
-      assignedAmount = null,
+      assignedAmount = undefined,
       tx = prisma,
     } = {},
   ) {
@@ -508,7 +523,7 @@ export const narrationService = {
       ...(narratorUserId != null ? { narratorUserId } : {}),
       ...(narratorTeamProfileId != null ? { narratorTeamProfileId } : {}),
       ...(deadline != null ? { deadline } : {}),
-      ...(assignedAmount != null ? { assignedAmount } : {}),
+      ...(assignedAmount !== undefined ? { assignedAmount } : {}),
       ...(assignedById ? { assignedById } : {}),
     };
 
@@ -556,10 +571,6 @@ export const narrationService = {
       throw new AppError('انتخاب نریتور الزامی است', 400, 'VALIDATION');
     }
 
-    const assignedAmount = parseAssignmentAmount(narrationCost ?? amount, {
-      fieldLabel: 'هزینه نریشن',
-    });
-
     const profile = await prisma.teamProfile.findFirst({
       where: {
         id: narratorProfileId,
@@ -568,11 +579,22 @@ export const narrationService = {
         deletedAt: null,
         user: { isActive: true, deletedAt: null },
       },
-      include: { user: true },
+      include: {
+        user: true,
+        compensationProfile: {
+          select: { type: true, isActive: true, fixedMonthlyAmount: true },
+        },
+      },
     });
     if (!profile) {
       throw new AppError('نریتور یافت نشد یا غیرفعال است', 404, 'NOT_FOUND');
     }
+
+    const hasMonthlySalary = teamProfileHasMonthlySalary(profile);
+    const assignedAmount = resolveAssignmentAmount(narrationCost ?? amount, {
+      fieldLabel: 'هزینه نریشن',
+      hasMonthlySalary,
+    });
 
     const deadlineAt = deadline ? new Date(deadline) : new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
     if (Number.isNaN(deadlineAt.getTime())) {
@@ -611,12 +633,16 @@ export const narrationService = {
         },
       });
 
-      await upsertLaborPayable(tx, {
-        projectId,
-        teamProfileId: profile.id,
-        roleLabel: 'NARRATOR',
-        amount: assignedAmount,
-      });
+      if (hasMonthlySalary) {
+        await clearLaborPayable(tx, { projectId, roleLabel: 'NARRATOR' });
+      } else {
+        await upsertLaborPayable(tx, {
+          projectId,
+          teamProfileId: profile.id,
+          roleLabel: 'NARRATOR',
+          amount: assignedAmount,
+        });
+      }
 
       if (project.status !== 'NARRATION_RECORDING' && project.status !== 'PRODUCTION_EDITING') {
         // Only force narration stage if content already approved or already in recording
@@ -648,7 +674,9 @@ export const narrationService = {
           projectId,
           type: 'NARRATION_ASSIGNED',
           title: 'نریشن به نریتور ارسال شد',
-          body: `${profile.displayName} — ${assignedAmount} AFN`,
+          body: hasMonthlySalary
+            ? `${profile.displayName} — معاش ماهانه`
+            : `${profile.displayName} — ${assignedAmount} AFN`,
           actorId: auth.userId,
         },
       });
@@ -676,6 +704,7 @@ export const narrationService = {
       after: {
         narratorProfileId,
         deadline: deadlineAt.toISOString(),
+        hasMonthlySalary,
         narrationCost: assignedAmount,
       },
       req,

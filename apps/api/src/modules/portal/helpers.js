@@ -1,10 +1,10 @@
-import { prisma } from '../../db/prisma.js';
+import { prisma } from "../../db/prisma.js";
 import {
   buildProjectProgress,
   attachProjectProgress,
-} from '../../services/projectProgress.js';
-import { formatFaDateTime, formatFaTime } from '../../utils/datetime.js';
-import { storedAssetUrl } from '../../services/storage/asset-url.js';
+} from "../../services/projectProgress.js";
+import { formatFaDateTime, formatFaTime } from "../../utils/datetime.js";
+import { storedAssetUrl } from "../../services/storage/asset-url.js";
 
 export function customerProjectWhere(auth) {
   return { crmCustomerId: auth.customerId, deletedAt: null };
@@ -15,16 +15,16 @@ export function customerProjectWhere(auth) {
  * Accepts customerFacingStatus string OR a project-like object.
  */
 export function computeProjectProgress(statusOrProject) {
-  if (statusOrProject && typeof statusOrProject === 'object') {
+  if (statusOrProject && typeof statusOrProject === "object") {
     return buildProjectProgress({
       status: statusOrProject.status,
       customerFacingStatus: statusOrProject.customerFacingStatus,
-      audience: 'portal',
+      audience: "portal",
     }).percent;
   }
   return buildProjectProgress({
     customerFacingStatus: statusOrProject,
-    audience: 'portal',
+    audience: "portal",
   }).percent;
 }
 
@@ -36,8 +36,8 @@ export function pickThumbnail(project) {
     const asset = ref.clientAsset;
     if (!asset || asset.deletedAt) continue;
     if (
-      ['LOGO', 'PRODUCT_IMAGE'].includes(asset.kind)
-      || asset.mimeType?.startsWith('image/')
+      ["LOGO", "PRODUCT_IMAGE"].includes(asset.kind) ||
+      asset.mimeType?.startsWith("image/")
     ) {
       return {
         storageKey: asset.storageKey,
@@ -63,11 +63,13 @@ export function serializePortalAsset(asset) {
 }
 
 export function serializePortalProjectSummary(project) {
-  const budget = project.finance ? Number(project.finance.finalProjectPrice) : null;
+  const budget = project.finance
+    ? Number(project.finance.finalProjectPrice)
+    : null;
   const progress = buildProjectProgress({
     status: project.status,
     customerFacingStatus: project.customerFacingStatus,
-    audience: 'portal',
+    audience: "portal",
   });
   const thumb = pickThumbnail(project);
   return {
@@ -91,9 +93,23 @@ export async function countPendingBriefs(customerId) {
       crmCustomerId: customerId,
       deletedAt: null,
       projectId: null,
-      pipelineStage: { notIn: ['CANCELED', 'COMPLETED'] },
+      pipelineStage: { notIn: ["LOST_CANCELED", "DELIVERED"] },
     },
   });
+}
+
+/**
+ * Portal may start another project when a pending brief exists,
+ * or when sales activated Repeat Customer for a returning client.
+ */
+export function canPortalCreateProject({
+  pipelineStage,
+  pendingBriefsCount = 0,
+} = {}) {
+  const stage = String(pipelineStage || "").toUpperCase();
+  if (stage === "LOST_CANCELED" || stage === "CANCELED") return false;
+  if (Number(pendingBriefsCount) > 0) return true;
+  return stage === "REPEAT_CUSTOMER";
 }
 
 export { attachProjectProgress, buildProjectProgress };

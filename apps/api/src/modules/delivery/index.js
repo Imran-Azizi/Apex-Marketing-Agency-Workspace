@@ -179,42 +179,35 @@ router.get('/:projectId/history', requirePermission('delivery.view'), async (req
 
 router.post('/:projectId/complete', requireCsrf, requirePermission('projects.complete'), async (req, res, next) => {
   try {
-    const project = await prisma.project.update({
-      where: { id: req.params.projectId },
-      data: {
-        status: 'COMPLETED',
-        customerFacingStatus: 'COMPLETED',
-        completedAt: new Date(),
-        deliveryStatus: 'COMPLETED',
-      },
+    const { forceCompleteProject } = await import('../../services/projectCompletion.js');
+    const reason =
+      typeof req.body?.reason === 'string' ? req.body.reason.trim() : null;
+
+    const result = await forceCompleteProject(prisma, {
+      projectId: req.params.projectId,
+      actorId: req.auth.userId,
+      reason: reason || null,
     });
-    await syncProjectDeliveryFields(prisma, project.id, {
-      projectPatch: { deliveryStatus: 'COMPLETED' },
-    });
-    await prisma.crmCustomer.update({
-      where: { id: project.crmCustomerId },
-      data: { pipelineStage: 'COMPLETED' },
-    });
-    await prisma.opportunity.updateMany({
-      where: { projectId: project.id },
-      data: { pipelineStage: 'COMPLETED' },
-    });
-    await prisma.projectTimelineEvent.create({
-      data: {
-        projectId: project.id,
-        type: 'PROJECT_COMPLETED',
-        title: 'پروژه تکمیل شد',
-        actorId: req.auth.userId,
-      },
-    });
+
     await writeAudit({
       userId: req.auth.userId,
       action: 'PROJECT_COMPLETE',
       entityType: 'Project',
-      entityId: project.id,
+      entityId: req.params.projectId,
+      after: {
+        alreadyCompleted: result.alreadyCompleted,
+        reason: reason || null,
+      },
       req,
     });
-    ok(res, project);
+
+    ok(res, {
+      id: req.params.projectId,
+      status: 'COMPLETED',
+      customerFacingStatus: 'COMPLETED',
+      completedAt: result.completedAt,
+      alreadyCompleted: result.alreadyCompleted,
+    });
   } catch (e) { next(e); }
 });
 

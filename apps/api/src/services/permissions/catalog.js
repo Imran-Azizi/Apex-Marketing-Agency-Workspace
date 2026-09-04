@@ -12,6 +12,7 @@ export const MANAGEABLE_STAFF_ROLES = [
   "EDITOR",
   "NARRATOR",
   "FINANCE",
+  "PROJECT_MANAGER",
 ];
 
 /** Roles that always retain full access and cannot be customized. */
@@ -32,15 +33,15 @@ export const PERMISSION_CATALOG = [
   },
   {
     id: "crm",
-    label: "مشتریان",
-    description: "مدیریت مشتریان، سرنخ‌ها و دعوت پورتال",
+    label: "CRM و فروش",
+    description: "مدیریت سرنخ‌ها، قیف فروش، مشتریان و دعوت پورتال",
     actions: [
       {
         code: "crm.view",
         label: "مشاهده",
         description: "مشاهده لیست و پرونده مشتری",
       },
-      { code: "crm.create", label: "ایجاد", description: "ایجاد مشتری جدید" },
+      { code: "crm.create", label: "ایجاد", description: "ایجاد سرنخ و تبدیل به مشتری پس از بیعانه" },
       {
         code: "crm.edit",
         label: "ویرایش",
@@ -61,6 +62,56 @@ export const PERMISSION_CATALOG = [
         code: "crm.invite",
         label: "دعوت پورتال",
         description: "ارسال دعوت ورود به پورتال مشتری",
+      },
+      {
+        code: "crm.portal_credentials",
+        label: "مشاهده اطلاعات ورود پورتال",
+        description:
+          "مشاهده شماره واتساپ و رمز عبور پورتال مشتری در مدیریت مشتری",
+      },
+    ],
+  },
+  {
+    id: "sales_assistant",
+    label: "دستیار فروش",
+    description: "صندوق توصیه فروش — پیگیری مشتری و فرصت‌های فروش",
+    actions: [
+      {
+        code: "sales_assistant.view",
+        label: "مشاهده",
+        description: "مشاهده صندوق توصیه‌های فروش",
+      },
+      {
+        code: "sales_assistant.act",
+        label: "اقدام",
+        description: "انجام، رد یا پیگیری توصیه‌های فروش",
+      },
+      {
+        code: "sales_assistant.manage",
+        label: "پیکربندی",
+        description: "اجرای دستی پویش دستیار فروش",
+      },
+    ],
+  },
+  {
+    id: "business_assistant",
+    label: "دستیار مدیریت",
+    description: "مشاور هوشمند کسب‌وکار و گفتگو با دستیار مدیریت",
+    actions: [
+      {
+        code: "business_assistant.view",
+        label: "مشاهده",
+        description: "مشاهده تحلیل مشاور کسب‌وکار و گفتگو با دستیار مدیریت",
+      },
+      {
+        code: "business_assistant.act",
+        label: "اقدام",
+        description: "گفتگو با دستیار مدیریت",
+      },
+      {
+        code: "business_assistant.manage",
+        label: "پیکربندی",
+        description: "پاک‌کردن گفتگوی دستیار مدیریت",
       },
     ],
   },
@@ -185,6 +236,33 @@ export const PERMISSION_CATALOG = [
         code: "video.send",
         label: "ارسال به مشتری",
         description: "ارسال نسخه‌های نهایی برای مشتری",
+      },
+    ],
+  },
+  {
+    id: "poster",
+    label: "پوستر پروژه",
+    description: "بارگذاری، بازبینی و ارسال پوستر نهایی پروژه",
+    actions: [
+      {
+        code: "poster.view",
+        label: "مشاهده",
+        description: "مشاهده پوسترها و وضعیت بررسی",
+      },
+      {
+        code: "poster.upload",
+        label: "بارگذاری پوستر",
+        description: "ارسال پوستر برای بررسی مدیریت",
+      },
+      {
+        code: "poster.approve",
+        label: "تأیید یا رد",
+        description: "بازبینی پوستر و ثبت تأیید یا رد",
+      },
+      {
+        code: "poster.send",
+        label: "ارسال به مشتری",
+        description: "ارسال پوستر تأییدشده به پورتال مشتری",
       },
     ],
   },
@@ -450,6 +528,33 @@ export const PERMISSION_CATALOG = [
       },
     ],
   },
+  {
+    id: "chat",
+    label: "گفتگوی داخلی",
+    description: "پیام‌رسانی امن بین مدیران و کارمندان",
+    actions: [
+      {
+        code: "chat.view",
+        label: "مشاهده",
+        description: "مشاهده گفتگوها و پیام‌ها",
+      },
+      {
+        code: "chat.send",
+        label: "ارسال",
+        description: "ارسال، ویرایش و حذف پیام‌های خود",
+      },
+      {
+        code: "chat.upload",
+        label: "بارگذاری",
+        description: "ارسال فایل و پیام صوتی",
+      },
+      {
+        code: "chat.manage",
+        label: "مدیریت دسترسی",
+        description: "تنظیم گفتگوی کارمند با کارمند",
+      },
+    ],
+  },
 ];
 
 export const ALL_PERMISSION_CODES = PERMISSION_CATALOG.flatMap((mod) =>
@@ -478,8 +583,8 @@ export const LEGACY_CODE_MAP = {
     "projects.assign",
   ],
   "voice:upload": ["narration.view", "narration.upload"],
-  "production:upload": ["video.view", "video.edit"],
-  "production:submit": ["video.upload"],
+  "production:upload": ["video.view", "video.edit", "poster.view"],
+  "production:submit": ["video.upload", "poster.upload"],
   "finance:read": ["finance.view"],
   "finance:write": ["finance.create", "finance.edit", "finance.delete"],
   "download:allow": ["delivery.view", "delivery.allow"],
@@ -531,20 +636,36 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "crm.merge",
     "crm.opportunity",
     "crm.invite",
-    "projects.view",
-    "finance.view",
-    "finance.create",
-    "finance.edit",
-    "finance.delete",
     "contact.view",
     "contact.edit",
+    "chat.view",
+    "chat.send",
+    "chat.upload",
+    "sales_assistant.view",
+    "sales_assistant.act",
+    "sales_assistant.manage",
   ],
-  EDITOR: ["dashboard.view", "video.view", "video.edit", "video.upload"],
-  NARRATOR: ["dashboard.view", "narration.view", "narration.upload"],
+  EDITOR: [
+    "dashboard.view",
+    "video.view",
+    "video.edit",
+    "video.upload",
+    "poster.view",
+    "poster.upload",
+    "chat.view",
+    "chat.send",
+    "chat.upload",
+  ],
+  NARRATOR: [
+    "dashboard.view",
+    "narration.view",
+    "narration.upload",
+    "chat.view",
+    "chat.send",
+    "chat.upload",
+  ],
   FINANCE: [
     "dashboard.view",
-    "crm.view",
-    "projects.view",
     "finance.view",
     "finance.create",
     "finance.edit",
@@ -552,6 +673,21 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "delivery.view",
     "delivery.allow",
     "audit.view",
+    "chat.view",
+    "chat.send",
+    "chat.upload",
+  ],
+  PROJECT_MANAGER: [
+    "dashboard.view",
+    "projects.view",
+    "projects.edit",
+    "projects.assign",
+    "projects.complete",
+    "content.view",
+    "poster.view",
+    "chat.view",
+    "chat.send",
+    "chat.upload",
   ],
   CUSTOMER: ["dashboard.view", "finance.view"],
   AI_SERVICE: ["projects.view", "content.view", "content.generate"],
@@ -568,9 +704,6 @@ export const ROLE_LEGACY_PERMISSIONS = {
     "crm:merge",
     "opportunity:manage",
     "portal_invite:create",
-    "project:read",
-    "finance:read",
-    "finance:write",
     "notification:read",
   ],
   EDITOR: [
@@ -582,12 +715,17 @@ export const ROLE_LEGACY_PERMISSIONS = {
   NARRATOR: ["dashboard:view", "voice:upload", "notification:read"],
   FINANCE: [
     "dashboard:view",
-    "crm:read",
-    "project:read",
     "finance:read",
     "finance:write",
     "download:allow",
     "audit:read",
+    "notification:read",
+  ],
+  PROJECT_MANAGER: [
+    "dashboard:view",
+    "project:read",
+    "project:write",
+    "project:start",
     "notification:read",
   ],
   CUSTOMER: [

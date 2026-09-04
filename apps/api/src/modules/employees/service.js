@@ -6,7 +6,7 @@ import { writeAudit } from "../../middleware/audit.js";
 import { createNotificationOnce } from "../../services/notifications.js";
 
 /** Roles managers can assign when creating/editing employees. */
-export const EMPLOYEE_ROLES = ["SALES", "EDITOR", "NARRATOR", "FINANCE"];
+export const EMPLOYEE_ROLES = ["SALES", "EDITOR", "NARRATOR", "FINANCE", "PROJECT_MANAGER"];
 
 /** All internal staff roles shown in the employee list. */
 export const STAFF_ROLES = [
@@ -16,6 +16,7 @@ export const STAFF_ROLES = [
   "EDITOR",
   "NARRATOR",
   "FINANCE",
+  "PROJECT_MANAGER",
 ];
 
 const ROLE_TO_TEAM_KIND = {

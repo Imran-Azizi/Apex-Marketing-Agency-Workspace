@@ -5,6 +5,7 @@ export const globalLimiter = rateLimit({
   max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => String(req.originalUrl || req.url || "").startsWith("/files/"),
 });
 
 export const authLimiter = rateLimit({
@@ -45,5 +46,37 @@ export const aiLimiter = rateLimit({
   message: {
     success: false,
     error: { code: 'AI_RATE_LIMITED', message: 'تعداد درخواست‌های هوش مصنوعی زیاد است. کمی بعد تلاش کنید.' },
+  },
+});
+
+/** Chat message send / conversation open */
+export const chatMessageLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.auth?.userId || req.ip || 'anonymous'),
+  message: {
+    success: false,
+    error: {
+      code: 'CHAT_RATE_LIMITED',
+      message: 'تعداد پیام‌ها زیاد است. کمی بعد تلاش کنید.',
+    },
+  },
+});
+
+/** Chat attachment / voice uploads */
+export const chatUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.auth?.userId || req.ip || 'anonymous'),
+  message: {
+    success: false,
+    error: {
+      code: 'CHAT_UPLOAD_RATE_LIMITED',
+      message: 'تعداد بارگذاری فایل زیاد است. کمی بعد تلاش کنید.',
+    },
   },
 });

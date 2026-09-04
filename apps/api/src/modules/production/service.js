@@ -1,10 +1,13 @@
 import { prisma } from "../../db/prisma.js";
 import { AppError } from "../../utils/response.js";
+import { getCustomerPersonName } from "../../utils/crmCustomerName.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { rebuildProjectContext } from "../../services/projectContext.js";
 import {
-  parseAssignmentAmount,
+  resolveAssignmentAmount,
+  teamProfileHasMonthlySalary,
   upsertLaborPayable,
+  clearLaborPayable,
   syncProjectLaborCosts,
 } from "../../services/assignmentFinance.js";
 import {
@@ -22,9 +25,14 @@ import {
   buildFinalVideoRevisionRequestedNotification,
 } from "../../services/notifications.js";
 import { serializeEditorTaskSummary } from "./editorView.js";
-import { canAssignProjectEditor } from "../../services/permissions/effective.js";
+import {
+  canAssignProjectEditor,
+  canReviewFinalVideos,
+  canSendFinalVideos,
+} from "../../services/permissions/effective.js";
 import {
   VIDEO_TYPE_LABELS,
+  asMeta,
   buildFinalFileMeta,
   markApprovedMeta,
   markRevisionRequestedMeta,
@@ -32,7 +40,10 @@ import {
   markViewedMeta,
   serializeFinalVideo,
   isSentToCustomer,
+  isAlreadyDelivered,
   resolveVideoStatus,
+  shouldPreserveProjectStatus,
+  projectStatusPatchAfterSend,
 } from "./finalProduct.js";
 import { mergeStorageMeta } from "../../services/storage/media-manager.js";
 
@@ -260,20 +271,6 @@ function statusFilterMap(status) {
   return map[status] || status;
 }
 
-function priorityFilterMap(priority) {
-  if (!priority || priority === "all") return null;
-  const map = {
-    high: ["OVERDUE", "HIGH"],
-    medium: ["MEDIUM"],
-    low: ["NORMAL"],
-    OVERDUE: ["OVERDUE"],
-    HIGH: ["HIGH"],
-    MEDIUM: ["MEDIUM"],
-    NORMAL: ["NORMAL"],
-  };
-  return map[priority] || [priority];
-}
-
 const taskInclude = {
   editorUser: { select: { id: true, fullName: true, email: true } },
   editorTeamProfile: {
@@ -328,7 +325,7 @@ function assertCanAssignProjectEditor(auth) {
 export const productionService = {
   async listAvailableEditors(auth) {
     assertCanAssignProjectEditor(auth);
-    return prisma.teamProfile.findMany({
+    const editors = await prisma.teamProfile.findMany({
       where: {
         kind: "EDITOR",
         status: "ACTIVE",
@@ -340,9 +337,22 @@ export const productionService = {
           select: { id: true, fullName: true, email: true, isActive: true },
         },
         rates: { where: { isActive: true }, take: 3 },
+        compensationProfile: {
+          select: {
+            type: true,
+            fixedMonthlyAmount: true,
+            isActive: true,
+            currency: true,
+          },
+        },
       },
       orderBy: { displayName: "asc" },
     });
+
+    return editors.map((editor) => ({
+      ...editor,
+      hasMonthlySalary: teamProfileHasMonthlySalary(editor),
+    }));
   },
 
   async listMyTasks(auth) {
@@ -455,7 +465,6 @@ export const productionService = {
     const dateFilter = String(query.date || "all");
     const from = query.from || null;
     const to = query.to || null;
-    const priorityMatch = priorityFilterMap(query.priority);
 
     const tasks = await prisma.editingTask.findMany({
       where: {
@@ -479,10 +488,6 @@ export const productionService = {
     items = items.filter((t) =>
       matchesDateFilter(t.assignedAt, dateFilter, from, to),
     );
-
-    if (priorityMatch) {
-      items = items.filter((t) => priorityMatch.includes(t.priority));
-    }
 
     items.sort(
       (a, b) =>
@@ -796,10 +801,6 @@ export const productionService = {
     if (!editorProfileId)
       throw new AppError("انتخاب ادیتور الزامی است", 400, "EDITOR_REQUIRED");
 
-    const assignedAmount = parseAssignmentAmount(editingCost ?? amount, {
-      fieldLabel: "هزینه ادیت",
-    });
-
     const profile = await prisma.teamProfile.findFirst({
       where: {
         id: editorProfileId,
@@ -808,10 +809,21 @@ export const productionService = {
         deletedAt: null,
         user: { isActive: true, deletedAt: null },
       },
-      include: { user: true },
+      include: {
+        user: true,
+        compensationProfile: {
+          select: { type: true, isActive: true, fixedMonthlyAmount: true },
+        },
+      },
     });
     if (!profile)
       throw new AppError("ادیتور یافت نشد یا غیرفعال است", 404, "NOT_FOUND");
+
+    const hasMonthlySalary = teamProfileHasMonthlySalary(profile);
+    const assignedAmount = resolveAssignmentAmount(editingCost ?? amount, {
+      fieldLabel: "هزینه ادیت",
+      hasMonthlySalary,
+    });
 
     const deadlineAt = deadline
       ? new Date(deadline)
@@ -871,12 +883,16 @@ export const productionService = {
         },
       });
 
-      await upsertLaborPayable(tx, {
-        projectId,
-        teamProfileId: profile.id,
-        roleLabel: "EDITOR",
-        amount: assignedAmount,
-      });
+      if (hasMonthlySalary) {
+        await clearLaborPayable(tx, { projectId, roleLabel: "EDITOR" });
+      } else {
+        await upsertLaborPayable(tx, {
+          projectId,
+          teamProfileId: profile.id,
+          roleLabel: "EDITOR",
+          amount: assignedAmount,
+        });
+      }
 
       // Move into production editing when already past narration or in revision/review
       if (
@@ -932,7 +948,9 @@ export const productionService = {
           type: "EDITOR_ASSIGNED",
           title: "ارجاع پروژه به ادیتور",
           body: [
-            `${profile.displayName} — ${assignedAmount} AFN`,
+            hasMonthlySalary
+              ? `${profile.displayName} — معاش ماهانه`
+              : `${profile.displayName} — ${assignedAmount} AFN`,
             instructions?.trim() || null,
             narrationAudio
               ? `فایل صوتی نریشن تأییدشده مدیر ضمیمه پروژه شد`
@@ -971,6 +989,7 @@ export const productionService = {
         editorProfileId,
         deadline: deadlineAt.toISOString(),
         instructions,
+        hasMonthlySalary,
         editingCost: assignedAmount,
       },
       req,
@@ -1081,7 +1100,9 @@ export const productionService = {
     let task = await prisma.editingTask.findFirst({
       where: { projectId, status: { in: ACTIVE_EDITING } },
       orderBy: { createdAt: "desc" },
-      include: { project: { select: { id: true, title: true, code: true } } },
+      include: {
+        project: { select: { id: true, title: true, code: true, status: true } },
+      },
     });
 
     if (!task) {
@@ -1264,7 +1285,13 @@ export const productionService = {
       orderBy: { createdAt: "desc" },
       include: {
         project: {
-          select: { id: true, title: true, code: true, portalAccountId: true },
+          select: {
+            id: true,
+            title: true,
+            code: true,
+            portalAccountId: true,
+            status: true,
+          },
         },
         editorUser: { select: { id: true } },
       },
@@ -1292,46 +1319,78 @@ export const productionService = {
         const watermarkedFiles = await tx.projectFile.findMany({
           where: { projectId, kind: "WATERMARKED_FINAL", deletedAt: null },
         });
+        const anyPriorDelivery = watermarkedFiles.some(
+          (file) => asMeta(file.meta).sentToCustomer === true,
+        );
+        let sentCount = 0;
         for (const file of watermarkedFiles) {
+          const meta = asMeta(file.meta);
+          // After the first delivery, extra uploads stay pending until
+          // the manager sends them from محصول نهایی.
+          if (anyPriorDelivery && meta.sentToCustomer !== true) continue;
           await tx.projectFile.update({
             where: { id: file.id },
             data: {
               meta: markSentMeta(markApprovedMeta(file.meta, sentAt), {
                 allowDownload: false,
                 sentAt,
+                sentBy: auth.userId,
               }),
             },
           });
+          sentCount += 1;
         }
 
         const cleanFiles = await tx.projectFile.findMany({
           where: { projectId, kind: "CLEAN_FINAL", deletedAt: null },
         });
         for (const file of cleanFiles) {
+          const meta = asMeta(file.meta);
+          const status = resolveVideoStatus(meta);
+          if (
+            anyPriorDelivery &&
+            meta.sentToCustomer !== true &&
+            ["PENDING_REVIEW", "UPLOADED", "REVISION_REQUESTED", "DRAFT"].includes(
+              status,
+            )
+          ) {
+            continue;
+          }
           await tx.projectFile.update({
             where: { id: file.id },
             data: { meta: markApprovedMeta(file.meta, sentAt) },
           });
         }
 
-        await tx.project.update({
-          where: { id: projectId },
-          data: {
-            status: "WAITING_CLIENT_FINAL_APPROVAL",
-            customerFacingStatus: "WAITING_YOUR_APPROVAL",
-          },
-        });
-        await tx.projectTimelineEvent.create({
-          data: {
-            projectId,
-            type: "FINAL_SENT_TO_CLIENT",
-            title: "ارسال ویدیو برای تأیید مشتری",
-            actorId: auth.userId,
-          },
-        });
+        if (sentCount > 0) {
+          const sendPatch = projectStatusPatchAfterSend(task.project.status);
+          if (sendPatch) {
+            await tx.project.update({
+              where: { id: projectId },
+              data: sendPatch,
+            });
+          }
+          await tx.projectTimelineEvent.create({
+            data: {
+              projectId,
+              type: "FINAL_SENT_TO_CLIENT",
+              title: "ارسال ویدیو برای تأیید مشتری",
+              actorId: auth.userId,
+            },
+          });
+        }
       });
 
-      if (task.project.portalAccountId) {
+      const deliveredThisReview = (await prisma.projectFile.findMany({
+        where: { projectId, kind: "WATERMARKED_FINAL", deletedAt: null },
+        select: { meta: true },
+      })).some(
+        (file) =>
+          asMeta(file.meta).sentToCustomer === true &&
+          asMeta(file.meta).sentAt === sentAt.toISOString(),
+      );
+
+      if (task.project.portalAccountId && deliveredThisReview) {
         await createNotificationOnce({
           ...buildEditingReadyForCustomerNotification({
             projectId,
@@ -1421,7 +1480,7 @@ export const productionService = {
   },
 
   /** Called when customer requests final video revision */
-  async onCustomerRevision(projectId, notes) {
+  async onCustomerRevision(projectId, notes, context = {}) {
     const task = await prisma.editingTask.findFirst({
       where: { projectId },
       orderBy: { createdAt: "desc" },
@@ -1462,7 +1521,7 @@ export const productionService = {
     );
   },
 
-  /** Called when customer approves clean final video (project completed). */
+  /** Called when customer approves and project reaches COMPLETED. */
   async onCustomerApprove(projectId, { completedAt = new Date() } = {}) {
     const task = await prisma.editingTask.findFirst({
       where: { projectId },
@@ -1489,26 +1548,17 @@ export const productionService = {
       });
     }
 
-    const customerName =
-      task.project.crmCustomer?.companyName ||
-      task.project.crmCustomer?.personName ||
-      "مشتری";
-
-    const basePayload = {
-      projectId,
-      projectTitle: task.project.title,
-      projectCode: task.project.code,
-      customerName,
-      at: completedAt,
-    };
-
-    await notifyManagersOnce(buildEditingCompletedNotification(basePayload));
-
+    // Editor notification is also emitted from markProjectCompleted (idempotent).
     if (task.editorUserId) {
+      const customerName = getCustomerPersonName(task.project.crmCustomer);
       await createNotificationOnce({
         ...buildEditingCompletedNotification({
-          ...basePayload,
+          projectId,
+          projectTitle: task.project.title,
+          projectCode: task.project.code,
+          customerName,
           forEditor: true,
+          at: completedAt,
         }),
         userId: task.editorUserId,
         audience: "INTERNAL",
@@ -1575,7 +1625,9 @@ export const productionService = {
             ? f.meta
             : {};
         return (
-          meta.status !== "APPROVED_BY_CUSTOMER" && !meta.approvedByCustomer
+          meta.sentToCustomer !== false &&
+          meta.status !== "APPROVED_BY_CUSTOMER" &&
+          !meta.approvedByCustomer
         );
       });
       if (needsBackfill) {
@@ -1596,26 +1648,33 @@ export const productionService = {
       }
     }
 
-    const uploaderIds = [
-      ...new Set(files.map((f) => f.uploadedBy).filter(Boolean)),
+    const actorIds = [
+      ...new Set(
+        files.flatMap((f) => {
+          const meta = asMeta(f.meta);
+          return [f.uploadedBy, meta.sentBy].filter(Boolean);
+        }),
+      ),
     ];
-    const uploaders = uploaderIds.length
+    const actors = actorIds.length
       ? await prisma.user.findMany({
-          where: { id: { in: uploaderIds } },
+          where: { id: { in: actorIds } },
           select: { id: true, fullName: true },
         })
       : [];
-    const uploaderMap = Object.fromEntries(
-      uploaders.map((u) => [u.id, u.fullName]),
+    const actorMap = Object.fromEntries(
+      actors.map((u) => [u.id, u.fullName]),
     );
 
-    const items = files.map((f) =>
-      serializeFinalVideo(f, {
+    const items = files.map((f) => {
+      const meta = asMeta(f.meta);
+      return serializeFinalVideo(f, {
         projectStatus: project.status,
-        uploaderName: f.uploadedBy ? uploaderMap[f.uploadedBy] || null : null,
+        uploaderName: f.uploadedBy ? actorMap[f.uploadedBy] || null : null,
+        sentByName: meta.sentBy ? actorMap[meta.sentBy] || null : null,
         customerApproved,
-      }),
-    );
+      });
+    });
 
     // Editors never receive storage keys for unrelated clean files beyond their project (already filtered)
     const forRole = auth.roleCode === "EDITOR" ? items : items;
@@ -1647,8 +1706,13 @@ export const productionService = {
         watermarked: forRole.filter((i) => i.videoType === "WATERMARKED")
           .length,
         clean: forRole.filter((i) => i.videoType === "CLEAN").length,
-        sent: forRole.filter((i) => i.sentToCustomer).length,
+        sent: forRole.filter((i) => i.alreadySent || i.sentToCustomer).length,
         pending: forRole.filter((i) => !i.sentToCustomer).length,
+        pendingReview: forRole.filter((i) => i.deliveryState === "PENDING_REVIEW")
+          .length,
+        awaitingDelivery: forRole.filter(
+          (i) => i.deliveryState === "AWAITING_DELIVERY",
+        ).length,
       },
     };
   },
@@ -1693,7 +1757,9 @@ export const productionService = {
     let task = await prisma.editingTask.findFirst({
       where: { projectId, status: { in: ACTIVE_EDITING } },
       orderBy: { createdAt: "desc" },
-      include: { project: { select: { id: true, title: true, code: true } } },
+      include: {
+        project: { select: { id: true, title: true, code: true, status: true } },
+      },
     });
 
     if (!task) {
@@ -1712,7 +1778,7 @@ export const productionService = {
       }
       const project = await prisma.project.findFirst({
         where: { id: projectId, deletedAt: null },
-        select: { id: true, title: true, code: true },
+        select: { id: true, title: true, code: true, status: true },
       });
       if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
       task = await prisma.editingTask.create({
@@ -1725,7 +1791,11 @@ export const productionService = {
           deadline: assignment.deadlineAt,
           instructions: assignment.notes,
         },
-        include: { project: { select: { id: true, title: true, code: true } } },
+        include: {
+          project: {
+            select: { id: true, title: true, code: true, status: true },
+          },
+        },
       });
     } else if (!canAccessAsEditor(task, auth)) {
       throw new AppError("Forbidden", 403, "FORBIDDEN");
@@ -1763,7 +1833,10 @@ export const productionService = {
             buildFinalFileMeta({
               videoType: type,
               status: "PENDING_REVIEW",
-              extras: notes?.trim() ? { editorNotes: notes.trim() } : {},
+              extras: {
+                sentToCustomer: false,
+                ...(notes?.trim() ? { editorNotes: notes.trim() } : {}),
+              },
             }),
             storageMeta,
           ),
@@ -1801,13 +1874,15 @@ export const productionService = {
         },
       });
 
-      await tx.project.update({
-        where: { id: projectId },
-        data: {
-          status: "MANAGER_FINAL_REVIEW",
-          customerFacingStatus: "FINAL_REVIEW",
-        },
-      });
+      if (!shouldPreserveProjectStatus(task.project.status)) {
+        await tx.project.update({
+          where: { id: projectId },
+          data: {
+            status: "MANAGER_FINAL_REVIEW",
+            customerFacingStatus: "FINAL_REVIEW",
+          },
+        });
+      }
 
       await tx.projectTimelineEvent.create({
         data: {
@@ -1872,7 +1947,7 @@ export const productionService = {
 
   /** Manager reviews one immutable final-video submission/version. */
   async reviewFinalVideo(projectId, fileId, body, auth, req) {
-    if (auth.roleCode !== "MANAGER" && auth.roleCode !== "ADMIN") {
+    if (!canReviewFinalVideos(auth.permissions, auth.roleCode)) {
       throw new AppError(
         "فقط مدیر می‌تواند ویدیوی نهایی را بررسی کند",
         403,
@@ -1902,7 +1977,7 @@ export const productionService = {
       },
       include: {
         project: {
-          select: { id: true, title: true, code: true },
+          select: { id: true, title: true, code: true, status: true },
         },
       },
     });
@@ -1910,6 +1985,7 @@ export const productionService = {
 
     const currentStatus = resolveVideoStatus(file.meta);
     if (
+      isAlreadyDelivered(file, file.project.status) ||
       [
         "SENT_TO_CUSTOMER",
         "VIEWED_BY_CUSTOMER",
@@ -1983,19 +2059,21 @@ export const productionService = {
         });
       }
 
-      await tx.project.update({
-        where: { id: projectId },
-        data:
-          decision === "REQUEST_REVISION"
-            ? {
-                status: "FINAL_REVISION",
-                customerFacingStatus: "FINAL_REVIEW",
-              }
-            : {
-                status: "MANAGER_FINAL_REVIEW",
-                customerFacingStatus: "FINAL_REVIEW",
-              },
-      });
+      if (!shouldPreserveProjectStatus(file.project.status)) {
+        await tx.project.update({
+          where: { id: projectId },
+          data:
+            decision === "REQUEST_REVISION"
+              ? {
+                  status: "FINAL_REVISION",
+                  customerFacingStatus: "FINAL_REVIEW",
+                }
+              : {
+                  status: "MANAGER_FINAL_REVIEW",
+                  customerFacingStatus: "FINAL_REVIEW",
+                },
+        });
+      }
 
       await tx.approval.create({
         data: {
@@ -2081,7 +2159,7 @@ export const productionService = {
 
   /** Manager selects final videos and sends them to the customer portal. */
   async sendFinalVideos(projectId, body, auth, req) {
-    if (auth.roleCode !== "MANAGER" && auth.roleCode !== "ADMIN") {
+    if (!canSendFinalVideos(auth.permissions, auth.roleCode)) {
       throw new AppError(
         "فقط مدیر می‌تواند ویدیو را برای مشتری ارسال کند",
         403,
@@ -2128,6 +2206,16 @@ export const productionService = {
     if (files.length !== fileIds.length) {
       throw new AppError("برخی فایل‌ها یافت نشدند", 404, "NOT_FOUND");
     }
+    const alreadySent = files.filter((file) =>
+      isAlreadyDelivered(file, project.status),
+    );
+    if (alreadySent.length > 0) {
+      throw new AppError(
+        "برخی ویدیوها قبلاً برای مشتری ارسال شده‌اند و دوباره ارسال نمی‌شوند",
+        409,
+        "FINAL_ALREADY_SENT",
+      );
+    }
     const unapproved = files.filter(
       (file) => resolveVideoStatus(file.meta) !== "APPROVED",
     );
@@ -2138,6 +2226,8 @@ export const productionService = {
         "FINAL_REVIEW_REQUIRED",
       );
     }
+
+    const sendPatch = projectStatusPatchAfterSend(project.status);
 
     // Clean download is gated by payment settlement in deliveryAccess.
     // allowDownload may unlock early before balance is settled.
@@ -2150,6 +2240,7 @@ export const productionService = {
               allowDownload:
                 file.kind === "CLEAN_FINAL" ? allowDownload : allowDownload,
               sentAt,
+              sentBy: auth.userId,
             }),
           },
         });
@@ -2181,13 +2272,12 @@ export const productionService = {
         // Keep task in review until customer approves; do not mark COMPLETED here
       }
 
-      await tx.project.update({
-        where: { id: projectId },
-        data: {
-          status: "WAITING_CLIENT_FINAL_APPROVAL",
-          customerFacingStatus: "WAITING_YOUR_APPROVAL",
-        },
-      });
+      if (sendPatch) {
+        await tx.project.update({
+          where: { id: projectId },
+          data: sendPatch,
+        });
+      }
 
       await tx.projectTimelineEvent.create({
         data: {

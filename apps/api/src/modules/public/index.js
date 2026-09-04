@@ -39,31 +39,6 @@ router.get('/services', cachePublic(60), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-/** Active narrator profiles customers may propose in the portal brief. */
-const ACTIVE_NARRATOR_WHERE = {
-  kind: 'NARRATOR',
-  status: 'ACTIVE',
-  deletedAt: null,
-  user: { isActive: true, deletedAt: null },
-};
-
-router.get('/narrators', cachePublic(15), async (req, res, next) => {
-  try {
-    const rows = await prisma.teamProfile.findMany({
-      where: ACTIVE_NARRATOR_WHERE,
-      orderBy: { displayName: 'asc' },
-      select: {
-        id: true,
-        displayName: true,
-        languages: true,
-        gender: true,
-        tone: true,
-      },
-    });
-    ok(res, rows);
-  } catch (e) { next(e); }
-});
-
 router.get('/customers', cachePublic(30), async (req, res, next) => {
   try {
     const { customersService } = await import('../customers/service.js');

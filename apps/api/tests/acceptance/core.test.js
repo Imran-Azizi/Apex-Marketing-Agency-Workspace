@@ -6,7 +6,7 @@ import { computeFinanceFields, mapProjectStatusToCustomer } from '../../src/serv
 test('AC helper: WhatsApp normalize unique identity', () => {
   assert.equal(normalizeWhatsapp('0700123456'), '93700123456');
   assert.equal(normalizeWhatsapp('+93 700 123 456'), '93700123456');
-  assert.equal(normalizeWhatsapp('700123456'), '93700123456');
+  assert.equal(normalizeWhatsapp('+12025550123'), '12025550123');
 });
 
 test('AC-19 helper: profit and balance formula', () => {

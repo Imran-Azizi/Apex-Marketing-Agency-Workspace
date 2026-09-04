@@ -82,8 +82,8 @@ const PasswordInput = React.forwardRef<HTMLInputElement, PasswordInputProps>(
           aria-label={visible ? hideLabel : showLabel}
           title={visible ? hideLabel : showLabel}
           className={cn(
-            "absolute inset-y-0 end-0 z-10 inline-flex w-10 items-center justify-center rounded-e-md text-muted-foreground transition-colors",
-            "hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            "absolute inset-y-0 end-0 z-10 inline-flex w-10 items-center justify-center rounded-e-xl text-muted-foreground transition-colors duration-200",
+            "hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0",
             "disabled:pointer-events-none disabled:opacity-50",
           )}
         >

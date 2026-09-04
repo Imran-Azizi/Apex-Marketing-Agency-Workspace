@@ -5,6 +5,7 @@ export const EMPLOYEE_CREATE_ROLES = [
   "EDITOR",
   "NARRATOR",
   "FINANCE",
+  "PROJECT_MANAGER",
 ] as const;
 
 export type EmployeeCreateRole = (typeof EMPLOYEE_CREATE_ROLES)[number];
@@ -16,6 +17,7 @@ export const STAFF_ROLES = [
   "EDITOR",
   "NARRATOR",
   "FINANCE",
+  "PROJECT_MANAGER",
 ] as const;
 
 export type StaffRole = (typeof STAFF_ROLES)[number];
@@ -27,6 +29,7 @@ export const ROLE_LABELS_FA: Record<StaffRole, string> = {
   EDITOR: "ادیتور",
   NARRATOR: "نریتور",
   FINANCE: "مالی",
+  PROJECT_MANAGER: "مدیر پروژه",
 };
 
 export const ROLE_BADGE_VARIANTS: Record<
@@ -39,6 +42,7 @@ export const ROLE_BADGE_VARIANTS: Record<
   EDITOR: "warning",
   NARRATOR: "secondary",
   FINANCE: "outline",
+  PROJECT_MANAGER: "secondary",
 };
 
 export interface Employee {

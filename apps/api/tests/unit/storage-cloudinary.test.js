@@ -94,6 +94,16 @@ test("resolveMediaPlacement routes by purpose", () => {
   );
   assert.equal(finalWm.folderPath, "projects/proj123/final/watermarked");
 
+  const poster = resolveMediaPlacement(
+    {
+      purpose: UPLOAD_PURPOSE.PRODUCTION_POSTER,
+      projectId: "proj123",
+    },
+    { contentType: "image/jpeg", filename: "poster.jpg" },
+  );
+  assert.equal(poster.folderPath, "projects/proj123/posters");
+  assert.equal(poster.category, MEDIA_ROOTS.IMAGES);
+
   const profile = resolveMediaPlacement(
     {
       purpose: UPLOAD_PURPOSE.EMPLOYEE_PROFILE,

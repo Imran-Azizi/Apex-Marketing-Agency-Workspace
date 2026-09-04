@@ -19,6 +19,7 @@ router.get("/", requirePermission("contact.view"), async (req, res, next) => {
         page: req.query.page,
         pageSize: req.query.pageSize,
         sort: req.query.sort,
+        auth: req.auth,
       }),
     );
   } catch (e) {
@@ -31,7 +32,7 @@ router.get(
   requirePermission("contact.view"),
   async (req, res, next) => {
     try {
-      ok(res, await contactService.unreadCount());
+      ok(res, await contactService.unreadCount(req.auth));
     } catch (e) {
       next(e);
     }
@@ -40,7 +41,7 @@ router.get(
 
 router.get("/:id", requirePermission("contact.view"), async (req, res, next) => {
   try {
-    ok(res, await contactService.getById(req.params.id));
+    ok(res, await contactService.getById(req.params.id, req.auth));
   } catch (e) {
     next(e);
   }

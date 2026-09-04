@@ -6,7 +6,6 @@ export type AuthAudience =
   | "narrator"
   | "sales"
   | "portal"
-  | "portal-recover"
   | "portal-register";
 
 export const INTERNAL_AUTH_AUDIENCES = [
@@ -75,17 +74,12 @@ export const AUTH_AUDIENCE_COPY: Record<AuthAudience, AuthAudienceCopy> = {
     title: "ورود به پورتال",
     description: "با شماره واتساپ وارد فضای پروژه‌ها و سفارش‌های خود شوید.",
   },
-  "portal-recover": {
-    documentTitle: "بازیابی رمز عبور — اپیکس",
-    eyebrow: "پورتال مشتری",
-    title: "بازیابی رمز عبور",
-    description: "شماره واتساپ حساب خود را وارد کنید تا کد بازیابی ارسال شود.",
-  },
   "portal-register": {
     documentTitle: "ثبت‌نام پورتال — اپیکس",
-    eyebrow: "پورتال مشتری",
+    eyebrow: "APEX SMART MARKETING",
     title: "ایجاد حساب پورتال",
-    description: "دعوت شما تأیید شد — حساب پورتال را با یک رمز امن کامل کنید.",
+    description:
+      "دعوت شما تأیید شد. حساب پورتال را با شماره واتساپ و یک رمز امن تکمیل کنید.",
   },
 };
 

@@ -29,6 +29,18 @@ router.get("/", requirePermission("projects.view"), async (req, res, next) => {
 });
 
 router.get(
+  "/filter-options",
+  requirePermission("projects.view"),
+  async (req, res, next) => {
+    try {
+      ok(res, await projectService.filterOptions(req.auth));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
   "/:id",
   requirePermission("projects.view"),
   async (req, res, next) => {

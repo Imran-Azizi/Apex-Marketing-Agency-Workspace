@@ -134,6 +134,8 @@ export default function PortalDashboardPage() {
       <DashboardHeader
         customerName={customerName}
         canCreateProject={data.canCreateProject}
+        pendingBriefsCount={data.pendingBriefsCount}
+        pipelineStage={data.pipelineStage}
       />
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
@@ -256,6 +258,8 @@ export default function PortalDashboardPage() {
                 action={
                   <CreateProjectButton
                     canCreate={data.canCreateProject}
+                    pendingBriefsCount={data.pendingBriefsCount}
+                    pipelineStage={data.pipelineStage}
                     size="lg"
                     className="h-11 px-6 shadow-md shadow-brand/20"
                   />

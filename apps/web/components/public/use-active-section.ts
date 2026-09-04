@@ -13,7 +13,18 @@ export const PUBLIC_SECTION_IDS = [
 
 export type PublicSectionId = (typeof PUBLIC_SECTION_IDS)[number];
 
-const HEADER_OFFSET_PX = 72;
+export const PUBLIC_NAV_ITEMS: Array<{ id: PublicSectionId; label: string }> = [
+  { id: "home", label: "خانه" },
+  { id: "services", label: "خدمات" },
+  { id: "portfolio", label: "نمونه‌کارها" },
+  { id: "customers", label: "مشتریان ما" },
+  { id: "contact", label: "تماس با ما" },
+];
+
+/** Matches the public header bar (`h-[4.25rem]`). */
+export const PUBLIC_HEADER_HEIGHT_CLASS = "h-[4.25rem]";
+export const HEADER_OFFSET_PX = 72;
+export const NO_PUBLIC_SECTIONS: readonly string[] = [];
 
 export function scrollToSection(id: PublicSectionId | string) {
   const el = document.getElementById(id);
@@ -27,47 +38,91 @@ export function scrollToSection(id: PublicSectionId | string) {
   }
 }
 
-/** Tracks which landing section is in view for active nav state. */
+function readActiveSection(ids: readonly string[]): string {
+  const fallback = ids[0] || "home";
+  const spyLine = HEADER_OFFSET_PX + 8;
+  let current = fallback;
+
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.getBoundingClientRect().top <= spyLine) {
+      current = id;
+    }
+  }
+
+  const doc = document.documentElement;
+  const atBottom =
+    window.innerHeight + window.scrollY >= doc.scrollHeight - 4;
+  if (atBottom) {
+    for (let i = ids.length - 1; i >= 0; i -= 1) {
+      if (document.getElementById(ids[i])) return ids[i];
+    }
+  }
+
+  return current;
+}
+
+/** Tracks which landing section sits under the fixed navbar. */
 export function useActiveSection(ids: readonly string[] = PUBLIC_SECTION_IDS) {
   const [active, setActive] = useState(ids[0] || "home");
+  const idsKey = ids.join(",");
 
   useEffect(() => {
     if (!ids.length) return;
 
-    const elements = ids
-      .map((id) => document.getElementById(id))
-      .filter((el): el is HTMLElement => !!el);
+    let frame = 0;
+    const compute = () => {
+      const next = readActiveSection(ids);
+      setActive((prev) => (prev === next ? prev : next));
+    };
 
-    if (!elements.length) return;
+    const onScrollOrResize = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        compute();
+      });
+    };
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-        if (visible[0]?.target?.id) {
-          setActive(visible[0].target.id);
-        }
-      },
-      {
-        rootMargin: "-20% 0px -55% 0px",
-        threshold: [0.15, 0.35, 0.55],
-      },
+    compute();
+    window.addEventListener("scroll", onScrollOrResize, { passive: true });
+    document.addEventListener("scroll", onScrollOrResize, {
+      passive: true,
+      capture: true,
+    });
+    window.addEventListener("resize", onScrollOrResize);
+
+    const main = document.querySelector("main");
+    main?.addEventListener("scroll", onScrollOrResize, { passive: true });
+
+    const observer = new MutationObserver(onScrollOrResize);
+    observer.observe(main || document.body, { childList: true, subtree: true });
+
+    // Home sections load via next/dynamic — retry until they exist.
+    const retries = [100, 400, 1000, 2500].map((ms) =>
+      window.setTimeout(compute, ms),
     );
 
-    elements.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [ids]);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize);
+      document.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+      main?.removeEventListener("scroll", onScrollOrResize);
+      observer.disconnect();
+      retries.forEach((timer) => window.clearTimeout(timer));
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [ids, idsKey]);
 
   useEffect(() => {
     if (!ids.length) return;
     const hash = window.location.hash.replace("#", "");
     if (hash && ids.includes(hash)) {
-      // Defer so section layout is ready after navigation/redirect
       const t = window.setTimeout(() => scrollToSection(hash), 50);
       return () => window.clearTimeout(t);
     }
-  }, [ids]);
+  }, [ids, idsKey]);
 
-  return active;
+  return { active, setActive };
 }

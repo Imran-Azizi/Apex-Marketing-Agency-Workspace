@@ -6,6 +6,7 @@ import { extensionOf, resolveCloudinaryResourceType } from "./resource-type.js";
 export const UPLOAD_PURPOSE = Object.freeze({
   PORTAL_ASSET: "portal-asset",
   PRODUCTION_FINAL: "production-final",
+  PRODUCTION_POSTER: "production-poster",
   NARRATION_AUDIO: "narration-audio",
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
@@ -14,6 +15,7 @@ export const UPLOAD_PURPOSE = Object.freeze({
   CUSTOMER_IMAGE: "customer-image",
   PORTFOLIO_VIDEO: "portfolio-video",
   PORTFOLIO_THUMBNAIL: "portfolio-thumbnail",
+  CHAT_ATTACHMENT: "chat-attachment",
   GENERIC: "generic",
 });
 
@@ -151,6 +153,7 @@ export function parseUploadContext(body = {}, auth = {}) {
     purpose,
     projectId: sanitizePathSegment(body.projectId),
     userId: sanitizePathSegment(body.userId) || sanitizePathSegment(auth.userId),
+    conversationId: sanitizePathSegment(body.conversationId),
     assetKind: String(body.assetKind || body.kind || "").trim() || undefined,
     videoType:
       String(body.videoType || "").toUpperCase() === "CLEAN"
@@ -265,9 +268,27 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
     };
   }
 
+  if (purpose === UPLOAD_PURPOSE.PRODUCTION_POSTER && context.projectId) {
+    return {
+      folderPath: `${MEDIA_ROOTS.PROJECTS}/${context.projectId}/posters`,
+      category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
   if (purpose === UPLOAD_PURPOSE.PORTAL_ASSET) {
     return {
       folderPath: category,
+      category,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.CHAT_ATTACHMENT) {
+    const conv = context.conversationId || "general";
+    const uid = context.userId || "user";
+    return {
+      folderPath: `${MEDIA_ROOTS.UPLOADS}/chat/${conv}/${uid}`,
       category,
       purpose,
     };
@@ -337,6 +358,7 @@ export function getMediaCategory(storageKey, opts = {}) {
       if (key.includes("/audio/")) return MEDIA_ROOTS.AUDIO;
       if (key.includes("/final/clean")) return MEDIA_ROOTS.VIDEOS;
       if (key.includes("/final/watermarked")) return MEDIA_ROOTS.VIDEOS;
+      if (key.includes("/posters")) return MEDIA_ROOTS.IMAGES;
       return MEDIA_ROOTS.PROJECTS;
     }
     if (first === MEDIA_ROOTS.USERS) return MEDIA_ROOTS.IMAGES;
@@ -379,6 +401,7 @@ export function getMediaFolderLabel(storageKey, opts = {}) {
     if (key.includes("/audio/")) return "صوت پروژه";
     if (key.includes("/final/clean")) return "ویدیوی نهایی (پاک)";
     if (key.includes("/final/watermarked")) return "ویدیوی نهایی (واترمارک)";
+    if (key.includes("/posters")) return "پوستر پروژه";
     return "دارایی‌های پروژه";
   }
 
@@ -402,6 +425,7 @@ function formatFolderPathLabel(folderPath) {
     if (parts.includes("audio")) return "صوت پروژه";
     if (parts.includes("clean")) return "ویدیوی نهایی (پاک)";
     if (parts.includes("watermarked")) return "ویدیوی نهایی (واترمارک)";
+    if (parts.includes("posters")) return "پوستر پروژه";
     return "دارایی‌های پروژه";
   }
   if (parts[0] === MEDIA_ROOTS.USERS) return "پروفایل کاربر";

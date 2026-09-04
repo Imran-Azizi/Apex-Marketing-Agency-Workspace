@@ -11,6 +11,34 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function extractChatText(data) {
+  const message = data?.choices?.[0]?.message || {};
+  const content = message.content;
+  if (typeof content === 'string' && content.trim()) return content.trim();
+  if (Array.isArray(content)) {
+    const joined = content
+      .map((part) => (typeof part === 'string' ? part : part?.text || ''))
+      .join('\n')
+      .trim();
+    if (joined) return joined;
+  }
+  if (typeof message.reasoning === 'string' && message.reasoning.trim()) {
+    return message.reasoning.trim();
+  }
+  return '';
+}
+
+async function readJsonResponse(res) {
+  const raw = await res.text();
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return { data: null, raw };
+  try {
+    return { data: JSON.parse(trimmed), raw };
+  } catch {
+    return { data: null, raw };
+  }
+}
+
 export const openRouterService = {
   id: 'openrouter',
 
@@ -75,25 +103,33 @@ export const openRouterService = {
           ],
           temperature,
           max_tokens: maxTokens,
-          response_format: responseFormat,
+          ...(responseFormat ? { response_format: responseFormat } : {}),
         }),
         signal: controller.signal,
       });
 
-      const errText = !res.ok ? await res.text() : null;
+      const { data, raw } = await readJsonResponse(res);
       if (!res.ok) {
+        console.warn('[openrouter]', res.status, String(raw).slice(0, 220));
         const error = createAiError(`OpenRouter HTTP ${res.status}`, {
           code: 'openrouter_http',
           status: res.status,
           provider: 'openrouter',
         });
-        error.body = errText;
+        error.body = raw;
         Object.assign(error, formatAiError(error, 'openrouter'));
         throw error;
       }
 
-      const data = await res.json();
-      const text = data.choices?.[0]?.message?.content || '';
+      if (!data) {
+        throw createAiError('OpenRouter returned non-JSON', {
+          code: 'invalid_response',
+          status: 502,
+          provider: 'openrouter',
+        });
+      }
+
+      const text = extractChatText(data);
       if (!text) {
         throw createAiError('OpenRouter returned empty content', {
           code: 'invalid_response',
@@ -127,7 +163,9 @@ export const openRouterService = {
         Object.assign(timeoutErr, formatAiError(timeoutErr, 'openrouter'));
         throw timeoutErr;
       }
-      if (err?.provider === 'openrouter' || err?.code) throw err;
+      // Only rethrow errors we already normalized — undici codes like
+      // UND_ERR_SOCKET must be wrapped so retries can run.
+      if (err?.provider === 'openrouter' && err?.status) throw err;
       const wrapped = createAiError(err.message || 'OpenRouter unavailable', {
         code: 'server_error',
         status: 503,
@@ -143,14 +181,15 @@ export const openRouterService = {
 
   async completeChatWithRetry(args) {
     const cfg = getModelConfig();
+    const maxRetries = Math.max(1, Number(args?.retries ?? cfg.maxRetries) || cfg.maxRetries);
     let lastError;
-    for (let attempt = 1; attempt <= cfg.maxRetries; attempt += 1) {
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
       try {
         return await this.completeChat(args);
       } catch (err) {
         lastError = err;
         const info = formatAiError(err, 'openrouter');
-        if (!info.retryable || attempt >= cfg.maxRetries) {
+        if (!info.retryable || attempt >= maxRetries) {
           throw Object.assign(err, info);
         }
         await sleep(cfg.retryDelayMs * attempt);
@@ -278,7 +317,7 @@ export const openRouterService = {
         Object.assign(timeoutErr, formatAiError(timeoutErr, 'openrouter'));
         throw timeoutErr;
       }
-      if (err?.provider === 'openrouter' || err?.code) throw err;
+      if (err?.provider === 'openrouter' && err?.status) throw err;
       const wrapped = createAiError(err.message || 'OpenRouter image unavailable', {
         code: 'server_error',
         status: 503,

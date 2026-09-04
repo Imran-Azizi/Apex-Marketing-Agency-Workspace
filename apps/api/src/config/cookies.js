@@ -18,6 +18,7 @@ export const AUTH_PANELS = Object.freeze([
   'editor',
   'sales',
   'narrator',
+  'project_manager',
   'portal',
 ]);
 
@@ -38,6 +39,8 @@ export function roleToPanel(role) {
       return 'sales';
     case 'NARRATOR':
       return 'narrator';
+    case 'PROJECT_MANAGER':
+      return 'project_manager';
     case 'CUSTOMER':
       return 'portal';
     default:

@@ -120,6 +120,7 @@ type NarratorProfile = {
   realName?: string | null;
   user: { id: string; fullName: string; email: string; isActive: boolean };
   rates?: Array<{ amount: string | number; isActive?: boolean }>;
+  hasMonthlySalary?: boolean;
 };
 
 const STATUS_LABEL: Record<NarrationStatus, string> = {
@@ -254,16 +255,25 @@ export function ProjectNarrationPanel({
 
   const assignMut = useMutation({
     mutationFn: () => {
-      const costError = validateCurrencyInput(narrationCost, "هزینه نریشن");
-      if (costError) {
-        setNarrationCostError(costError);
-        throw new Error(costError);
-      }
-      return apiPost(`/narration/projects/${projectId}/assign`, {
+      const selected = (narratorsQ.data || []).find((n) => n.id === narratorId);
+      const hasMonthlySalary = Boolean(selected?.hasMonthlySalary);
+      const payload: {
+        narratorProfileId: string;
+        deadline?: string;
+        narrationCost?: string;
+      } = {
         narratorProfileId: narratorId,
         deadline: deadline || undefined,
-        narrationCost: narrationCost.replace(/,/g, "").trim(),
-      });
+      };
+      if (!hasMonthlySalary) {
+        const costError = validateCurrencyInput(narrationCost, "هزینه نریشن");
+        if (costError) {
+          setNarrationCostError(costError);
+          throw new Error(costError);
+        }
+        payload.narrationCost = narrationCost.replace(/,/g, "").trim();
+      }
+      return apiPost(`/narration/projects/${projectId}/assign`, payload);
     },
     onSuccess: () => {
       toast.success("نریشن به نریتور ارسال شد");
@@ -347,6 +357,10 @@ export function ProjectNarrationPanel({
 
   const task = taskQ.data;
   const sentToNarrator = !!task?.narratorUser;
+  const selectedNarrator = (narratorsQ.data || []).find(
+    (n) => n.id === narratorId,
+  );
+  const narratorHasMonthlySalary = Boolean(selectedNarrator?.hasMonthlySalary);
   const script = useMemo(
     () =>
       scriptText(
@@ -721,8 +735,9 @@ export function ProjectNarrationPanel({
           <DialogHeader>
             <DialogTitle>ارسال نریشن به نریتور</DialogTitle>
             <DialogDescription className="leading-6">
-              نریتور را انتخاب کنید و در صورت نیاز مهلت ارسال را مشخص کنید. تا
-              زمان ثبت، نریتور اعلان یا دسترسی دریافت نمی‌کند.
+              {narratorHasMonthlySalary
+                ? "نریتور را انتخاب کنید و در صورت نیاز مهلت ارسال را مشخص کنید. این نریتور معاش ماهانه دارد و هزینه نریشن جداگانه ثبت نمی‌شود."
+                : "نریتور را انتخاب کنید و در صورت نیاز مهلت ارسال را مشخص کنید. تا زمان ثبت، نریتور اعلان یا دسترسی دریافت نمی‌کند."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -735,10 +750,18 @@ export function ProjectNarrationPanel({
                   const profile = (narratorsQ.data || []).find(
                     (n) => n.id === value,
                   );
+                  if (profile?.hasMonthlySalary) {
+                    setNarrationCost("");
+                    setNarrationCostError(undefined);
+                    return;
+                  }
                   const rate = profile?.rates?.[0]?.amount;
                   if (rate != null && rate !== "") {
                     setNarrationCost(String(rate));
+                  } else {
+                    setNarrationCost("");
                   }
+                  setNarrationCostError(undefined);
                 }}
               >
                 <SelectTrigger>
@@ -754,22 +777,24 @@ export function ProjectNarrationPanel({
                 </SelectContent>
               </Select>
             </div>
-            <CurrencyField
-              id="narration-cost"
-              label="هزینه نریشن"
-              value={narrationCost}
-              onChange={(v) => {
-                setNarrationCost(v);
-                if (narrationCostError) {
-                  setNarrationCostError(
-                    validateCurrencyInput(v, "هزینه نریشن"),
-                  );
-                }
-              }}
-              error={narrationCostError}
-              required
-              hint="مبلغ پرداختی به نریتور برای این پروژه"
-            />
+            {!narratorHasMonthlySalary ? (
+              <CurrencyField
+                id="narration-cost"
+                label="هزینه نریشن"
+                value={narrationCost}
+                onChange={(v) => {
+                  setNarrationCost(v);
+                  if (narrationCostError) {
+                    setNarrationCostError(
+                      validateCurrencyInput(v, "هزینه نریشن"),
+                    );
+                  }
+                }}
+                error={narrationCostError}
+                required
+                hint="مبلغ پرداختی به نریتور برای این پروژه"
+              />
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="assign-deadline">مهلت (اختیاری)</Label>
               <Input
@@ -787,7 +812,9 @@ export function ProjectNarrationPanel({
             <Button
               variant="brand"
               disabled={
-                !narratorId || !narrationCost.trim() || assignMut.isPending
+                !narratorId ||
+                (!narratorHasMonthlySalary && !narrationCost.trim()) ||
+                assignMut.isPending
               }
               onClick={() => assignMut.mutate()}
             >

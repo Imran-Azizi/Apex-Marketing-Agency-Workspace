@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
-import { useHasPermission } from "@/lib/permissions";
+import { useHasPermission, useMeQuery } from "@/lib/permissions";
+import { contactMessagesPath } from "@/lib/rbac";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { MessageIcon, UnreadMessageBadge } from "@/components/contact/unread-message-badge";
 
 export function MessageInboxButton({ className }: { className?: string }) {
   const canView = useHasPermission("contact.view");
+  const { data: me } = useMeQuery();
 
   const query = useQuery({
     queryKey: ["contact-unread-count"],
@@ -23,6 +25,7 @@ export function MessageInboxButton({ className }: { className?: string }) {
   if (!canView) return null;
 
   const unreadCount = query.data?.unreadCount ?? 0;
+  const href = contactMessagesPath(me?.role);
 
   return (
     <Button
@@ -32,7 +35,7 @@ export function MessageInboxButton({ className }: { className?: string }) {
       asChild
     >
       <Link
-        href="/manager/messages"
+        href={href}
         aria-label={
           unreadCount > 0
             ? `پیام‌های تماس، ${unreadCount} خوانده‌نشده`

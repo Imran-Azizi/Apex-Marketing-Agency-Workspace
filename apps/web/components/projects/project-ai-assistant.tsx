@@ -56,6 +56,7 @@ import {
   NarrationFinalView,
   ScenarioFinalView,
   StoryboardFinalView,
+  resolveStoryboardCollage,
 } from "@/components/projects/ai-content-views";
 import {
   ContentEditForm,
@@ -191,7 +192,7 @@ function friendlyError(raw?: string | null): string | null {
   if (/model.?not.?found|HTTP 404|NOT_FOUND|در دسترس نیست/i.test(text)) {
     return "مدل درخواستی در دسترس نیست. مدل پیش‌فرض یا پشتیبان را بررسی کنید.";
   }
-  if (/unavailable|ECONNREFUSED|در دسترس نیست|ارتباط با/i.test(text)) {
+  if (/unavailable|ECONNREFUSED|ECONNRESET|ERR_CONNECTION_RESET|NETWORK_ERROR|در دسترس نیست|ارتباط با|قطع شد/i.test(text)) {
     return "سرویس AI موقتاً در دسترس نیست. دوباره تلاش کنید.";
   }
   if (text.includes("{") || text.length > 180) {
@@ -1484,6 +1485,9 @@ export function ProjectAiAssistant({
               onNarrationChange={setEditNarrationForm}
               scenes={editStoryboardScenes}
               onScenesChange={setEditStoryboardScenes}
+              collageImageUrl={
+                resolveStoryboardCollage(editOriginalStoryboard).src
+              }
               disabled={saveMut.isPending || aiEditMut.isPending}
             />
           </div>

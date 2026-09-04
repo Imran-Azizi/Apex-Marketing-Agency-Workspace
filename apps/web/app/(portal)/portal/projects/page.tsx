@@ -95,7 +95,11 @@ export default function PortalProjectsPage() {
         title="پروژه‌ها"
         subtitle="مدیریت و پیگیری تمام پروژه‌های شما"
         actions={
-          <CreateProjectButton canCreate={data?.canCreateProject ?? false} />
+          <CreateProjectButton
+            canCreate={data?.canCreateProject ?? false}
+            pendingBriefsCount={data?.pendingBriefsCount ?? 0}
+            pipelineStage={data?.pipelineStage}
+          />
         }
       />
 
@@ -247,7 +251,11 @@ export default function PortalProjectsPage() {
                 پاک کردن فیلترها
               </Button>
             ) : (
-              <CreateProjectButton canCreate={data.canCreateProject} />
+              <CreateProjectButton
+                canCreate={data.canCreateProject}
+                pendingBriefsCount={data.pendingBriefsCount}
+                pipelineStage={data.pipelineStage}
+              />
             )
           }
         />

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { toEnglishDigits } from "@/lib/utils";
+import { isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE } from "@/lib/phone";
 
 export const CONTACT_SUBJECTS = [
   { value: "CONSULTATION", label: "مشاوره پروژه" },
@@ -33,6 +33,19 @@ export type PublicContactInfo = {
   subjects: Array<{ value: string; label: string }>;
 };
 
+/** Hours copy already shown on the public contact panel. */
+export const CONTACT_HOURS_TEXT =
+  "ساعات پاسخگویی: همه‌روزه از ۹ صبح تا ۶ عصر";
+
+export function configuredContactChannels(
+  info: PublicContactInfo | undefined,
+): ContactChannel[] {
+  if (!info) return [];
+  return [info.whatsapp, info.phone, info.email].filter(
+    (channel) => Boolean(channel.value?.trim()) && Boolean(channel.href?.trim()),
+  );
+}
+
 export type ContactFormValues = {
   name: string;
   email: string;
@@ -56,6 +69,12 @@ export type ContactMessage = {
   readAt: string | null;
   createdAt: string;
   updatedAt: string;
+  crmCustomerId?: string | null;
+  crmCustomer?: {
+    id: string;
+    customerCode: string | null;
+    displayName: string | null;
+  } | null;
 };
 
 export type ContactMessageListPayload = {
@@ -89,10 +108,7 @@ export const contactFormSchema = z.object({
     .string()
     .trim()
     .min(1, "شماره تماس الزامی است")
-    .refine((value) => {
-      const digits = toEnglishDigits(value).replace(/\D/g, "");
-      return digits.length >= 8 && digits.length <= 15;
-    }, "شماره تماس معتبر وارد کنید"),
+    .refine(isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE),
   company: z.string().trim().max(120, "نام شرکت بیش از حد طولانی است").optional().or(z.literal("")),
   subject: z.enum(
     ["CONSULTATION", "QUOTE", "COLLABORATION", "SUPPORT", "OTHER"],

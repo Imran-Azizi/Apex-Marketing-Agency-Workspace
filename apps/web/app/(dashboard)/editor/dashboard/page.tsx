@@ -202,10 +202,16 @@ export default function EditorDashboardPage() {
                       <p className="truncate font-medium">{task.title}</p>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <Badge
-                          variant={editingStatusVariant(task.status)}
+                          variant={
+                            task.projectStatus === "COMPLETED"
+                              ? "success"
+                              : editingStatusVariant(task.status)
+                          }
                           className="font-normal"
                         >
-                          {EDITING_STATUS_LABEL[task.status] || task.status}
+                          {task.projectStatus === "COMPLETED"
+                            ? "تکمیل‌شده"
+                            : EDITING_STATUS_LABEL[task.status] || task.status}
                         </Badge>
                         {task.assignedAt && (
                           <span className="inline-flex items-center gap-1">

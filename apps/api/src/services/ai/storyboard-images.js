@@ -1,26 +1,27 @@
 /**
  * Storyboard still-image generation helpers.
- * Attaches reference images to each scene without breaking text storyboard shape.
+ * Generates a sharp still per scene, then composites ONE labeled storyboard sheet.
  */
 
 import { prisma } from '../../db/prisma.js';
 import { env } from '../../config/env.js';
 import { storage } from '../storage.js';
 import { aiProvider } from './ai.service.js';
-import { openRouterService } from './openrouter.service.js';
 import { normalizeStoryboardOutput } from './validate.js';
 import {
   STORYBOARD_IMAGE_SIZE,
   buildSceneImagePrompt,
+  collageGrid,
   extractProjectBrandContext,
   extractScenarioContext,
   extractSceneNarrationHint,
-  resolveShotType,
   sceneImageSeed,
   validateImagePrompt,
 } from './storyboard-image-prompt.js';
+import { composeStoryboardSheet, storyboardSheetLayout } from './storyboard-sheet.js';
 
-export { buildSceneImagePrompt } from './storyboard-image-prompt.js';
+export { buildSceneImagePrompt, collageGrid } from './storyboard-image-prompt.js';
+export { storyboardSheetLayout } from './storyboard-sheet.js';
 
 async function loadImageGenerationContext(projectId, { scenario, narration } = {}) {
   if (!projectId) {
@@ -55,35 +56,30 @@ async function loadImageGenerationContext(projectId, { scenario, narration } = {
   };
 }
 
-async function persistGeneratedImage(image, { projectId, sceneNumber }) {
-  let buffer = null;
-  let contentType = image?.contentType || 'image/jpeg';
-
+async function imageToBuffer(image) {
   if (image?.b64) {
-    buffer = Buffer.from(image.b64, 'base64');
-  } else if (image?.url) {
-    try {
-      const res = await fetch(image.url, { redirect: 'follow' });
-      const ct = res.headers.get('content-type') || '';
-      if (res.ok && ct.startsWith('image/')) {
-        buffer = Buffer.from(await res.arrayBuffer());
-        contentType = ct;
-      }
-    } catch {
-      buffer = null;
-    }
+    const buffer = Buffer.from(image.b64, 'base64');
+    return buffer.length >= 8000 ? buffer : null;
   }
-
-  if (!buffer || buffer.length < 8000) {
-    return { url: null, storageKey: null };
-  }
-
+  if (!image?.url) return null;
   try {
-    const ext = contentType.includes('png') ? 'png' : 'jpg';
+    const res = await fetch(image.url, { redirect: 'follow' });
+    const ct = res.headers.get('content-type') || '';
+    if (!res.ok || !ct.startsWith('image/')) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return buffer.length >= 8000 ? buffer : null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistJpegBuffer(buffer, { projectId, label = 'collage' }) {
+  if (!buffer || buffer.length < 8000) return { url: null, storageKey: null };
+  try {
     const saved = await storage.saveBuffer(buffer, {
-      filename: `storyboard-scene-${sceneNumber}-${Date.now()}-${Math.floor(Math.random() * 1e6)}.${ext}`,
+      filename: `storyboard-${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}.jpg`,
       folder: 'uploads',
-      contentType,
+      contentType: 'image/jpeg',
       uploadContext: {
         folder: 'uploads',
         projectId: projectId || undefined,
@@ -98,118 +94,23 @@ async function persistGeneratedImage(image, { projectId, sceneNumber }) {
   }
 }
 
-function placeholderUrl(sceneNumber, title = '') {
-  const label = encodeURIComponent(`Scene ${sceneNumber}${title ? `: ${title}` : ''}`);
+function placeholderCollageUrl(sceneCount = 1) {
+  const label = encodeURIComponent(`Storyboard ${sceneCount} scenes`);
   return `https://placehold.co/1920x1080/1f2937/d4af37/png?text=${label}&font=source-sans-pro`;
 }
 
-function buildPromptsForScenes(scenes, ctx, { styleGuide, customPrompt, sceneIndex } = {}) {
-  const totalScenes = scenes.length;
-  const buildOne = (scene, index) =>
-    buildSceneImagePrompt(scene, {
-      styleGuide,
-      customPrompt: sceneIndex === index ? customPrompt : undefined,
-      projectContext: ctx.projectContext,
-      scenarioContext: ctx.scenarioContext,
-      narrationContext: extractSceneNarrationHint(ctx.narration, index, totalScenes),
-      sceneIndex: index,
-      totalScenes,
-    });
-
-  if (typeof sceneIndex === 'number') {
-    return [buildOne(scenes[sceneIndex], sceneIndex)];
-  }
-
-  return scenes.map((scene, index) => buildOne(scene, index));
-}
-
-function compactSceneForLlm(scene) {
-  return {
-    sceneNumber: scene.sceneNumber ?? scene.scene_number,
-    title: scene.title,
-    visual: scene.visualDescription || scene.visual,
-    camera: scene.camera || scene.cameraAngle,
-    action: scene.characterActions || scene.action,
-    environment: scene.environment,
-    lighting: scene.lighting,
-    mood: scene.visualDirection,
-  };
-}
-
-async function polishPromptWithLlm(fallbackPrompt, { scene, ctx, sceneIndex, totalScenes }) {
-  if (!openRouterService.isConfigured() || env.aiProvider === 'mock') {
-    return fallbackPrompt;
-  }
-
-  try {
-    const shot = resolveShotType(scene);
-    const result = await openRouterService.completeChat({
-      model: env.openrouterBackupModel || env.openrouterModel,
-      temperature: 0.18,
-      maxTokens: 280,
-      timeoutMs: 25000,
-      responseFormat: { type: 'json_object' },
-      system:
-        'You write ONE English image-generation prompt for a premium commercial video storyboard still. Return JSON {"prompt":"..."}. The first 15 words MUST name the exact visible subject of this scene (translate Persian). Honor the shot type. Photoreal 16:9 cinema still, ARRI Alexa / 35mm look, sharp, cinematic grade. Do not invent a fashion model, sci-fi character, or unrelated portrait. No readable fake text. Max 70 words. ASCII only.',
-      userContent: {
-        lockedFallback: String(fallbackPrompt).slice(0, 280),
-        shot: shot.key,
-        frame: `${sceneIndex + 1}/${totalScenes}`,
-        scene: compactSceneForLlm(scene),
-        project: {
-          title: ctx.projectContext?.projectTitle,
-          product: ctx.projectContext?.productName,
-          message: ctx.projectContext?.mainMessage,
-          audience: ctx.projectContext?.audience,
-          customer: ctx.projectContext?.customerName,
-        },
-        scenario: {
-          concept: ctx.scenarioContext?.concept,
-          hook: ctx.scenarioContext?.hook,
-        },
-        narration: ctx.narration
-          ? extractSceneNarrationHint(ctx.narration, sceneIndex, totalScenes)
-          : '',
-      },
-    });
-
-    let parsed = {};
-    try {
-      parsed = JSON.parse(result.text);
-    } catch {
-      const match = String(result.text || '').match(/\{[\s\S]*\}/);
-      parsed = match ? JSON.parse(match[0]) : {};
-    }
-    const polished = String(parsed.prompt || '')
-      .replace(/[^\x20-\x7E]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (polished.length < 48) return fallbackPrompt;
-    return polished.slice(0, 720);
-  } catch {
-    return fallbackPrompt;
-  }
-}
-
-async function buildPolishedPrompts(scenes, ctx, options = {}) {
-  const base = buildPromptsForScenes(scenes, ctx, options);
-  const polished = [];
-  for (let i = 0; i < base.length; i += 1) {
-    const sceneIndex = typeof options.sceneIndex === 'number' ? options.sceneIndex : i;
-    polished.push(
-      await polishPromptWithLlm(base[i], {
-        scene: scenes[sceneIndex],
-        ctx,
-        sceneIndex,
-        totalScenes: scenes.length,
-      }),
-    );
-  }
-  return polished;
+function canGenerateImages() {
+  return Boolean(
+    env.openrouterApiKey ||
+      env.openaiApiKey ||
+      env.aiImageProvider === 'free' ||
+      env.aiImageProvider === 'pollinations' ||
+      env.aiImageProvider === 'auto',
+  );
 }
 
 /**
- * Generate and attach stills for every storyboard scene.
+ * Generate distinct stills, then one composed storyboard sheet for the UI.
  * Non-fatal: returns storyboard even if some/all images fail.
  */
 export async function attachStoryboardImages(
@@ -224,15 +125,29 @@ export async function attachStoryboardImages(
 
   const ctx = await loadImageGenerationContext(projectId, { scenario, narration });
   const styleGuide = normalized.visualStyleGuide || '';
-  const prompts = await buildPolishedPrompts(scenes, ctx, { styleGuide });
-  const seeds = scenes.map((scene, i) =>
-    sceneImageSeed(projectId, scene.sceneNumber || i + 1),
-  );
+  const grid = collageGrid(scenes.length);
+  const layout = storyboardSheetLayout(scenes.length);
+
+  const prompts = [];
+  for (let i = 0; i < scenes.length; i += 1) {
+    const fallback = buildSceneImagePrompt(scenes[i], {
+      styleGuide,
+      projectContext: ctx.projectContext,
+      scenarioContext: ctx.scenarioContext,
+      narrationContext: extractSceneNarrationHint(ctx.narration, i, scenes.length),
+      sceneIndex: i,
+      totalScenes: scenes.length,
+    });
+    prompts.push(fallback);
+  }
 
   const readyPrompts = prompts.map((prompt, i) => {
     const check = validateImagePrompt(prompt, scenes[i]);
     return check.ok ? prompt : '';
   });
+  const seeds = scenes.map((scene, i) =>
+    sceneImageSeed(projectId, scene.sceneNumber || i + 1, i + 1),
+  );
 
   let generated = { provider: 'mock', model: null, images: [] };
   try {
@@ -240,6 +155,7 @@ export async function attachStoryboardImages(
       size: STORYBOARD_IMAGE_SIZE,
       seeds,
       enhance: false,
+      preferQuality: true,
     });
   } catch (err) {
     generated = {
@@ -254,51 +170,53 @@ export async function attachStoryboardImages(
     };
   }
 
-  const byIndex = new Map(
-    (generated.images || []).map((img) => [img.index, img]),
-  );
-  const canGenerateImages = Boolean(
-    env.openrouterApiKey ||
-      env.openaiApiKey ||
-      env.aiImageProvider === 'free' ||
-      env.aiImageProvider === 'pollinations' ||
-      env.aiImageProvider === 'auto',
-  );
-
+  const byIndex = new Map((generated.images || []).map((img) => [img.index, img]));
+  const sheetPanels = [];
   const enriched = [];
+
   for (let i = 0; i < scenes.length; i += 1) {
     const scene = scenes[i];
     const promptCheck = validateImagePrompt(prompts[i], scene);
     const image = byIndex.get(i) || { index: i, prompt: prompts[i], url: null };
-    const persisted = promptCheck.ok
-      ? await persistGeneratedImage(image, {
-          projectId,
-          sceneNumber: scene.sceneNumber || i + 1,
-        })
-      : { url: null, storageKey: null };
-    const url =
-      persisted.url ||
-      (env.aiProvider === 'mock' || !canGenerateImages
-        ? placeholderUrl(scene.sceneNumber || i + 1, scene.title)
-        : null);
-
+    const buffer = promptCheck.ok ? await imageToBuffer(image) : null;
+    sheetPanels.push({
+      buffer,
+      sceneNumber: scene.sceneNumber || i + 1,
+      title: scene.title || '',
+    });
     enriched.push({
       ...scene,
       imagePrompt: prompts[i],
-      imageUrl: url,
-      imageStorageKey: persisted.storageKey,
+      imageUrl: null,
+      imageStorageKey: null,
       imageProvider: generated.provider || null,
-      imageModel:
-        generated.model ||
-        env.pollinationsImageModel ||
-        env.openrouterImageModel ||
-        env.openaiImageModel ||
-        null,
-      imageGeneratedAt: url ? new Date().toISOString() : null,
+      imageModel: generated.model || null,
+      imageGeneratedAt: null,
       imageError: promptCheck.ok
-        ? image.error || null
+        ? image.error || (buffer ? null : 'تولید تصویر صحنه ناموفق بود')
         : promptCheck.error,
     });
+  }
+
+  let collageUrl = null;
+  let collageKey = null;
+  let collageError = null;
+  const usablePanels = sheetPanels.filter((panel) => panel.buffer).length;
+
+  if (usablePanels > 0) {
+    try {
+      const sheet = await composeStoryboardSheet(sheetPanels);
+      const saved = await persistJpegBuffer(sheet, { projectId, label: 'collage' });
+      collageUrl = saved.url;
+      collageKey = saved.storageKey;
+      if (!collageUrl) collageError = 'ذخیره شیت استوری‌بورد ناموفق بود';
+    } catch (err) {
+      collageError = err.message || 'ساخت شیت استوری‌بورد ناموفق بود';
+    }
+  } else if (env.aiProvider === 'mock' || !canGenerateImages()) {
+    collageUrl = placeholderCollageUrl(scenes.length);
+  } else {
+    collageError = 'تولید تصاویر صحنه‌ها ناموفق بود';
   }
 
   return {
@@ -307,12 +225,33 @@ export async function attachStoryboardImages(
     scenes: enriched,
     imagePrompts: enriched.map((s) => s.imagePrompt),
     openaiImagePrompts: enriched.map((s) => s.imagePrompt),
+    collageImageUrl: collageUrl,
+    collageImageStorageKey: collageKey,
+    collageImagePrompt: `Composed ${scenes.length}-scene storyboard sheet (${grid.cols}x${grid.rows}).`,
+    collageLayout: {
+      cols: grid.cols,
+      rows: grid.rows,
+      sceneCount: scenes.length,
+      unused: layout.unused,
+    },
+    collageImageError: collageError,
     imagesMeta: {
+      layout: 'composed-sheet',
       provider: generated.provider,
-      model: generated.model,
+      model:
+        generated.model ||
+        env.pollinationsImageModel ||
+        env.openrouterImageModel ||
+        env.openaiImageModel ||
+        null,
       generatedAt: new Date().toISOString(),
-      count: enriched.filter((s) => s.imageUrl).length,
-      size: STORYBOARD_IMAGE_SIZE,
+      count: collageUrl ? 1 : 0,
+      sceneStills: usablePanels,
+      sceneCount: scenes.length,
+      cols: grid.cols,
+      rows: grid.rows,
+      size: `${layout.width}x${layout.height}`,
+      error: collageError,
     },
   };
 }

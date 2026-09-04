@@ -261,10 +261,16 @@ export default function NarratorDashboardPage() {
                       <p className="truncate font-medium">{task.title}</p>
                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <Badge
-                          variant={narrationStatusVariant(task.status)}
+                          variant={
+                            task.projectStatus === "COMPLETED"
+                              ? "success"
+                              : narrationStatusVariant(task.status)
+                          }
                           className="font-normal"
                         >
-                          {NARRATION_STATUS_LABEL[task.status] || task.status}
+                          {task.projectStatus === "COMPLETED"
+                            ? "تکمیل‌شده"
+                            : NARRATION_STATUS_LABEL[task.status] || task.status}
                         </Badge>
                         {task.assignedAt && (
                           <span className="inline-flex items-center gap-1">

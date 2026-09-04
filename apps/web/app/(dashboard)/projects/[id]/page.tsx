@@ -4,8 +4,8 @@ import { use, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiGet, apiPost } from "@/lib/api";
 import { formatDate, formatCurrency, cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import {
@@ -45,12 +45,15 @@ import {
   ArrowRight,
   Banknote,
   Building2,
+  CheckCircle2,
   Clapperboard,
   FolderOpen,
+  Loader2,
   Mic2,
   Sparkles,
   UserRound,
 } from "lucide-react";
+import { toast } from "sonner";
 
 function PanelSkeleton({ className }: { className?: string }) {
   return (
@@ -318,11 +321,12 @@ export default function ProjectDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const [section, setSection] = useState<ProjectDataSectionId>("customer");
   const [tab, setTab] = useState<DetailTab>("brief");
   const [aiPanel, setAiPanel] = useState<"content" | "feedback">("content");
   const [productionWorkspace, setProductionWorkspace] = useState<
-    "customer" | "ai" | "narration" | "final" | undefined
+    "customer" | "ai" | "narration" | "final" | "poster" | undefined
   >(undefined);
 
   useEffect(() => {
@@ -360,7 +364,8 @@ export default function ProjectDetailPage({
       workspaceParam === "customer" ||
       workspaceParam === "ai" ||
       workspaceParam === "narration" ||
-      workspaceParam === "final"
+      workspaceParam === "final" ||
+      workspaceParam === "poster"
     ) {
       setProductionWorkspace(workspaceParam);
     }
@@ -381,6 +386,29 @@ export default function ProjectDetailPage({
     queryKey: ["project", id],
     queryFn: () => apiGet<ProjectDetail>(`/projects/${id}`),
     enabled: !blockProjectDetail,
+  });
+
+  const completeProject = useMutation({
+    mutationFn: () =>
+      apiPost<{
+        status: string;
+        completedAt?: string;
+        alreadyCompleted?: boolean;
+      }>(`/delivery/${id}/complete`, {}),
+    onSuccess: (res) => {
+      toast.success(
+        res?.alreadyCompleted
+          ? "پروژه قبلاً تکمیل شده است"
+          : "پروژه با موفقیت به‌عنوان تکمیل‌شده ثبت شد",
+      );
+      queryClient.invalidateQueries({ queryKey: ["project", id] });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (err) => {
+      toast.error(
+        err instanceof Error ? err.message : "ثبت تکمیل پروژه ناموفق بود",
+      );
+    },
   });
 
   useEffect(() => {
@@ -498,6 +526,11 @@ export default function ProjectDetailPage({
 
   const showCustomerSection = customerTabs.length > 0;
   const showApexSection = apexTabs.length > 0;
+  const canMarkCompleted =
+    hasPermission(permissions, "projects.complete", role) &&
+    data.status !== "COMPLETED" &&
+    data.status !== "CANCELED" &&
+    data.status !== "CANCELLED";
 
   return (
     <div
@@ -526,6 +559,37 @@ export default function ProjectDetailPage({
               <Badge variant="outline" className="font-mono" dir="ltr">
                 {data.code}
               </Badge>
+              {canMarkCompleted ? (
+                <Button
+                  variant="brand"
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  disabled={completeProject.isPending}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        "آیا از تکمیل دستی این پروژه مطمئن هستید؟ این وضعیت در پنل مدیر، پورتال مشتری و جزئیات پروژه ذخیره می‌شود.",
+                      )
+                    ) {
+                      return;
+                    }
+                    completeProject.mutate();
+                  }}
+                >
+                  {completeProject.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  )}
+                  علامت‌گذاری به‌عنوان تکمیل‌شده
+                </Button>
+              ) : null}
+              {data.status === "COMPLETED" ? (
+                <Badge variant="success" className="gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  تکمیل‌شده
+                </Badge>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <h1 className="break-words text-xl font-bold tracking-tight sm:text-2xl lg:text-3xl">

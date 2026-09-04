@@ -1,17 +1,26 @@
 export const CUSTOMER_PAYMENT_METHODS = [
-  { value: "CASH", label: "حضوری" },
+  { value: "CASH", label: "نقدی / حضوری" },
   { value: "HAWALA", label: "حواله" },
   { value: "HESAB_PAY", label: "حساب پی" },
+  { value: "BANK_TRANSFER", label: "انتقال بانکی" },
+] as const;
+
+export const INVOICE_PAYMENT_METHODS = [
+  { value: "HESAB_PAY", label: "حساب پی" },
+  { value: "CASH", label: "نقدی / حضوری" },
+  { value: "BANK_TRANSFER", label: "انتقال بانکی" },
 ] as const;
 
 export type CustomerPaymentMethod =
   (typeof CUSTOMER_PAYMENT_METHODS)[number]["value"];
 
+export type InvoicePaymentMethod =
+  (typeof INVOICE_PAYMENT_METHODS)[number]["value"];
+
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
-  CASH: "حضوری",
+  CASH: "نقدی / حضوری",
   HAWALA: "حواله",
   HESAB_PAY: "حساب پی",
-  // Historical values remain readable.
   BANK_TRANSFER: "انتقال بانکی",
   CARD: "کارت",
   OTHER: "سایر",

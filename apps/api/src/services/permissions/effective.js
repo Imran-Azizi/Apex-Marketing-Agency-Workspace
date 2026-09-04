@@ -21,13 +21,28 @@ const LEGACY_FROM_CANONICAL = (() => {
 
 /**
  * Editors/narrators historically had project:read for their own task APIs.
- * That must not unlock the manager projects module during rollout.
+ * Finance/Sales legacy codes must not unlock restricted manager modules.
  */
 function skipLegacyExpand(legacyCode, roleCode) {
-  return (
+  if (
     legacyCode === "project:read" &&
-    (roleCode === "EDITOR" || roleCode === "NARRATOR")
-  );
+    (roleCode === "EDITOR" ||
+      roleCode === "NARRATOR" ||
+      roleCode === "FINANCE" ||
+      roleCode === "SALES")
+  ) {
+    return true;
+  }
+  if (legacyCode === "crm:read" && roleCode === "FINANCE") {
+    return true;
+  }
+  if (
+    (legacyCode === "finance:read" || legacyCode === "finance:write") &&
+    roleCode === "SALES"
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function expandLegacyCodes(codes = [], roleCode) {
@@ -90,6 +105,34 @@ export function hasAnyPermission(effectiveCodes, requiredCodes, roleCode) {
 export function canAssignProjectEditor(permissions, roleCode) {
   if (roleCode === "EDITOR") return false;
   return hasAnyPermission(permissions, ["projects.assign"], roleCode);
+}
+
+/** Poster approve/reject is exclusive to Manager/Admin. Editors cannot, even if granted the code. */
+export function canReviewProjectPosters(permissions, roleCode) {
+  if (roleCode === "EDITOR") return false;
+  if (roleCode !== "MANAGER" && roleCode !== "ADMIN") return false;
+  return hasAnyPermission(permissions, ["poster.approve"], roleCode);
+}
+
+/** Sending posters to the customer is exclusive to Manager/Admin. */
+export function canSendProjectPosters(permissions, roleCode) {
+  if (roleCode === "EDITOR") return false;
+  if (roleCode !== "MANAGER" && roleCode !== "ADMIN") return false;
+  return hasAnyPermission(permissions, ["poster.send"], roleCode);
+}
+
+/** Final-video approve/revision is exclusive to Manager/Admin. Editors cannot release. */
+export function canReviewFinalVideos(permissions, roleCode) {
+  if (roleCode === "EDITOR") return false;
+  if (roleCode !== "MANAGER" && roleCode !== "ADMIN") return false;
+  return hasAnyPermission(permissions, ["video.approve"], roleCode);
+}
+
+/** Sending final videos to the customer is exclusive to Manager/Admin. */
+export function canSendFinalVideos(permissions, roleCode) {
+  if (roleCode === "EDITOR") return false;
+  if (roleCode !== "MANAGER" && roleCode !== "ADMIN") return false;
+  return hasAnyPermission(permissions, ["video.send"], roleCode);
 }
 
 export function loadOverridesFromUser(user) {

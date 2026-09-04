@@ -1,29 +1,33 @@
 /** Canonical lead-source codes stored in CrmCustomer.source */
 export const LEAD_SOURCE_CODES = [
+  'WHATSAPP',
+  'WEBSITE',
+  'WEBSITE_CONTACT',
   'INSTAGRAM',
   'FACEBOOK',
-  'WHATSAPP',
   'TELEGRAM',
-  'WEBSITE',
   'GOOGLE_SEARCH',
   'REFERRAL',
   'WALK_IN',
   'PHONE_CALL',
   'ADVERTISEMENT',
+  'MANUAL',
   'OTHER',
 ];
 
 export const LEAD_SOURCE_LABELS = {
+  WHATSAPP: 'واتساپ',
+  WEBSITE: 'وب‌سایت',
+  WEBSITE_CONTACT: 'فرم تماس وب‌سایت',
   INSTAGRAM: 'اینستاگرام',
   FACEBOOK: 'فیسبوک',
-  WHATSAPP: 'واتساپ',
   TELEGRAM: 'تلگرام',
-  WEBSITE: 'وب‌سایت',
   GOOGLE_SEARCH: 'جستجوی گوگل',
   REFERRAL: 'معرفی',
   WALK_IN: 'مراجعه حضوری',
   PHONE_CALL: 'تماس تلفنی',
   ADVERTISEMENT: 'تبلیغات',
+  MANUAL: 'ورود دستی',
   OTHER: 'سایر',
 };
 

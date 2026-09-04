@@ -1,10 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { apiGet, apiDelete } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { toEnglishDigits } from "@/lib/utils";
 import { getMe } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
 import { PageHeader } from "@/components/shared/page-header";
@@ -14,6 +19,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +29,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -30,16 +43,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, Trash2 } from "lucide-react";
+import { AlertTriangle, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { getProjectStatusLabel } from "@/lib/project-status";
+import {
+  DELIVERY_STATUS_FILTER_OPTIONS,
+  getDeliveryStatusLabel,
+  getProjectStatusLabel,
+} from "@/lib/project-status";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import type { ProjectProgress } from "@/lib/project-progress";
 
+const ALL = "ALL";
+
+const DATE_PRESET_OPTIONS = [
+  { value: ALL, label: "همه تاریخ‌ها" },
+  { value: "today", label: "امروز" },
+  { value: "week", label: "۷ روز اخیر" },
+  { value: "month", label: "این ماه" },
+  { value: "custom", label: "بازه سفارشی" },
+] as const;
+
 interface AssignmentRecord {
   role: string;
-  teamProfile?: { displayName?: string | null };
-  user?: { fullName?: string | null };
+  teamProfile?: { displayName?: string | null; userId?: string | null };
+  user?: { id?: string; fullName?: string | null };
 }
 
 interface Project {
@@ -48,11 +75,30 @@ interface Project {
   title: string;
   status: string;
   customerFacingStatus: string;
-  deadlineAt: string | null;
+  deliveryStatus?: string | null;
   progress?: ProjectProgress | number | null;
-  crmCustomer: { personName: string; companyName: string | null };
+  crmCustomer: {
+    id?: string;
+    personName: string;
+    companyName: string | null;
+  };
   assignments?: AssignmentRecord[];
 }
+
+interface ProjectFilterOptions {
+  customers: Array<{
+    id: string;
+    personName: string;
+    companyName: string | null;
+  }>;
+  editors: Array<{ id: string; fullName: string }>;
+}
+
+type ActiveChip = {
+  key: string;
+  label: string;
+  onClear: () => void;
+};
 
 function getAssignedPerson(project: Project, role: "EDITOR" | "NARRATOR") {
   const assignment = project.assignments?.find((item) => item.role === role);
@@ -70,15 +116,91 @@ function initials(name: string) {
     .join("");
 }
 
+function customerLabel(customer: {
+  personName: string;
+  companyName: string | null;
+}) {
+  return customer.companyName
+    ? `${customer.personName} — ${customer.companyName}`
+    : customer.personName;
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [deletingProject, setDeletingProject] = useState<Project | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["projects"],
-    queryFn: () => apiGet<Project[]>("/projects"),
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [customerId, setCustomerId] = useState(ALL);
+  const [editorId, setEditorId] = useState(ALL);
+  const [deliveryStatus, setDeliveryStatus] = useState(ALL);
+  const [createdPreset, setCreatedPreset] = useState(ALL);
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(toEnglishDigits(searchInput).trim());
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const listParams = useMemo(() => {
+    const params = new URLSearchParams();
+    if (search) params.set("q", search);
+    if (customerId !== ALL) params.set("customerId", customerId);
+    if (editorId !== ALL) params.set("editorId", editorId);
+    if (deliveryStatus !== ALL) params.set("deliveryStatus", deliveryStatus);
+    if (createdPreset !== ALL) params.set("createdPreset", createdPreset);
+    if (createdPreset === "custom") {
+      if (createdFrom) params.set("createdFrom", createdFrom);
+      if (createdTo) params.set("createdTo", createdTo);
+    }
+    return params.toString();
+  }, [
+    search,
+    customerId,
+    editorId,
+    deliveryStatus,
+    createdPreset,
+    createdFrom,
+    createdTo,
+  ]);
+
+  const filterKey = useMemo(
+    () => ({
+      search,
+      customerId,
+      editorId,
+      deliveryStatus,
+      createdPreset,
+      createdFrom,
+      createdTo,
+    }),
+    [
+      search,
+      customerId,
+      editorId,
+      deliveryStatus,
+      createdPreset,
+      createdFrom,
+      createdTo,
+    ],
+  );
+
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ["projects", filterKey],
+    queryFn: () =>
+      apiGet<Project[]>(listParams ? `/projects?${listParams}` : "/projects"),
+    placeholderData: keepPreviousData,
+  });
+
+  const { data: filterOptions } = useQuery({
+    queryKey: ["projects", "filter-options"],
+    queryFn: () => apiGet<ProjectFilterOptions>("/projects/filter-options"),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: me } = useQuery({
@@ -86,8 +208,16 @@ export default function ProjectsPage() {
     queryFn: getMe,
     retry: false,
   });
-  const canDeleteProject = hasPermission(me?.permissions, "projects.delete", me?.role);
-  const canViewProjects = hasPermission(me?.permissions, "projects.view", me?.role);
+  const canDeleteProject = hasPermission(
+    me?.permissions,
+    "projects.delete",
+    me?.role,
+  );
+  const canViewProjects = hasPermission(
+    me?.permissions,
+    "projects.view",
+    me?.role,
+  );
 
   useEffect(() => {
     if (!me?.role) return;
@@ -97,6 +227,9 @@ export default function ProjectsPage() {
     }
     if (me.role === "EDITOR") {
       router.replace("/editor/dashboard");
+    }
+    if (me.role === "PROJECT_MANAGER") {
+      router.replace("/project-manager/dashboard");
     }
   }, [me, router, canViewProjects]);
 
@@ -117,6 +250,118 @@ export default function ProjectsPage() {
     },
   });
 
+  const activeDropdownFilters =
+    (customerId !== ALL ? 1 : 0) +
+    (editorId !== ALL ? 1 : 0) +
+    (deliveryStatus !== ALL ? 1 : 0) +
+    (createdPreset !== ALL ? 1 : 0);
+
+  const hasActiveFilters = search !== "" || activeDropdownFilters > 0;
+
+  const clearFilters = () => {
+    setSearchInput("");
+    setSearch("");
+    setCustomerId(ALL);
+    setEditorId(ALL);
+    setDeliveryStatus(ALL);
+    setCreatedPreset(ALL);
+    setCreatedFrom("");
+    setCreatedTo("");
+  };
+
+  const clearDropdownFilters = () => {
+    setCustomerId(ALL);
+    setEditorId(ALL);
+    setDeliveryStatus(ALL);
+    setCreatedPreset(ALL);
+    setCreatedFrom("");
+    setCreatedTo("");
+  };
+
+  const selectedCustomer = filterOptions?.customers.find(
+    (c) => c.id === customerId,
+  );
+  const selectedEditor = filterOptions?.editors.find((e) => e.id === editorId);
+  const selectedDatePreset = DATE_PRESET_OPTIONS.find(
+    (o) => o.value === createdPreset,
+  );
+
+  const activeChips = useMemo(() => {
+    const chips: ActiveChip[] = [];
+    if (search) {
+      chips.push({
+        key: "search",
+        label: `جستجو: ${search}`,
+        onClear: () => {
+          setSearchInput("");
+          setSearch("");
+        },
+      });
+    }
+    if (customerId !== ALL && selectedCustomer) {
+      chips.push({
+        key: "customer",
+        label: `مشتری: ${selectedCustomer.personName}`,
+        onClear: () => setCustomerId(ALL),
+      });
+    } else if (customerId !== ALL) {
+      chips.push({
+        key: "customer",
+        label: "مشتری: انتخاب‌شده",
+        onClear: () => setCustomerId(ALL),
+      });
+    }
+    if (editorId !== ALL && selectedEditor) {
+      chips.push({
+        key: "editor",
+        label: `ویرایشگر: ${selectedEditor.fullName}`,
+        onClear: () => setEditorId(ALL),
+      });
+    } else if (editorId !== ALL) {
+      chips.push({
+        key: "editor",
+        label: "ویرایشگر: انتخاب‌شده",
+        onClear: () => setEditorId(ALL),
+      });
+    }
+    if (deliveryStatus !== ALL) {
+      chips.push({
+        key: "delivery",
+        label: `تحویل: ${getDeliveryStatusLabel(deliveryStatus)}`,
+        onClear: () => setDeliveryStatus(ALL),
+      });
+    }
+    if (createdPreset !== ALL) {
+      let dateLabel = selectedDatePreset?.label || "تاریخ";
+      if (createdPreset === "custom") {
+        const fromLabel = createdFrom || "…";
+        const toLabel = createdTo || "…";
+        dateLabel = `از ${fromLabel} تا ${toLabel}`;
+      }
+      chips.push({
+        key: "created",
+        label: `ایجاد: ${dateLabel}`,
+        onClear: () => {
+          setCreatedPreset(ALL);
+          setCreatedFrom("");
+          setCreatedTo("");
+        },
+      });
+    }
+    return chips;
+  }, [
+    search,
+    customerId,
+    editorId,
+    deliveryStatus,
+    createdPreset,
+    createdFrom,
+    createdTo,
+    selectedCustomer,
+    selectedEditor,
+    selectedDatePreset,
+  ]);
+
   const openDelete = (project: Project) => {
     setDeletingProject(project);
     setDeleteOpen(true);
@@ -125,6 +370,10 @@ export default function ProjectsPage() {
   const openProject = (projectId: string) => {
     router.push(`/projects/${projectId}`);
   };
+
+  const resultCount = data?.length ?? 0;
+  const showEmptyCatalog = Boolean(data && data.length === 0 && !hasActiveFilters);
+  const showEmptyFiltered = Boolean(data && data.length === 0 && hasActiveFilters);
 
   return (
     <div className="min-w-0">
@@ -170,181 +419,386 @@ export default function ProjectsPage() {
         </DialogContent>
       </Dialog>
 
-      {isLoading && <LoadingTable columns={canDeleteProject ? 9 : 8} />}
-
-      {error && <EmptyState title="بارگذاری پروژه‌ها ناموفق بود" />}
-
-      {data && data.length === 0 && (
-        <EmptyState title="پروژه‌ای ثبت نشده است" />
-      )}
-
-      {data && data.length > 0 && (
-        <HorizontalScroll>
-          <Table className="min-w-[48rem]">
-            <TableHeader>
-              <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  کد
-                </TableHead>
-                <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  عنوان
-                </TableHead>
-                <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  مشتری
-                </TableHead>
-                <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  ادیتور
-                </TableHead>
-                <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  نریتور
-                </TableHead>
-                <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  وضعیت
-                </TableHead>
-                <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  پیشرفت پروژه
-                </TableHead>
-                <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                  مهلت
-                </TableHead>
-                {canDeleteProject && (
-                  <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    عملیات
-                  </TableHead>
-                )}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((project) => (
-                <TableRow
-                  key={project.id}
-                  role="link"
-                  tabIndex={0}
-                  aria-label={`مشاهده جزئیات پروژه ${project.code}`}
-                  className="cursor-pointer transition-colors hover:bg-muted/50 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
-                  onClick={() => openProject(project.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openProject(project.id);
-                    }
+      <div className="space-y-4">
+        <div className="-mx-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:thin]">
+          <div className="flex min-w-max items-center gap-2">
+            <div className="relative w-[min(20rem,55vw)] shrink-0 sm:w-[18rem] lg:w-[20rem]">
+              <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="جستجو: پروژه، مشتری، شرکت یا شناسه…"
+                className="h-10 ps-9 pe-9"
+                aria-label="جستجوی پروژه‌ها"
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchInput("");
+                    setSearch("");
                   }}
+                  className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  title="پاک کردن جستجو"
+                  aria-label="پاک کردن جستجو"
                 >
-                  <TableCell>
-                    <span
-                      className="whitespace-nowrap font-medium text-foreground"
-                      dir="ltr"
-                    >
-                      {project.code}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="block min-w-[8rem] max-w-[16rem] font-medium leading-snug">
-                      {project.title}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="min-w-[8rem]">
-                      <span className="font-medium">
-                        {project.crmCustomer.personName}
-                      </span>
-                      {project.crmCustomer.companyName && (
-                        <span className="block text-xs text-muted-foreground">
-                          {project.crmCustomer.companyName}
-                        </span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {getAssignedPerson(project, "EDITOR") ? (
-                      <div
-                        className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
-                        title={getAssignedPerson(project, "EDITOR") || ""}
-                      >
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback>
-                            {initials(getAssignedPerson(project, "EDITOR") || "?")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="truncate text-sm font-medium">
-                          {getAssignedPerson(project, "EDITOR")}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
-                        تعیین نشده
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {getAssignedPerson(project, "NARRATOR") ? (
-                      <div
-                        className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
-                        title={getAssignedPerson(project, "NARRATOR") || ""}
-                      >
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback>
-                            {initials(getAssignedPerson(project, "NARRATOR") || "?")}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="truncate text-sm font-medium">
-                          {getAssignedPerson(project, "NARRATOR")}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
-                        تعیین نشده
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="whitespace-nowrap">
-                      {getProjectStatusLabel(project.status)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell
-                    className="min-w-[10rem]"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <ProjectProgressBar
-                      progress={project.progress}
-                      status={project.status}
-                      variant="inline"
-                      showTitle={false}
-                    />
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
-                    {project.deadlineAt
-                      ? formatDate(project.deadlineAt)
-                      : "—"}
-                  </TableCell>
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            <Select value={customerId} onValueChange={setCustomerId}>
+              <SelectTrigger
+                className="h-10 w-[10.5rem] shrink-0"
+                aria-label="فیلتر مشتری"
+              >
+                <SelectValue placeholder="مشتری" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>همه مشتریان</SelectItem>
+                {(filterOptions?.customers ?? []).map((customer) => (
+                  <SelectItem key={customer.id} value={customer.id}>
+                    {customerLabel(customer)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={editorId} onValueChange={setEditorId}>
+              <SelectTrigger
+                className="h-10 w-[10rem] shrink-0"
+                aria-label="فیلتر ویرایشگر"
+              >
+                <SelectValue placeholder="ویرایشگر" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>همه ویرایشگرها</SelectItem>
+                {(filterOptions?.editors ?? []).map((editor) => (
+                  <SelectItem key={editor.id} value={editor.id}>
+                    {editor.fullName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={deliveryStatus} onValueChange={setDeliveryStatus}>
+              <SelectTrigger
+                className="h-10 w-[10rem] shrink-0"
+                aria-label="فیلتر وضعیت تحویل"
+              >
+                <SelectValue placeholder="تحویل" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>همه وضعیت‌های تحویل</SelectItem>
+                {DELIVERY_STATUS_FILTER_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={createdPreset}
+              onValueChange={(value) => {
+                setCreatedPreset(value);
+                if (value !== "custom") {
+                  setCreatedFrom("");
+                  setCreatedTo("");
+                }
+              }}
+            >
+              <SelectTrigger
+                className="h-10 w-[9.5rem] shrink-0"
+                aria-label="فیلتر تاریخ ایجاد"
+              >
+                <SelectValue placeholder="تاریخ ایجاد" />
+              </SelectTrigger>
+              <SelectContent>
+                {DATE_PRESET_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {createdPreset === "custom" && (
+              <>
+                <Input
+                  type="date"
+                  value={createdFrom}
+                  onChange={(e) => setCreatedFrom(e.target.value)}
+                  className="h-10 w-[9.5rem] shrink-0"
+                  dir="ltr"
+                  aria-label="از تاریخ"
+                />
+                <Input
+                  type="date"
+                  value={createdTo}
+                  onChange={(e) => setCreatedTo(e.target.value)}
+                  className="h-10 w-[9.5rem] shrink-0"
+                  dir="ltr"
+                  aria-label="تا تاریخ"
+                />
+              </>
+            )}
+
+            {activeDropdownFilters > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-10 shrink-0 gap-1.5 px-3 text-muted-foreground"
+                onClick={clearDropdownFilters}
+              >
+                <X className="h-4 w-4" />
+                پاک کردن فیلترها
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {activeChips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {activeChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={chip.onClear}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-border/80 bg-muted/50 px-2.5 py-1 text-xs text-foreground transition-colors hover:bg-muted"
+                title="حذف این فیلتر"
+              >
+                <span className="truncate">{chip.label}</span>
+                <X className="h-3 w-3 shrink-0 text-muted-foreground" />
+              </button>
+            ))}
+            {hasActiveFilters && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground"
+                onClick={clearFilters}
+              >
+                <X className="h-3.5 w-3.5" />
+                پاک کردن همه
+              </Button>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
+          <p>
+            {data
+              ? `${resultCount.toLocaleString("fa-AF", {
+                  numberingSystem: "latn",
+                })} پروژه`
+              : "—"}
+            {isFetching && !isLoading ? " · در حال به‌روزرسانی…" : ""}
+          </p>
+        </div>
+
+        {isLoading && <LoadingTable columns={canDeleteProject ? 8 : 7} />}
+
+        {error && (
+          <EmptyState
+            title="بارگذاری پروژه‌ها ناموفق بود"
+            description="لطفاً اتصال خود را بررسی کرده و دوباره تلاش کنید."
+          />
+        )}
+
+        {showEmptyCatalog && (
+          <EmptyState title="پروژه‌ای ثبت نشده است" />
+        )}
+
+        {showEmptyFiltered && (
+          <EmptyState
+            title="نتیجه‌ای یافت نشد"
+            description="با معیارهای جستجو یا فیلتر انتخاب‌شده پروژه‌ای پیدا نشد."
+            action={
+              <Button variant="outline" onClick={clearFilters}>
+                <X className="h-4 w-4" />
+                پاک کردن فیلترها
+              </Button>
+            }
+          />
+        )}
+
+        {data && data.length > 0 && (
+          <HorizontalScroll
+            className={
+              isFetching ? "opacity-70 transition-opacity" : undefined
+            }
+          >
+            <Table className="min-w-[48rem]">
+              <TableHeader>
+                <TableRow className="bg-muted/40 hover:bg-muted/40">
+                  <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    کد
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    عنوان
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    مشتری
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    ادیتور
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    نریتور
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    وضعیت
+                  </TableHead>
+                  <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    پیشرفت پروژه
+                  </TableHead>
                   {canDeleteProject && (
-                    <TableCell
-                      className="text-center"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
-                        title="حذف پروژه"
-                        aria-label="حذف پروژه"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openDelete(project);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
+                    <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      عملیات
+                    </TableHead>
                   )}
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </HorizontalScroll>
-      )}
+              </TableHeader>
+              <TableBody>
+                {data.map((project) => (
+                  <TableRow
+                    key={project.id}
+                    role="link"
+                    tabIndex={0}
+                    aria-label={`مشاهده جزئیات پروژه ${project.code}`}
+                    className="cursor-pointer transition-colors hover:bg-muted/50 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+                    onClick={() => openProject(project.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openProject(project.id);
+                      }
+                    }}
+                  >
+                    <TableCell>
+                      <span
+                        className="whitespace-nowrap font-medium text-foreground"
+                        dir="ltr"
+                      >
+                        {project.code}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="block min-w-[8rem] max-w-[16rem] font-medium leading-snug">
+                        {project.title}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="min-w-[8rem]">
+                        <span className="font-medium">
+                          {project.crmCustomer.personName}
+                        </span>
+                        {project.crmCustomer.companyName && (
+                          <span className="block text-xs text-muted-foreground">
+                            {project.crmCustomer.companyName}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {getAssignedPerson(project, "EDITOR") ? (
+                        <div
+                          className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
+                          title={getAssignedPerson(project, "EDITOR") || ""}
+                        >
+                          <Avatar className="h-8 w-8">
+                            <AvatarFallback>
+                              {initials(
+                                getAssignedPerson(project, "EDITOR") || "?",
+                              )}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="truncate text-sm font-medium">
+                            {getAssignedPerson(project, "EDITOR")}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
+                          تعیین نشده
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {getAssignedPerson(project, "NARRATOR") ? (
+                        <div
+                          className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
+                          title={getAssignedPerson(project, "NARRATOR") || ""}
+                        >
+                          <Avatar className="h-8 w-8">
+                            <AvatarFallback>
+                              {initials(
+                                getAssignedPerson(project, "NARRATOR") || "?",
+                              )}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="truncate text-sm font-medium">
+                            {getAssignedPerson(project, "NARRATOR")}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
+                          تعیین نشده
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          project.status === "COMPLETED"
+                            ? "success"
+                            : "secondary"
+                        }
+                        className="whitespace-nowrap"
+                      >
+                        {getProjectStatusLabel(project.status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell
+                      className="min-w-[10rem]"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ProjectProgressBar
+                        progress={project.progress}
+                        status={project.status}
+                        variant="inline"
+                        showTitle={false}
+                      />
+                    </TableCell>
+                    {canDeleteProject && (
+                      <TableCell
+                        className="text-center"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+                          title="حذف پروژه"
+                          aria-label="حذف پروژه"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDelete(project);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </HorizontalScroll>
+        )}
+      </div>
     </div>
   );
 }

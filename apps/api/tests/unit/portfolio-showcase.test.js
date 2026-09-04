@@ -37,13 +37,33 @@ test("create portfolio item requires video storage key and title", () => {
   assert.equal(missingVideo.success, false);
 });
 
-test("update schema allows optional description and category assignment", () => {
+test("project publish requires selected videoFileId", async () => {
+  const { publishPortfolioSchema } = await import(
+    "../../src/modules/portfolio/service.js"
+  );
+  const missing = publishPortfolioSchema.safeParse({
+    title: "عنوان تستی",
+    description: "توضیحات کوتاه برای انتشار نمونه‌کار عمومی",
+  });
+  assert.equal(missing.success, false);
+
+  const ok = publishPortfolioSchema.parse({
+    title: "عنوان تستی",
+    description: "توضیحات کوتاه برای انتشار نمونه‌کار عمومی",
+    videoFileId: "file_123",
+  });
+  assert.equal(ok.videoFileId, "file_123");
+});
+
+test("update schema allows optional description, success story, and category assignment", () => {
   const parsed = updatePortfolioSchema.parse({
     description: "",
+    successStory: "",
     categoryIds: ["pcat_food"],
     status: "UNPUBLISHED",
   });
   assert.equal(parsed.description, null);
+  assert.equal(parsed.successStory, null);
   assert.deepEqual(parsed.categoryIds, ["pcat_food"]);
 });
 

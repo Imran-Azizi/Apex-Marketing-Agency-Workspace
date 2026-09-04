@@ -1,13 +1,18 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy, ExternalLink, Lock, Send, Shield } from "lucide-react";
-import { apiPost } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import type {
+  PortalCredentials,
+  PortalInviteListResponse,
+} from "@/lib/portal-invites";
+import { CustomerPortalCredentialsFields } from "./customer-portal-info";
 
 interface InviteEligibility {
   eligible: boolean;
@@ -33,7 +38,9 @@ function getInviteBlockMessage(gates?: Record<string, boolean>) {
 
 interface PortalInviteSectionProps {
   opportunityId: string;
+  customerId: string;
   eligibility: InviteEligibility | undefined;
+  portalCredentials?: PortalCredentials | null;
   inviteUrl: string;
   onInviteUrlChange: (url: string) => void;
   onChanged: () => void;
@@ -41,22 +48,53 @@ interface PortalInviteSectionProps {
 
 export function PortalInviteSection({
   opportunityId,
+  customerId,
   eligibility,
+  portalCredentials,
   inviteUrl,
   onInviteUrlChange,
   onChanged,
 }: PortalInviteSectionProps) {
   const isEligible = !!eligibility?.eligible;
+  const hasExistingPortal = !!eligibility?.hasExistingPortal;
+  const accountCreated = Boolean(portalCredentials?.isRegistered);
   const waitingForPayment = eligibility?.gates?.hasFirstPayment === false;
+
+  const invitesQ = useQuery({
+    queryKey: ["portal-invites", opportunityId],
+    queryFn: () =>
+      apiGet<PortalInviteListResponse>(
+        `/crm/portal-invites?opportunityId=${encodeURIComponent(opportunityId)}&pageSize=10`,
+      ),
+    enabled: Boolean(opportunityId),
+    refetchInterval:
+      accountCreated || portalCredentials?.status !== "INVITED"
+        ? false
+        : 8000,
+  });
+
+  const latestInvite = invitesQ.data?.items?.[0];
+  const displayUrl = inviteUrl || latestInvite?.registerUrl || "";
 
   const inviteMut = useMutation({
     mutationFn: () =>
-      apiPost<{ registerUrl: string }>(
-        `/crm/opportunities/${opportunityId}/portal-invite`,
-      ),
+      apiPost<{
+        registerUrl?: string | null;
+        alreadyHasPortal?: boolean;
+        message?: string;
+      }>(`/crm/opportunities/${opportunityId}/portal-invite`),
     onSuccess: (res) => {
-      onInviteUrlChange(res.registerUrl);
+      if (res.alreadyHasPortal) {
+        toast.success(
+          res.message ||
+            "این مشتری از قبل حساب پورتال دارد. دعوت جدید لازم نیست.",
+        );
+        onChanged();
+        return;
+      }
+      if (res.registerUrl) onInviteUrlChange(res.registerUrl);
       toast.success("دعوت ساخته شد");
+      void invitesQ.refetch();
       onChanged();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
@@ -133,16 +171,27 @@ export function PortalInviteSection({
                   <Lock className="h-4 w-4" />
                 )}
                 {inviteMut.isPending
-                  ? "در حال ساخت دعوت..."
-                  : isEligible
-                    ? "ایجاد دعوت پورتال"
-                    : "دعوت غیرفعال"}
+                  ? "در حال بررسی..."
+                  : hasExistingPortal
+                    ? "حساب پورتال موجود است"
+                    : isEligible
+                      ? "ایجاد دعوت پورتال"
+                      : "دعوت غیرفعال"}
               </Button>
             </span>
           </div>
         </div>
 
-        {eligibility && !isEligible && (
+        {hasExistingPortal && (
+          <div className="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+            <Check className="h-4 w-4 shrink-0" />
+            <p className="text-start">
+              این مشتری از قبل حساب پورتال دارد. برای پروژه جدید دعوت جداگانه لازم نیست.
+            </p>
+          </div>
+        )}
+
+        {eligibility && !isEligible && !hasExistingPortal && (
           <div
             className={cn(
               "mt-5 flex items-start gap-2.5 rounded-xl border px-4 py-3.5 text-sm",
@@ -160,7 +209,7 @@ export function PortalInviteSection({
           </div>
         )}
 
-        {isEligible && !inviteUrl && (
+        {isEligible && !displayUrl && !hasExistingPortal && (
           <div className="mt-5 flex items-center gap-2 rounded-xl border border-emerald-200/80 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
             <Check className="h-4 w-4 shrink-0" />
             <p className="text-start">
@@ -169,29 +218,45 @@ export function PortalInviteSection({
           </div>
         )}
 
-        {inviteUrl && (
-          <div className="mt-5 space-y-2 border-t border-brand/15 pt-5">
-            <Label className="text-sm font-medium">لینک ثبت‌نام مشتری</Label>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Input
-                dir="ltr"
-                readOnly
-                value={inviteUrl}
-                className="rounded-xl bg-background/80 font-mono text-sm text-start shadow-sm"
+        {(displayUrl || accountCreated || latestInvite) && (
+          <div className="mt-5 space-y-4 border-t border-brand/15 pt-5">
+            {displayUrl && !accountCreated ? (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">لینک ثبت‌نام مشتری</Label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Input
+                    dir="ltr"
+                    readOnly
+                    value={displayUrl}
+                    className="rounded-xl bg-background/80 font-mono text-sm text-start shadow-sm"
+                  />
+                  <Button
+                    variant="outline"
+                    className="shrink-0 rounded-xl sm:w-auto"
+                    aria-label="کپی لینک دعوت"
+                    onClick={() => {
+                      navigator.clipboard.writeText(displayUrl);
+                      toast.success("لینک کپی شد");
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                    کپی لینک
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {accountCreated && portalCredentials ? (
+              <CustomerPortalCredentialsFields
+                customerId={customerId}
+                credentials={portalCredentials}
               />
-              <Button
-                variant="outline"
-                className="shrink-0 rounded-xl sm:w-auto"
-                aria-label="کپی لینک دعوت"
-                onClick={() => {
-                  navigator.clipboard.writeText(inviteUrl);
-                  toast.success("لینک کپی شد");
-                }}
-              >
-                <Copy className="h-4 w-4" />
-                کپی لینک
-              </Button>
-            </div>
+            ) : (
+              <p className="rounded-xl border border-dashed border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                حساب پورتال مشتری هنوز ایجاد نشده است. پس از ثبت‌نام با لینک دعوت،
+                شماره واتساپ و رمز عبور اینجا نمایش داده می‌شود.
+              </p>
+            )}
           </div>
         )}
       </div>

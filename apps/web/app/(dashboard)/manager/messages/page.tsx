@@ -1,11 +1,11 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiDelete, apiGet, apiPatch } from "@/lib/api";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, contactMessagesPath } from "@/lib/rbac";
 import { useMeQuery } from "@/lib/permissions";
 import type {
   ContactMessage,
@@ -44,9 +44,14 @@ const EMPTY_STATS: ContactMessageStats = {
 
 function ContactMessagesPageInner() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const { data: me } = useMeQuery();
+  const basePath =
+    pathname === "/sales/messages" || pathname.startsWith("/sales/messages/")
+      ? "/sales/messages"
+      : contactMessagesPath(me?.role);
   const canEdit = hasPermission(me?.permissions, "contact.edit", me?.role);
   const canDelete = hasPermission(me?.permissions, "contact.delete", me?.role);
 
@@ -150,11 +155,11 @@ function ContactMessagesPageInner() {
   });
 
   function openMessage(item: ContactMessage) {
-    router.replace(`/manager/messages?id=${item.id}`);
+    router.replace(`${basePath}?id=${item.id}`);
   }
 
   function closeDetails() {
-    router.replace("/manager/messages");
+    router.replace(basePath);
   }
 
   const markMutate = markMut.mutate;

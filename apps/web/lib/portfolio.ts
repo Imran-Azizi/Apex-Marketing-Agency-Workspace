@@ -71,6 +71,7 @@ export type PublicPortfolioItem = {
   slug: string;
   title: string;
   description: string | null;
+  successStory: string | null;
   publishedAt: string | null;
   thumbnailUrl: string | null;
   category: { id: string; name: string; slug: string } | null;
@@ -104,6 +105,7 @@ export type PortfolioAdminItem = {
   id: string;
   title: string;
   description: string;
+  successStory: string;
   slug: string;
   status: PortfolioStatus;
   sortOrder: number;
@@ -164,3 +166,24 @@ export type PortfolioAdminCategory = {
 
 export type PortfolioStatusFilter = "ALL" | "PUBLISHED" | "UNPUBLISHED";
 export type PortfolioMixedFilter = "ALL" | "IN" | "OUT";
+
+export function portfolioCardExcerpt(item: {
+  description?: string | null;
+  successStory?: string | null;
+}) {
+  const description = String(item.description || "").trim();
+  if (description) return description;
+  const story = String(item.successStory || "").trim();
+  if (!story) return null;
+  return story.replace(/\s+/g, " ");
+}
+
+export function portfolioMetaDescription(item: {
+  title: string;
+  description?: string | null;
+  successStory?: string | null;
+}) {
+  const excerpt = portfolioCardExcerpt(item);
+  if (!excerpt) return `نمونه‌کار ${item.title} در بخش نمونه های کاری اپیکس`;
+  return excerpt.length > 180 ? `${excerpt.slice(0, 177)}…` : excerpt;
+}

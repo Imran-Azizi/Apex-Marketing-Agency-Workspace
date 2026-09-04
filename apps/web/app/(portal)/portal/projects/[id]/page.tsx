@@ -9,7 +9,6 @@ import { apiGet, apiPost } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { PortalStatusBadge } from "@/components/portal/portal-status-badge";
 import { PortalProjectBriefView } from "@/components/portal/portal-project-brief-view";
 import type { PortalProjectAsset } from "@/components/portal/portal-project-assets";
@@ -26,27 +25,19 @@ import {
 } from "@/components/shared/section-tab-nav";
 import { replaceTabSearchParams } from "@/lib/tab-url";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   ArrowRight,
   ClipboardList,
-  Download,
   FolderOpen,
-  MessageCircle,
+  ImageIcon,
   PackageCheck,
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import type { PortalFinalVideo } from "@/components/portal/portal-final-product";
+import type { PosterItem } from "@/lib/poster";
 
 function PortalPanelSkeleton() {
   return (
@@ -81,8 +72,14 @@ const PortalFinalProduct = dynamic(
   { ssr: false, loading: () => <PortalPanelSkeleton /> },
 );
 
+const PortalPosters = dynamic(
+  () =>
+    import("@/components/portal/portal-posters").then((m) => m.PortalPosters),
+  { ssr: false, loading: () => <PortalPanelSkeleton /> },
+);
+
 type CustomerSubId = "brief" | "assets";
-type ApexSubId = "content" | "final";
+type ApexSubId = "content" | "final" | "poster";
 
 interface PortalProject {
   id: string;
@@ -121,7 +118,7 @@ interface PortalProject {
   watermarkedFiles: PortalFinalVideo[];
   cleanFiles?: PortalFinalVideo[];
   finalVideos?: PortalFinalVideo[];
-  cleanDownloadAvailable: boolean;
+  posters?: PosterItem[];
   paymentStatus?: string;
   deliveryStatus?: string;
   cleanFileAccess?: string;
@@ -157,6 +154,11 @@ function applyLegacyTab(
     setters.setApexSub("final");
     return;
   }
+  if (q === "poster") {
+    setters.setSection("apex");
+    setters.setApexSub("poster");
+    return;
+  }
   if (q === "customer") {
     setters.setSection("customer");
     return;
@@ -177,8 +179,6 @@ export default function PortalProjectPage({
   const [section, setSection] = useState<ProjectDataSectionId>("customer");
   const [customerSub, setCustomerSub] = useState<CustomerSubId>("brief");
   const [apexSub, setApexSub] = useState<ApexSubId>("content");
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const [feedbackBody, setFeedbackBody] = useState("");
 
   useEffect(() => {
     applyLegacyTab(searchParams.get("tab"), {
@@ -253,11 +253,12 @@ export default function PortalProjectPage({
   const approveFinal = useMutation({
     mutationFn: (payload: {
       videoType: "CLEAN" | "WATERMARKED";
-      fileId?: string;
+      fileId: string;
     }) =>
       apiPost<{
         completed?: boolean;
         alreadyCompleted?: boolean;
+        projectAdvanced?: boolean;
         awaitingPayment?: boolean;
         awaitingDeliveryUnlock?: boolean;
       }>(`/portal/projects/${id}/final/approve`, payload),
@@ -266,10 +267,12 @@ export default function PortalProjectPage({
         res?.alreadyCompleted
           ? "پروژه قبلاً تکمیل شده است"
           : res?.completed
-            ? "محصول نهایی تأیید شد — پروژه تکمیل شد"
-            : res?.awaitingPayment
-              ? "محصول نهایی تأیید شد — در انتظار تسویه پرداخت"
-              : "محصول نهایی تأیید شد — در انتظار فعال‌سازی تحویل",
+            ? "ویدیو تأیید شد — پروژه تکمیل شد"
+            : res?.projectAdvanced
+              ? res?.awaitingPayment
+                ? "محصول نهایی تأیید شد — در انتظار تسویه کامل پرداخت"
+                : "محصول نهایی تأیید شد"
+              : "ویدیو با موفقیت تأیید شد",
       );
       queryClient.invalidateQueries({ queryKey: ["portal-project", id] });
       queryClient.invalidateQueries({ queryKey: ["portal-projects"] });
@@ -281,61 +284,16 @@ export default function PortalProjectPage({
   });
 
   const requestFinalChanges = useMutation({
-    mutationFn: (body: string) =>
-      apiPost(`/portal/projects/${id}/final/request-changes`, { body }),
+    mutationFn: (payload: { body: string; fileId: string }) =>
+      apiPost(`/portal/projects/${id}/final/request-changes`, payload),
     onSuccess: () => {
       toast.success("درخواست اصلاح ثبت شد");
-      setFeedbackOpen(false);
-      setFeedbackBody("");
       queryClient.invalidateQueries({ queryKey: ["portal-project", id] });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "ثبت درخواست ناموفق بود");
     },
   });
-
-  const contactMut = useMutation({
-    mutationFn: () =>
-      apiGet<{ url: string }>(`/portal/projects/${id}/contact-manager`),
-    onSuccess: (res) => {
-      window.open(res.url, "_blank", "noopener,noreferrer");
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "خطا");
-    },
-  });
-
-  const downloadMut = useMutation({
-    mutationFn: () =>
-      apiGet<{ url: string; projectCompleted?: boolean }>(
-        `/portal/downloads/${id}`,
-      ),
-    onSuccess: (res) => {
-      window.open(res.url, "_blank", "noopener,noreferrer");
-      toast.success(
-        res.projectCompleted
-          ? "دانلود شروع شد — پروژه تکمیل شد"
-          : "لینک دانلود باز شد",
-      );
-      queryClient.invalidateQueries({ queryKey: ["portal-project", id] });
-    },
-    onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "دانلود در دسترس نیست");
-    },
-  });
-
-  function openFeedback() {
-    setFeedbackBody("");
-    setFeedbackOpen(true);
-  }
-
-  function submitFeedback() {
-    if (!feedbackBody.trim()) {
-      toast.error("توضیح تغییرات الزامی است");
-      return;
-    }
-    requestFinalChanges.mutate(feedbackBody);
-  }
 
   if (isLoading) {
     return (
@@ -365,6 +323,8 @@ export default function PortalProjectPage({
     );
   }
 
+  const posters = data.posters || [];
+
   const finalVideos: PortalFinalVideo[] =
     data.finalVideos && data.finalVideos.length > 0
       ? data.finalVideos
@@ -381,23 +341,24 @@ export default function PortalProjectPage({
       : finalVideos.filter((v) => v.videoType === "CLEAN");
 
   const primaryClean = cleanVideos[0];
-  const cleanUnlocked =
-    !!primaryClean &&
-    primaryClean.accessLocked !== true &&
-    primaryClean.canPlay !== false;
   const projectCompleted = data.status === "COMPLETED";
   const awaitingFinalDecision =
     !projectCompleted &&
     finalVideos.length > 0 &&
     (data.internalStatus === "WAITING_CLIENT_FINAL_APPROVAL" ||
-      ["WAITING_YOUR_APPROVAL", "FINAL_REVIEW"].includes(data.status));
-  const canApproveFinal =
-    !projectCompleted &&
-    finalVideos.length > 0 &&
-    (awaitingFinalDecision || cleanUnlocked);
-  const canRequestRevision =
-    awaitingFinalDecision &&
-    !["WAITING_PAYMENT", "READY_DELIVERY"].includes(data.status);
+      ["WAITING_YOUR_APPROVAL", "FINAL_REVIEW"].includes(data.status) ||
+      // Extra manager deliveries may leave status on WAITING_PAYMENT while
+      // individual new files still need confirm / reject.
+      finalVideos.some(
+        (v) =>
+          v.status === "SENT_TO_CUSTOMER" ||
+          v.status === "VIEWED_BY_CUSTOMER" ||
+          v.isNewForCustomer === true,
+      ));
+  const cleanUnlocked =
+    !!primaryClean &&
+    primaryClean.accessLocked !== true &&
+    primaryClean.canPlay !== false;
 
   return (
     <div dir="rtl" className="space-y-6 text-start">
@@ -441,45 +402,6 @@ export default function PortalProjectPage({
               <span className="text-xs text-muted-foreground">
                 بروزرسانی: {formatDate(data.updatedAt)}
               </span>
-            </div>
-            <div className="flex flex-wrap justify-start gap-2 pt-1">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                onClick={() => contactMut.mutate()}
-                disabled={contactMut.isPending}
-              >
-                <MessageCircle className="h-4 w-4" />
-                ارتباط با مدیر
-              </Button>
-              {data.cleanDownloadAvailable ? (
-                <Button
-                  variant="brand"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => downloadMut.mutate()}
-                  disabled={downloadMut.isPending}
-                >
-                  <Download className="h-4 w-4" />
-                  دانلود فایل پاک
-                </Button>
-              ) : (
-                (data.paymentStatus || data.deliveryStatus) &&
-                (data.cleanFileAccess === "LOCKED_PAYMENT" ||
-                  data.status === "COMPLETED") && (
-                  <Badge
-                    variant="outline"
-                    className="h-8 gap-1 px-3 text-xs font-normal"
-                  >
-                    {data.cleanFileAccess === "LOCKED_PAYMENT"
-                      ? "دانلود پس از تسویه پرداخت"
-                      : data.status === "COMPLETED"
-                        ? "پروژه تکمیل‌شده"
-                        : null}
-                  </Badge>
-                )
-              )}
             </div>
           </div>
 
@@ -562,6 +484,12 @@ export default function PortalProjectPage({
                   <PackageCheck className="h-3.5 w-3.5" />
                   محصول نهایی
                 </SectionTabsTrigger>
+                {posters.length > 0 ? (
+                  <SectionTabsTrigger value="poster">
+                    <ImageIcon className="h-3.5 w-3.5" />
+                    پوستر
+                  </SectionTabsTrigger>
+                ) : null}
               </SectionTabsList>
 
               <SectionTabsPanel value="content">
@@ -591,54 +519,52 @@ export default function PortalProjectPage({
                   videos={finalVideos}
                   watermarkedVideos={watermarkedVideos}
                   cleanVideos={cleanVideos}
+                  projectId={id}
                   projectTitle={data.title}
                   projectCode={data.code}
                   revisionUsed={data.videoRevisionUsed}
                   revisionMax={data.videoRevisionMax}
-                  canApproveFinal={canApproveFinal}
-                  canRequestRevision={canRequestRevision}
-                  approving={approveFinal.isPending}
+                  projectCompleted={projectCompleted}
+                  awaitingFinalDecision={
+                    awaitingFinalDecision ||
+                    finalVideos.some(
+                      (v) =>
+                        v.isNewForCustomer === true ||
+                        v.status === "SENT_TO_CUSTOMER" ||
+                        v.status === "VIEWED_BY_CUSTOMER",
+                    )
+                  }
+                  cleanUnlocked={cleanUnlocked}
+                  approvingFileId={
+                    approveFinal.isPending
+                      ? approveFinal.variables?.fileId ?? null
+                      : null
+                  }
+                  requestingFileId={
+                    requestFinalChanges.isPending
+                      ? requestFinalChanges.variables?.fileId ?? null
+                      : null
+                  }
                   onApproveFinal={(payload) => approveFinal.mutate(payload)}
-                  onRequestRevision={openFeedback}
+                  onRequestRevision={async (payload) => {
+                    await requestFinalChanges.mutateAsync(payload);
+                  }}
+                  onVideoViewed={() =>
+                    queryClient.invalidateQueries({ queryKey: ["portal-project", id] })
+                  }
                   paymentDetailsHref="/portal"
                 />
               </SectionTabsPanel>
+
+              {posters.length > 0 ? (
+                <SectionTabsPanel value="poster">
+                  <PortalPosters posters={posters} projectTitle={data.title} />
+                </SectionTabsPanel>
+              ) : null}
             </SectionTabs>
           </ProjectSectionShell>
         )}
       </div>
-
-      <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
-        <DialogContent dir="rtl" className="text-start sm:max-w-md">
-          <DialogHeader className="space-y-1 text-start sm:text-start">
-            <DialogTitle>درخواست اصلاح</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="feedback" className="text-start">
-                توضیح تغییرات
-              </Label>
-              <Textarea
-                id="feedback"
-                dir="rtl"
-                rows={4}
-                value={feedbackBody}
-                onChange={(e) => setFeedbackBody(e.target.value)}
-                placeholder="لطفاً تغییرات مورد نظر خود را بنویسید..."
-                className="text-start"
-              />
-            </div>
-            <Button
-              className="w-full"
-              variant="brand"
-              onClick={submitFeedback}
-              disabled={requestFinalChanges.isPending}
-            >
-              ارسال
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

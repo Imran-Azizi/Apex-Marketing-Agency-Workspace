@@ -1,27 +1,24 @@
 "use client";
 
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { Lock, Phone } from "lucide-react";
+import { Lock } from "lucide-react";
 import { loginPortal } from "@/lib/auth";
 import { toast } from "sonner";
 import { useRef, useState } from "react";
 import {
   AuthFormError,
-  AuthInput,
   AuthPasswordField,
   AuthSubmitButton,
 } from "@/components/auth/auth-field";
+import { AuthWhatsAppInput } from "@/components/auth/auth-whatsapp-input";
+import { whatsappFieldSchema } from "@/lib/phone";
 
 const schema = z.object({
-  whatsapp: z
-    .string()
-    .min(1, "شماره واتساپ الزامی است")
-    .min(8, "شماره واتساپ معتبر وارد کنید"),
+  whatsapp: whatsappFieldSchema,
   password: z.string().min(1, "رمز عبور الزامی است"),
 });
 
@@ -35,6 +32,7 @@ export function PortalLoginForm() {
   const submittingRef = useRef(false);
 
   const {
+    control,
     register,
     handleSubmit,
     formState: { errors },
@@ -42,6 +40,7 @@ export function PortalLoginForm() {
     resolver: zodResolver(schema),
     mode: "onBlur",
     reValidateMode: "onChange",
+    defaultValues: { whatsapp: "", password: "" },
   });
 
   async function onSubmit(data: FormData) {
@@ -52,8 +51,6 @@ export function PortalLoginForm() {
     try {
       await loginPortal(data);
       toast.success("ورود موفق");
-      // Drop the stale unauthenticated "me" cache; otherwise the portal
-      // layout reads the old null session and bounces back to the login page.
       queryClient.removeQueries({ queryKey: ["me"] });
       queryClient.removeQueries({ queryKey: ["notifications"] });
       router.push("/portal");
@@ -77,24 +74,21 @@ export function PortalLoginForm() {
     >
       {formError ? <AuthFormError message={formError} /> : null}
 
-      <AuthInput
-        id="whatsapp"
-        label="شماره واتساپ"
-        type="tel"
-        inputMode="tel"
-        autoComplete="tel"
-        autoCapitalize="none"
-        autoCorrect="off"
-        spellCheck={false}
-        dir="ltr"
-        icon={Phone}
-        required
-        disabled={loading}
-        error={errors.whatsapp?.message}
-        placeholder="0700123456 یا +93700123456"
-        hint="شماره موبایل افغانستان با ۰۷ یا کد کشور ۹۳"
-        autoFocus
-        {...register("whatsapp")}
+      <Controller
+        name="whatsapp"
+        control={control}
+        render={({ field }) => (
+          <AuthWhatsAppInput
+            id="whatsapp"
+            label="شماره واتساپ"
+            value={field.value}
+            onChange={field.onChange}
+            onBlur={field.onBlur}
+            required
+            disabled={loading}
+            error={errors.whatsapp?.message}
+          />
+        )}
       />
 
       <AuthPasswordField
@@ -109,20 +103,9 @@ export function PortalLoginForm() {
         {...register("password")}
       />
 
-      <div className="space-y-3">
-        <AuthSubmitButton loading={loading} loadingText="در حال ورود...">
-          ورود به پورتال
-        </AuthSubmitButton>
-
-        <p className="text-center text-sm">
-          <Link
-            href="/portal/forgot-password"
-            className="font-medium text-brand transition-colors hover:text-brand/80 hover:underline underline-offset-4"
-          >
-            فراموشی رمز عبور
-          </Link>
-        </p>
-      </div>
+      <AuthSubmitButton loading={loading} loadingText="در حال ورود...">
+        ورود به پورتال
+      </AuthSubmitButton>
     </form>
   );
 }

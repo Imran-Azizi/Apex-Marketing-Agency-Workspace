@@ -1,7 +1,8 @@
 "use client";
 
-import { use, useCallback, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { buildWhatsAppChatUrl, toWhatsAppDigits } from "@/lib/utils";
@@ -16,10 +17,12 @@ import { PaymentHistoryPanel } from "../_components/payment-history-panel";
 import { CustomerProfileHeader } from "../_components/customer-profile-header";
 import { PortalInviteSection } from "../_components/portal-invite-section";
 import { CustomerDetailSkeleton } from "../_components/customer-detail-skeleton";
+import { CustomerSalesAssistantCard } from "../_components/customer-sales-assistant-card";
 import {
   CustomerDetailTabsNav,
   type CrmDetailTabValue,
 } from "../_components/customer-detail-tabs";
+import type { PortalCredentials } from "@/lib/portal-invites";
 
 interface Opportunity {
   id: string;
@@ -54,6 +57,7 @@ interface CrmCustomerDetail {
   notes: string | null;
   nextFollowUpAt: string | null;
   salesOwner: { fullName: string } | null;
+  portalCredentials?: PortalCredentials | null;
   opportunities: Opportunity[];
   projects: Array<{ id: string; code: string; title: string; status: string }>;
   invoices: Array<{
@@ -90,14 +94,52 @@ export default function CrmDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const qc = useQueryClient();
   const [inviteUrl, setInviteUrl] = useState("");
   const [activeTab, setActiveTab] = useState<CrmDetailTabValue>("details");
   const [receiptPaymentId, setReceiptPaymentId] = useState<string | null>(null);
 
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    const receipt = searchParams.get("receipt");
+    if (tab === "history" || tab === "details" || tab === "portal") {
+      setActiveTab(tab);
+    }
+    if (receipt) {
+      setActiveTab("history");
+      setReceiptPaymentId(receipt);
+    }
+  }, [searchParams]);
+
+  const clearReceiptHandoff = useCallback(() => {
+    setReceiptPaymentId(null);
+    const params = new URLSearchParams(searchParams.toString());
+    if (params.has("receipt") || params.has("tab")) {
+      params.delete("receipt");
+      // Keep history tab visible after handoff without sticky query noise.
+      if (params.get("tab") === "history") params.delete("tab");
+      const qs = params.toString();
+      router.replace(qs ? `/crm/${id}?${qs}` : `/crm/${id}`, { scroll: false });
+    }
+  }, [id, router, searchParams]);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["crm-customer", id],
     queryFn: () => apiGet<CrmCustomerDetail>(`/crm/customers/${id}`),
+    refetchInterval: (query) => {
+      const customer = query.state.data;
+      if (!customer) return false;
+      if (customer.portalCredentials?.isRegistered) return false;
+      if (
+        customer.portalStatus === "INVITED" ||
+        customer.portalCredentials?.status === "INVITED"
+      ) {
+        return 8000;
+      }
+      return false;
+    },
   });
 
   const opp = useMemo(() => {
@@ -114,6 +156,16 @@ export default function CrmDetailPage({
         `/crm/opportunities/${opp!.id}/invite-eligibility`,
       ),
     enabled: !!opp?.id,
+    refetchInterval: () => {
+      if (data?.portalCredentials?.isRegistered) return false;
+      if (
+        data?.portalStatus === "INVITED" ||
+        data?.portalCredentials?.status === "INVITED"
+      ) {
+        return 8000;
+      }
+      return false;
+    },
   });
 
   const invalidate = async () => {
@@ -121,6 +173,7 @@ export default function CrmDetailPage({
     await qc.refetchQueries({ queryKey: ["crm-customer", id] });
     if (opp?.id) {
       await qc.invalidateQueries({ queryKey: ["invite-eligibility", opp.id] });
+      await qc.invalidateQueries({ queryKey: ["portal-invites", opp.id] });
     }
     // Keep project / portal panels in sync with payment changes.
     await Promise.all([
@@ -130,6 +183,8 @@ export default function CrmDetailPage({
       qc.invalidateQueries({ queryKey: ["portal-projects"] }),
       qc.invalidateQueries({ queryKey: ["portal-project"] }),
       qc.invalidateQueries({ queryKey: ["dashboard-summary"] }),
+      qc.invalidateQueries({ queryKey: ["crm-customers"] }),
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] }),
     ]);
   };
 
@@ -143,10 +198,6 @@ export default function CrmDetailPage({
     setActiveTab("history");
     setReceiptPaymentId(payment.id);
   };
-
-  const clearReceiptHandoff = useCallback(() => {
-    setReceiptPaymentId(null);
-  }, []);
 
   if (isLoading) {
     return <CustomerDetailSkeleton />;
@@ -206,6 +257,8 @@ export default function CrmDetailPage({
         onWhatsAppClick={openWhatsAppChat}
       />
 
+      <CustomerSalesAssistantCard customerId={id} />
+
       {/* Tabs: remaining sections only */}
       <Tabs
         value={activeTab}
@@ -257,7 +310,9 @@ export default function CrmDetailPage({
           {opp ? (
             <PortalInviteSection
               opportunityId={opp.id}
+              customerId={data.id}
               eligibility={eligibility}
+              portalCredentials={data.portalCredentials}
               inviteUrl={inviteUrl}
               onInviteUrlChange={setInviteUrl}
               onChanged={invalidate}

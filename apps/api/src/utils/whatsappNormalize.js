@@ -1,56 +1,153 @@
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { AppError } from './response.js';
 import { toEnglishDigits } from './toEnglishDigits.js';
 
-/**
- * Convert Persian / Arabic-Indic digits to ASCII, then strip non-digits.
- * Accepts common Afghan WhatsApp formats and returns digits-only E.164 without '+':
- *   0700123456  → 93700123456
- *   700123456   → 93700123456
- *   +93 700 123 456 → 93700123456
- *   0093700123456 → 93700123456
- */
-export function normalizeWhatsapp(input) {
-  if (input == null || String(input).trim() === '') {
-    throw new AppError('شماره واتساپ الزامی است', 400, 'INVALID_WHATSAPP');
+export const WHATSAPP_VALIDATION_MESSAGE =
+  'لطفاً یک شماره واتساپ معتبر وارد کنید.';
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function tryParse(raw, defaultCountry) {
+  try {
+    return defaultCountry
+      ? parsePhoneNumberFromString(raw, defaultCountry)
+      : parsePhoneNumberFromString(raw);
+  } catch {
+    return null;
   }
+}
 
-  let raw = toEnglishDigits(String(input).trim());
-
-  // Keep leading + for international notation, then digits only
-  const hadPlus = raw.startsWith('+');
-  let digits = raw.replace(/\D/g, '');
-
-  // International dial prefix 00 → drop it
-  if (digits.startsWith('00')) {
-    digits = digits.slice(2);
-  } else if (hadPlus && digits.startsWith('0')) {
-    // unlikely "+0700..." — treat as local after +
-    digits = digits.replace(/^0+/, '');
-  }
-
-  // Local Afghan mobile: 07XXXXXXXX (10 digits) → 93 + drop leading 0
+function expandLegacyAfghanAliases(digits, bucket) {
   if (/^07\d{8}$/.test(digits)) {
-    return `93${digits.slice(1)}`;
+    bucket.add(digits);
+    bucket.add(`93${digits.slice(1)}`);
+    return;
   }
-
-  // Local without trunk 0: 7XXXXXXXX (9 digits)
+  if (/^93\d{9}$/.test(digits)) {
+    bucket.add(digits);
+    bucket.add(`0${digits.slice(2)}`);
+    return;
+  }
   if (/^7\d{8}$/.test(digits)) {
-    return `93${digits}`;
+    bucket.add(digits);
+    bucket.add(`93${digits}`);
+    bucket.add(`0${digits}`);
+  }
+}
+
+/**
+ * All normalized keys that may exist in the database for the same WhatsApp identity.
+ * Keeps legacy Afghanistan local numbers compatible with international E.164 entries.
+ */
+export function getWhatsappLookupKeys(input, options = {}) {
+  const parsed = parseInternationalPhone(input, options);
+  if (!parsed) return [];
+
+  const keys = new Set([parsed.digits]);
+  expandLegacyAfghanAliases(parsed.digits, keys);
+
+  if (parsed.country === 'AF' && parsed.nationalNumber) {
+    const national = String(parsed.nationalNumber);
+    keys.add(`93${national}`);
+    keys.add(`0${national}`);
   }
 
-  // Already country-coded Afghan: 937XXXXXXXX (11 digits)
-  if (/^937\d{8}$/.test(digits)) {
-    return digits;
+  return [...keys];
+}
+
+export function whatsappNumbersMatch(a, b) {
+  if (!a || !b) return false;
+  try {
+    const left = new Set(getWhatsappLookupKeys(a));
+    for (const key of getWhatsappLookupKeys(b)) {
+      if (left.has(key)) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Parse any WhatsApp-compatible international phone number into a stable identity.
+ * Numbers are accepted globally. Legacy Afghanistan local numbers (07…) are normalized to E.164.
+ */
+export function parseInternationalPhone(input, { required = true } = {}) {
+  if (input == null || String(input).trim() === '') {
+    if (required) {
+      throw new AppError('شماره واتساپ الزامی است', 400, 'INVALID_WHATSAPP');
+    }
+    return null;
   }
 
-  // Other international numbers (10–15 digits, not starting with 0)
-  if (/^[1-9]\d{9,14}$/.test(digits)) {
-    return digits;
+  const original = String(input).trim();
+  let raw = toEnglishDigits(original).trim();
+
+  if (raw.startsWith('00')) {
+    raw = `+${raw.slice(2)}`;
   }
 
-  throw new AppError(
-    'فرمت شماره واتساپ نامعتبر است. مثال: 0700123456 یا +93700123456',
-    400,
-    'INVALID_WHATSAPP'
-  );
+  const digits = digitsOnly(raw);
+  let parsed = null;
+
+  if (raw.startsWith('+')) {
+    parsed = tryParse(raw);
+  } else if (/^0?7\d{8}$/.test(digits)) {
+    const localAf = digits.length === 9 ? `0${digits}` : digits;
+    parsed = tryParse(localAf, 'AF');
+  } else if (digits.length >= 8 && digits.length <= 15) {
+    parsed = tryParse(`+${digits}`) || tryParse(raw);
+  }
+
+  if (parsed && parsed.isValid()) {
+    const e164 = parsed.number;
+    const normalized = e164.replace(/\D/g, '');
+    return {
+      raw: original,
+      e164,
+      digits: normalized,
+      country: parsed.country || null,
+      nationalNumber: parsed.nationalNumber || null,
+      countryCallingCode: parsed.countryCallingCode || null,
+    };
+  }
+
+  throw new AppError(WHATSAPP_VALIDATION_MESSAGE, 400, 'INVALID_WHATSAPP');
+}
+
+/**
+ * Convert to digits-only E.164 without '+'.
+ * Backward-compatible identity key used by CrmCustomer.normalizedWhatsapp.
+ */
+export function normalizeWhatsapp(input, options) {
+  return parseInternationalPhone(input, options).digits;
+}
+
+export function formatE164Display(input) {
+  try {
+    const parsed = parseInternationalPhone(input, { required: false });
+    if (!parsed) return input || '';
+    const phone = tryParse(parsed.e164);
+    return phone ? phone.formatInternational() : parsed.e164;
+  } catch {
+    const digits = digitsOnly(input);
+    if (/^07\d{8}$/.test(digits)) {
+      return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
+    }
+    if (/^\d{10,15}$/.test(digits)) return `+${digits}`;
+    return String(input || '');
+  }
+}
+
+export function whatsappDigitsForLink(input) {
+  try {
+    return parseInternationalPhone(input, { required: false })?.digits || null;
+  } catch {
+    const digits = digitsOnly(input);
+    if (/^07\d{8}$/.test(digits)) return `93${digits.slice(1)}`;
+    if (/^\d{10,15}$/.test(digits)) return digits;
+    return null;
+  }
 }

@@ -227,6 +227,10 @@ export const env = {
   aiModelScenario: process.env.AI_MODEL_SCENARIO || "",
   aiModelNarration: process.env.AI_MODEL_NARRATION || "",
   aiModelStoryboard: process.env.AI_MODEL_STORYBOARD || "",
+  aiModelPortfolio: process.env.AI_MODEL_PORTFOLIO || "",
+  aiModelSalesAssistant: process.env.AI_MODEL_SALES_ASSISTANT || "",
+  aiModelBusinessAssistant:
+    process.env.AI_MODEL_BUSINESS_ASSISTANT || "google/gemini-2.0-flash-exp:free",
   aiTemperature: process.env.AI_TEMPERATURE,
   aiMaxTokens: process.env.AI_MAX_TOKENS,
   aiRequestTimeoutMs: Number(process.env.AI_REQUEST_TIMEOUT_MS || 120000),
@@ -314,6 +318,14 @@ export const env = {
    * (Previously gated on NODE_ENV===production, which broke registration on Railway.)
    */
   portalExposeOtp: bool("PORTAL_EXPOSE_OTP", true),
+  /**
+   * AES-256-GCM secret for recoverable portal passwords (manager assistance).
+   * Falls back to JWT_ACCESS_SECRET when unset so existing deploys keep booting.
+   */
+  portalCredentialSecret:
+    process.env.PORTAL_CREDENTIAL_SECRET ||
+    process.env.JWT_ACCESS_SECRET ||
+    "dev-access-secret-min-32-characters-xx",
   signedUrlSecret: required(
     "SIGNED_URL_SECRET",
     "dev-signed-url-secret-32-characters",

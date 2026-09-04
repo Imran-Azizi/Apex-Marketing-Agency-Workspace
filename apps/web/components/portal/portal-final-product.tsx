@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
+import { apiPost } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -17,6 +21,7 @@ import { downloadMediaFile, formatFileSize } from "@/lib/upload";
 import { cn, formatDate } from "@/lib/utils";
 import {
   Check,
+  CheckCircle2,
   Download,
   Eye,
   Film,
@@ -41,12 +46,15 @@ export type PortalFinalVideo = {
   status?: string;
   statusLabel?: string | null;
   sentAt?: string | null;
+  viewedAt?: string | null;
+  isNewForCustomer?: boolean;
   allowDownload?: boolean;
   canPlay?: boolean;
   canDownload?: boolean;
   accessLocked?: boolean;
   accessStatus?: string | null;
   accessMessage?: string | null;
+  revisionNotes?: string | null;
 };
 
 type PortalFinalProductProps = {
@@ -57,21 +65,29 @@ type PortalFinalProductProps = {
   projectCode?: string;
   revisionUsed?: number;
   revisionMax?: number;
-  /** Show revision request (not completion). */
-  canRequestRevision?: boolean;
-  /** Customer may approve the received final product. */
-  canApproveFinal?: boolean;
-  /** @deprecated Prefer canApproveFinal — kept for compatibility. */
-  canConfirmClean?: boolean;
-  approving?: boolean;
+  projectCompleted?: boolean;
+  awaitingFinalDecision?: boolean;
+  cleanUnlocked?: boolean;
+  approvingFileId?: string | null;
+  requestingFileId?: string | null;
   onApproveFinal?: (payload: {
     videoType: "CLEAN" | "WATERMARKED";
-    fileId?: string;
+    fileId: string;
   }) => void;
-  /** @deprecated Prefer onApproveFinal */
-  onApproveClean?: (payload: { videoType: "CLEAN"; fileId?: string }) => void;
-  onRequestRevision?: () => void;
+  onRequestRevision?: (payload: {
+    fileId: string;
+    body: string;
+  }) => void | Promise<void>;
   paymentDetailsHref?: string;
+  projectId?: string;
+  onVideoViewed?: () => void;
+};
+
+const PORTAL_STATUS_LABEL: Record<string, string> = {
+  APPROVED_BY_CUSTOMER: "تأیید شده",
+  REVISION_REQUESTED: "در انتظار اصلاح",
+  SENT_TO_CUSTOMER: "در انتظار تأیید",
+  VIEWED_BY_CUSTOMER: "در انتظار تأیید",
 };
 
 function resolveType(video: PortalFinalVideo): FinalVideoType {
@@ -86,6 +102,68 @@ function splitVideos(videos: PortalFinalVideo[]) {
     else watermarked.push(video);
   }
   return { watermarked, clean };
+}
+
+function sortPortalVideos(videos: PortalFinalVideo[]): PortalFinalVideo[] {
+  return [...videos].sort((a, b) => {
+    const aNew = a.isNewForCustomer === true;
+    const bNew = b.isNewForCustomer === true;
+    if (aNew !== bNew) return aNew ? -1 : 1;
+    const aSent = a.sentAt || a.createdAt || "";
+    const bSent = b.sentAt || b.createdAt || "";
+    const sentCmp = new Date(bSent).getTime() - new Date(aSent).getTime();
+    if (sentCmp !== 0) return sentCmp;
+    return (b.version ?? 0) - (a.version ?? 0);
+  });
+}
+
+function isPendingCustomerDecision(video: PortalFinalVideo): boolean {
+  const status = video.status || "";
+  if (status === "APPROVED_BY_CUSTOMER") return false;
+  if (status === "REVISION_REQUESTED") return false;
+  return (
+    status === "SENT_TO_CUSTOMER" ||
+    status === "VIEWED_BY_CUSTOMER" ||
+    status === "" ||
+    !status
+  );
+}
+
+/**
+ * Top row = newest watermarked + newest clean (side by side), regardless of
+ * whether the manager sent them in the exact same API call / second.
+ * Everything else stays under «ارسال‌های قبلی».
+ */
+function splitLatestDeliveryBatch(
+  watermarked: PortalFinalVideo[],
+  clean: PortalFinalVideo[],
+): {
+  latestWatermarked: PortalFinalVideo | null;
+  latestClean: PortalFinalVideo | null;
+  previousWatermarked: PortalFinalVideo[];
+  previousClean: PortalFinalVideo[];
+} {
+  const sortedWm = sortPortalVideos(watermarked);
+  const sortedClean = sortPortalVideos(clean);
+  const latestWatermarked = sortedWm[0] ?? null;
+  const latestClean = sortedClean[0] ?? null;
+  const featuredIds = new Set(
+    [latestWatermarked?.id, latestClean?.id].filter(Boolean) as string[],
+  );
+
+  return {
+    latestWatermarked,
+    latestClean,
+    previousWatermarked: sortedWm.filter((v) => !featuredIds.has(v.id)),
+    previousClean: sortedClean.filter((v) => !featuredIds.has(v.id)),
+  };
+}
+
+function isVideoNew(
+  video: PortalFinalVideo,
+  viewedIds: Set<string>,
+): boolean {
+  return video.isNewForCustomer === true && !viewedIds.has(video.id);
 }
 
 function formatDuration(totalSec: number | null | undefined): string {
@@ -103,56 +181,178 @@ function formatDuration(totalSec: number | null | undefined): string {
   return `${mm}:${ss}`;
 }
 
+function portalStatusBadge(
+  video: PortalFinalVideo,
+  variant: FinalVideoType,
+  isNew: boolean,
+  locked: boolean,
+): { label: string; tone: "brand" | "success" | "warning" | "secondary" | "destructive" } {
+  if (locked) return { label: "قفل شده", tone: "warning" };
+  if (isNew) return { label: "جدید", tone: "brand" };
+  const status = video.status || "";
+  if (status === "APPROVED_BY_CUSTOMER") {
+    return { label: "تأیید شده", tone: "success" };
+  }
+  if (status === "REVISION_REQUESTED") {
+    return { label: "در انتظار اصلاح", tone: "destructive" };
+  }
+  if (status === "SENT_TO_CUSTOMER" || status === "VIEWED_BY_CUSTOMER") {
+    return { label: "در انتظار تأیید", tone: "secondary" };
+  }
+  return {
+    label: PORTAL_STATUS_LABEL[status] || video.statusLabel || "آماده",
+    tone: "secondary",
+  };
+}
+
+function canApproveVideo(
+  video: PortalFinalVideo,
+  variant: FinalVideoType,
+  opts: {
+    projectCompleted: boolean;
+    awaitingFinalDecision: boolean;
+    cleanUnlocked: boolean;
+  },
+): boolean {
+  if (!video) return false;
+  if (video.status === "APPROVED_BY_CUSTOMER") return false;
+  if (video.status === "REVISION_REQUESTED") return false;
+  if (!isPendingCustomerDecision(video)) return false;
+
+  const locked =
+    variant === "CLEAN" &&
+    (video.accessLocked === true || video.canPlay === false);
+  if (locked) return false;
+
+  if (variant === "CLEAN") {
+    return opts.cleanUnlocked;
+  }
+
+  // Once clean delivery is unlocked, package confirmation must use the clean file.
+  if (opts.cleanUnlocked) return false;
+
+  // Watermarked: allow for any pending delivery (including extra sends after
+  // WAITING_PAYMENT / prior approval), not only the initial decision window.
+  void opts.projectCompleted;
+  void opts.awaitingFinalDecision;
+  return true;
+}
+
+function canRequestRevisionVideo(
+  video: PortalFinalVideo,
+  _variant: FinalVideoType,
+  opts: {
+    projectCompleted: boolean;
+    awaitingFinalDecision: boolean;
+    revisionUsed: number;
+    revisionMax: number;
+  },
+): boolean {
+  if (!video) return false;
+  if (video.status === "APPROVED_BY_CUSTOMER") return false;
+  if (video.status === "REVISION_REQUESTED") return false;
+  if (opts.revisionUsed >= opts.revisionMax) return false;
+  if (!isPendingCustomerDecision(video)) return false;
+  // Locked clean may still be rejected so the customer can request changes
+  // on newly sent deliveries without needing payment unlock first.
+  void opts.projectCompleted;
+  void opts.awaitingFinalDecision;
+  return true;
+}
+
 export function PortalFinalProduct({
   videos,
   watermarkedVideos,
   cleanVideos,
   projectTitle,
   projectCode,
-  revisionUsed,
-  revisionMax,
-  canRequestRevision,
-  canApproveFinal,
-  canConfirmClean,
-  approving,
+  revisionUsed = 0,
+  revisionMax = 0,
+  projectCompleted = false,
+  awaitingFinalDecision = false,
+  cleanUnlocked = false,
+  approvingFileId,
+  requestingFileId,
   onApproveFinal,
-  onApproveClean,
   onRequestRevision,
   paymentDetailsHref = "/portal",
+  projectId,
+  onVideoViewed,
 }: PortalFinalProductProps) {
   const split = splitVideos(videos);
-  const watermarked = watermarkedVideos?.length
-    ? watermarkedVideos
-    : split.watermarked;
-  const clean = cleanVideos?.length ? cleanVideos : split.clean;
+  const watermarked = sortPortalVideos(
+    watermarkedVideos?.length ? watermarkedVideos : split.watermarked,
+  );
+  const clean = sortPortalVideos(
+    cleanVideos?.length ? cleanVideos : split.clean,
+  );
   const total = watermarked.length + clean.length;
+  const {
+    latestWatermarked,
+    latestClean,
+    previousWatermarked,
+    previousClean,
+  } = splitLatestDeliveryBatch(watermarked, clean);
+  const hasLatestRow = !!(latestWatermarked || latestClean);
+  const hasPrevious =
+    previousWatermarked.length > 0 || previousClean.length > 0;
   const [viewer, setViewer] = useState<PortalFinalVideo | null>(null);
-  const cleanVideo = clean[0] ?? null;
-  const watermarkedVideo = watermarked[0] ?? null;
-  const cleanLocked =
-    !!cleanVideo &&
-    (cleanVideo.accessLocked === true || cleanVideo.canPlay === false);
-  const showApprove =
-    !!(canApproveFinal ?? canConfirmClean) &&
-    !!(onApproveFinal || onApproveClean);
-  const showActions = showApprove || !!canRequestRevision;
+  const [viewedIds, setViewedIds] = useState<Set<string>>(() => new Set());
+  const [revisionOpen, setRevisionOpen] = useState(false);
+  const [revisionTarget, setRevisionTarget] = useState<PortalFinalVideo | null>(
+    null,
+  );
+  const [revisionBody, setRevisionBody] = useState("");
 
-  const handleApprove = () => {
-    if (cleanVideo && !cleanLocked) {
-      const payload = { videoType: "CLEAN" as const, fileId: cleanVideo.id };
-      if (onApproveFinal) onApproveFinal(payload);
-      else onApproveClean?.(payload);
+  const newCount = useMemo(
+    () =>
+      [...watermarked, ...clean].filter((v) => isVideoNew(v, viewedIds)).length,
+    [watermarked, clean, viewedIds],
+  );
+
+  const handleView = useCallback(
+    async (video: PortalFinalVideo) => {
+      setViewer(video);
+      if (
+        !projectId ||
+        !isVideoNew(video, viewedIds) ||
+        viewedIds.has(video.id)
+      ) {
+        return;
+      }
+      try {
+        await apiPost(`/portal/projects/${projectId}/final-videos/${video.id}/view`);
+        setViewedIds((prev) => new Set(prev).add(video.id));
+        onVideoViewed?.();
+      } catch {
+        // Playback still works if tracking fails.
+      }
+    },
+    [projectId, viewedIds, onVideoViewed],
+  );
+
+  const openRevision = (video: PortalFinalVideo) => {
+    setRevisionTarget(video);
+    setRevisionBody("");
+    setRevisionOpen(true);
+  };
+
+  const submitRevision = async () => {
+    if (!revisionTarget || !revisionBody.trim()) {
+      toast.error("توضیح تغییرات الزامی است");
       return;
     }
-    const fileId = cleanVideo?.id || watermarkedVideo?.id;
-    const payload = {
-      videoType: (cleanVideo ? "CLEAN" : "WATERMARKED") as
-        | "CLEAN"
-        | "WATERMARKED",
-      fileId,
-    };
-    if (onApproveFinal) onApproveFinal(payload);
-    else if (cleanVideo) onApproveClean?.({ videoType: "CLEAN", fileId: cleanVideo.id });
+    try {
+      await onRequestRevision?.({
+        fileId: revisionTarget.id,
+        body: revisionBody.trim(),
+      });
+      setRevisionOpen(false);
+      setRevisionTarget(null);
+      setRevisionBody("");
+    } catch {
+      // Parent handles toast on error.
+    }
   };
 
   if (total === 0) {
@@ -171,14 +371,22 @@ export function PortalFinalProduct({
     );
   }
 
+  const actionOpts = {
+    projectCompleted,
+    awaitingFinalDecision,
+    cleanUnlocked,
+    revisionUsed,
+    revisionMax,
+  };
+
   return (
-    <div className="space-y-4" dir="rtl">
-      <header className="space-y-1 text-start">
+    <div className="space-y-5" dir="rtl">
+      <header className="space-y-2 text-start">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold tracking-tight">
             محصول نهایی پروژه
           </h2>
-          {revisionUsed != null && revisionMax != null ? (
+          {revisionMax > 0 ? (
             <Badge
               variant="outline"
               className="h-5 px-1.5 text-[10px] font-normal"
@@ -196,7 +404,7 @@ export function PortalFinalProduct({
           ) : null}
         </div>
         <p className="text-xs leading-6 text-muted-foreground">
-          ویدیوهای نهایی پروژه در این بخش قابل مشاهده و دریافت هستند
+          هر ویدیو را جداگانه مشاهده، تأیید یا درخواست اصلاح کنید
           {projectTitle ? (
             <>
               {" "}
@@ -206,66 +414,69 @@ export function PortalFinalProduct({
           ) : null}
           .
         </p>
+        {newCount > 0 ? (
+          <p className="rounded-xl border border-brand/25 bg-brand/5 px-3 py-2.5 text-xs leading-6 text-foreground">
+            {newCount.toLocaleString("fa-AF")} ویدیوی جدید برای مشاهده دارید.
+            ویدیوهای جدید در ردیف بالای صفحه با برچسب «جدید» مشخص شده‌اند.
+          </p>
+        ) : null}
       </header>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:items-stretch md:gap-4">
-        <VersionCard
-          variant="WATERMARKED"
-          title={VIDEO_TYPE_LABELS.WATERMARKED}
-          video={watermarkedVideo}
-          emptyLabel="هنوز ارسال نشده"
+      {hasLatestRow ? (
+        <LatestDeliveryRow
+          watermarked={latestWatermarked}
+          clean={latestClean}
+          viewedIds={viewedIds}
+          actionOpts={actionOpts}
+          approvingFileId={approvingFileId}
+          requestingFileId={requestingFileId}
           paymentDetailsHref={paymentDetailsHref}
-          onView={setViewer}
+          onView={handleView}
+          onApprove={onApproveFinal}
+          onRequestRevision={openRevision}
         />
-        <VersionCard
-          variant="CLEAN"
-          title={VIDEO_TYPE_LABELS.CLEAN}
-          video={cleanVideo}
-          emptyLabel="هنوز ارسال نشده"
-          paymentDetailsHref={paymentDetailsHref}
-          onView={setViewer}
-        />
-      </div>
+      ) : null}
 
-      {showActions ? (
-        <div className="space-y-2 border-t border-border/60 pt-3">
-          <div className="flex flex-wrap gap-2">
-            {showApprove ? (
-              <Button
-                variant="brand"
-                size="sm"
-                className="h-9 gap-1.5"
-                disabled={approving}
-                onClick={handleApprove}
-              >
-                {approving ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Check className="h-3.5 w-3.5" />
-                )}
-                تأیید
-              </Button>
-            ) : null}
-            {canRequestRevision ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 gap-1.5"
-                disabled={approving}
-                onClick={onRequestRevision}
-              >
-                <MessageSquare className="h-3.5 w-3.5" />
-                درخواست اصلاح
-              </Button>
-            ) : null}
+      {hasPrevious ? (
+        <div className="space-y-5">
+          <div className="flex items-center gap-3">
+            <h3 className="shrink-0 text-sm font-semibold text-muted-foreground">
+              ارسال‌های قبلی
+            </h3>
+            <div className="h-px flex-1 bg-border/70" />
           </div>
-          {showApprove ? (
-            <p className="text-[11px] leading-5 text-muted-foreground">
-              {cleanVideo && !cleanLocked
-                ? "با تأیید نسخه بدون واترمارک، پروژه تکمیل می‌شود."
-                : "با تأیید، محصول نهایی پذیرفته می‌شود و مرحله بعدی گردش‌کار فعال می‌گردد."}
-            </p>
-          ) : null}
+
+          <VideoSection
+            title={VIDEO_TYPE_LABELS.WATERMARKED}
+            variant="WATERMARKED"
+            videos={previousWatermarked}
+            emptyLabel="موردی در ارسال‌های قبلی نیست"
+            hideWhenEmpty
+            viewedIds={viewedIds}
+            actionOpts={actionOpts}
+            approvingFileId={approvingFileId}
+            requestingFileId={requestingFileId}
+            paymentDetailsHref={paymentDetailsHref}
+            onView={handleView}
+            onApprove={onApproveFinal}
+            onRequestRevision={openRevision}
+          />
+
+          <VideoSection
+            title={VIDEO_TYPE_LABELS.CLEAN}
+            variant="CLEAN"
+            videos={previousClean}
+            emptyLabel="موردی در ارسال‌های قبلی نیست"
+            hideWhenEmpty
+            viewedIds={viewedIds}
+            actionOpts={actionOpts}
+            approvingFileId={approvingFileId}
+            requestingFileId={requestingFileId}
+            paymentDetailsHref={paymentDetailsHref}
+            onView={handleView}
+            onApprove={onApproveFinal}
+            onRequestRevision={openRevision}
+          />
         </div>
       ) : null}
 
@@ -293,248 +504,512 @@ export function PortalFinalProduct({
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={revisionOpen} onOpenChange={setRevisionOpen}>
+        <DialogContent dir="rtl" className="text-start sm:max-w-md">
+          <DialogHeader className="space-y-1 text-start sm:text-start">
+            <DialogTitle>درخواست اصلاح ویدیو</DialogTitle>
+          </DialogHeader>
+          {revisionTarget ? (
+            <p className="text-xs leading-6 text-muted-foreground">
+              {VIDEO_TYPE_LABELS[resolveType(revisionTarget)]} — نسخه{" "}
+              {revisionTarget.version ?? "—"}
+            </p>
+          ) : null}
+          <div className="space-y-2">
+            <Label htmlFor="final-revision-body">توضیح تغییرات</Label>
+            <Textarea
+              id="final-revision-body"
+              dir="rtl"
+              rows={4}
+              value={revisionBody}
+              onChange={(e) => setRevisionBody(e.target.value)}
+              placeholder="لطفاً تغییرات مورد نظر برای این ویدیو را بنویسید..."
+              className="text-start"
+            />
+          </div>
+          <DialogFooter className="gap-2 sm:justify-start">
+            <Button
+              variant="brand"
+              onClick={submitRevision}
+              disabled={
+                !!requestingFileId ||
+                !revisionBody.trim() ||
+                !revisionTarget
+              }
+            >
+              {requestingFileId === revisionTarget?.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "ارسال درخواست"
+              )}
+            </Button>
+            <Button variant="outline" onClick={() => setRevisionOpen(false)}>
+              انصراف
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function VersionCard({
-  variant,
-  title,
-  video,
-  emptyLabel,
+function LatestDeliveryRow({
+  watermarked,
+  clean,
+  viewedIds,
+  actionOpts,
+  approvingFileId,
+  requestingFileId,
   paymentDetailsHref,
   onView,
+  onApprove,
+  onRequestRevision,
 }: {
-  variant: FinalVideoType;
-  title: string;
-  video: PortalFinalVideo | null;
-  emptyLabel: string;
+  watermarked: PortalFinalVideo | null;
+  clean: PortalFinalVideo | null;
+  viewedIds: Set<string>;
+  actionOpts: {
+    projectCompleted: boolean;
+    awaitingFinalDecision: boolean;
+    cleanUnlocked: boolean;
+    revisionUsed: number;
+    revisionMax: number;
+  };
+  approvingFileId?: string | null;
+  requestingFileId?: string | null;
   paymentDetailsHref: string;
   onView: (video: PortalFinalVideo) => void;
+  onApprove?: (payload: {
+    videoType: "CLEAN" | "WATERMARKED";
+    fileId: string;
+  }) => void;
+  onRequestRevision: (video: PortalFinalVideo) => void;
+}) {
+  const cards: Array<{ video: PortalFinalVideo; variant: FinalVideoType }> = [];
+  if (watermarked) cards.push({ video: watermarked, variant: "WATERMARKED" });
+  if (clean) cards.push({ video: clean, variant: "CLEAN" });
+  if (cards.length === 0) return null;
+
+  const anyNew = cards.some(({ video }) => isVideoNew(video, viewedIds));
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold">آخرین ارسال مدیر</h3>
+        {anyNew ? (
+          <Badge variant="brand" className="h-5 px-2 text-[10px]">
+            جدید
+          </Badge>
+        ) : null}
+        <span className="text-[11px] text-muted-foreground">
+          نسخه دارای واترمارک و بدون واترمارک در یک ردیف
+        </span>
+      </div>
+
+      <div
+        className={cn(
+          "rounded-2xl border p-3 sm:p-4",
+          anyNew
+            ? "border-brand/35 bg-brand/[0.03] ring-1 ring-brand/10"
+            : "border-border/70 bg-muted/10",
+        )}
+      >
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4",
+            cards.length > 1 && "md:grid-cols-2",
+          )}
+        >
+          {cards.map(({ video, variant }) => (
+            <div key={video.id} className="space-y-2">
+              <p className="text-[11px] font-medium text-muted-foreground">
+                {VIDEO_TYPE_LABELS[variant]}
+              </p>
+              <VideoCard
+                variant={variant}
+                video={video}
+                isNew={isVideoNew(video, viewedIds)}
+                canApprove={canApproveVideo(video, variant, actionOpts)}
+                canRequestRevision={canRequestRevisionVideo(
+                  video,
+                  variant,
+                  actionOpts,
+                )}
+                isApproving={approvingFileId === video.id}
+                isRequesting={requestingFileId === video.id}
+                paymentDetailsHref={paymentDetailsHref}
+                onView={onView}
+                onApprove={onApprove}
+                onRequestRevision={onRequestRevision}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function VideoSection({
+  title,
+  variant,
+  videos,
+  emptyLabel,
+  hideWhenEmpty = false,
+  viewedIds,
+  actionOpts,
+  approvingFileId,
+  requestingFileId,
+  paymentDetailsHref,
+  onView,
+  onApprove,
+  onRequestRevision,
+}: {
+  title: string;
+  variant: FinalVideoType;
+  videos: PortalFinalVideo[];
+  emptyLabel: string;
+  hideWhenEmpty?: boolean;
+  viewedIds: Set<string>;
+  actionOpts: {
+    projectCompleted: boolean;
+    awaitingFinalDecision: boolean;
+    cleanUnlocked: boolean;
+    revisionUsed: number;
+    revisionMax: number;
+  };
+  approvingFileId?: string | null;
+  requestingFileId?: string | null;
+  paymentDetailsHref: string;
+  onView: (video: PortalFinalVideo) => void;
+  onApprove?: (payload: {
+    videoType: "CLEAN" | "WATERMARKED";
+    fileId: string;
+  }) => void;
+  onRequestRevision: (video: PortalFinalVideo) => void;
+}) {
+  if (hideWhenEmpty && videos.length === 0) return null;
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {videos.length === 0 ? (
+        <EmptyVideoCard emptyLabel={emptyLabel} />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {videos.map((video) => (
+            <VideoCard
+              key={video.id}
+              variant={variant}
+              video={video}
+              isNew={isVideoNew(video, viewedIds)}
+              canApprove={canApproveVideo(video, variant, actionOpts)}
+              canRequestRevision={canRequestRevisionVideo(
+                video,
+                variant,
+                actionOpts,
+              )}
+              isApproving={approvingFileId === video.id}
+              isRequesting={requestingFileId === video.id}
+              paymentDetailsHref={paymentDetailsHref}
+              onView={onView}
+              onApprove={onApprove}
+              onRequestRevision={onRequestRevision}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EmptyVideoCard({ emptyLabel }: { emptyLabel: string }) {
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed bg-muted/10 px-4 py-8 text-center">
+      <Film className="h-6 w-6 text-muted-foreground/40" />
+      <p className="text-xs text-muted-foreground">{emptyLabel}</p>
+    </div>
+  );
+}
+
+function VideoCard({
+  variant,
+  video,
+  isNew,
+  canApprove,
+  canRequestRevision,
+  isApproving,
+  isRequesting,
+  paymentDetailsHref,
+  onView,
+  onApprove,
+  onRequestRevision,
+}: {
+  variant: FinalVideoType;
+  video: PortalFinalVideo;
+  isNew: boolean;
+  canApprove: boolean;
+  canRequestRevision: boolean;
+  isApproving: boolean;
+  isRequesting: boolean;
+  paymentDetailsHref: string;
+  onView: (video: PortalFinalVideo) => void;
+  onApprove?: (payload: {
+    videoType: "CLEAN" | "WATERMARKED";
+    fileId: string;
+  }) => void;
+  onRequestRevision: (video: PortalFinalVideo) => void;
 }) {
   const [downloading, setDownloading] = useState(false);
   const [durationSec, setDurationSec] = useState<number | null>(null);
 
   const locked =
-    !!video &&
     variant === "CLEAN" &&
     (video.accessLocked === true || video.canPlay === false);
 
   const canPlay =
-    !!video &&
-    (variant === "WATERMARKED" ||
-      (!locked && video.canPlay !== false));
+    variant === "WATERMARKED" ||
+    (!locked && video.canPlay !== false);
 
   const canDownload =
-    !!video &&
     !locked &&
     (variant === "WATERMARKED"
       ? true
       : video.canDownload === true || video.allowDownload === true);
 
-  const dateValue = video?.sentAt || video?.createdAt || null;
-  const stream = canPlay && video ? mediaStreamUrl(video.id) : "";
+  const dateValue = video.sentAt || video.createdAt || null;
+  const stream = canPlay ? mediaStreamUrl(video.id) : "";
   const thumbSrc = stream ? `${stream}#t=0.5` : "";
+  const statusBadge = portalStatusBadge(video, variant, isNew, locked);
+  const showDecisionActions = canApprove || canRequestRevision;
 
   return (
     <article
       className={cn(
-        "flex h-full flex-col overflow-hidden rounded-2xl border bg-card shadow-sm",
+        "flex h-full flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-shadow hover:shadow-md",
         locked
-          ? "border-amber-500/25"
-          : "border-border/70",
+          ? "border-amber-500/30"
+          : isNew
+            ? "border-brand/45 ring-1 ring-brand/15"
+            : video.status === "APPROVED_BY_CUSTOMER"
+              ? "border-emerald-500/25"
+              : "border-border/70",
       )}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3.5 py-2.5 text-start">
-        <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
-        {!video ? (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            ناموجود
-          </span>
-        ) : locked ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-200">
-            <Lock className="h-3 w-3" />
-            قفل‌شده
-          </span>
-        ) : (
-          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
-            آماده
-          </span>
-        )}
-      </div>
-
-      {/* Preview */}
-      <div className="bg-muted/30 p-3">
-        <div className="relative overflow-hidden rounded-xl bg-neutral-950 ring-1 ring-black/5 dark:ring-white/5">
-          {!video ? (
-            <div className="flex aspect-video items-center justify-center bg-muted text-muted-foreground">
-              <div className="flex flex-col items-center gap-1.5 px-3 text-center">
-                <Film className="h-5 w-5 opacity-40" />
-                <p className="text-[11px]">{emptyLabel}</p>
-              </div>
-            </div>
-          ) : canPlay ? (
-            <button
-              type="button"
-              onClick={() => onView(video)}
-              className="group relative block w-full text-start"
-              aria-label="مشاهده ویدیو"
-            >
-              <video
-                src={thumbSrc}
-                preload="metadata"
-                muted
-                playsInline
-                className="aspect-video w-full object-cover"
-                onLoadedMetadata={(e) => {
-                  const d = e.currentTarget.duration;
-                  if (Number.isFinite(d) && d > 0) setDurationSec(d);
-                }}
-              />
-              <span className="absolute inset-0 flex items-center justify-center bg-black/15 transition-colors group-hover:bg-black/40">
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-card text-foreground shadow-lg ring-1 ring-border/60 transition-transform group-hover:scale-105">
-                  <Play className="h-4 w-4 fill-current ps-0.5" />
-                </span>
+      <div className="relative bg-neutral-950">
+        {canPlay ? (
+          <button
+            type="button"
+            onClick={() => onView(video)}
+            className="group relative block w-full text-start"
+            aria-label="مشاهده ویدیو"
+          >
+            <video
+              src={thumbSrc}
+              preload="metadata"
+              muted
+              playsInline
+              className="aspect-video w-full object-cover"
+              onLoadedMetadata={(e) => {
+                const d = e.currentTarget.duration;
+                if (Number.isFinite(d) && d > 0) setDurationSec(d);
+              }}
+            />
+            <span className="absolute inset-0 flex items-center justify-center bg-black/10 transition-colors group-hover:bg-black/35">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/95 text-foreground shadow-lg ring-1 ring-black/10 transition-transform group-hover:scale-105">
+                <Play className="h-5 w-5 fill-current ps-0.5" />
               </span>
-            </button>
-          ) : (
-            <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-gradient-to-br from-neutral-300 via-neutral-200 to-neutral-300 dark:from-neutral-800 dark:via-neutral-900 dark:to-neutral-800">
-              <div className="absolute inset-0 scale-110 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.35),transparent_55%)] blur-sm" />
-              <div className="absolute inset-0 bg-background/35 backdrop-blur-[2px]" />
-              <div className="relative z-10 flex flex-col items-center gap-1.5">
-                <span className="flex h-10 w-10 items-center justify-center rounded-full border border-amber-500/30 bg-background/95 text-amber-700 shadow-sm dark:text-amber-300">
-                  <Lock className="h-4 w-4" />
-                </span>
-                <span className="text-[10px] font-medium text-muted-foreground">
-                  دسترسی قفل است
-                </span>
-              </div>
+            </span>
+          </button>
+        ) : (
+          <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-gradient-to-br from-neutral-300 via-neutral-200 to-neutral-300 dark:from-neutral-800 dark:via-neutral-900 dark:to-neutral-800">
+            <div className="absolute inset-0 bg-background/40 backdrop-blur-[2px]" />
+            <div className="relative z-10 flex flex-col items-center gap-2 px-4 text-center">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-amber-500/30 bg-background/95 text-amber-700 shadow-sm dark:text-amber-300">
+                <Lock className="h-5 w-5" />
+              </span>
+              <span className="text-xs font-medium text-muted-foreground">
+                دسترسی قفل است
+              </span>
             </div>
-          )}
+          </div>
+        )}
+
+        <div className="absolute start-3 top-3 flex flex-wrap gap-1.5">
+          <Badge variant={statusBadge.tone} className="h-5 px-2 text-[10px] shadow-sm">
+            {statusBadge.label}
+          </Badge>
+          {video.version != null ? (
+            <Badge variant="secondary" className="h-5 px-2 text-[10px] shadow-sm">
+              نسخه {video.version}
+            </Badge>
+          ) : null}
         </div>
       </div>
 
-      {/* Info + actions */}
-      <div className="flex flex-1 flex-col gap-3 px-3.5 pb-3.5 text-start">
-        {video ? (
-          <>
-            <div className="space-y-2">
-              <p
-                className="line-clamp-2 text-sm font-semibold leading-snug"
-                title={video.name}
+      <div className="flex flex-1 flex-col gap-3 p-4 text-start">
+        <div className="space-y-2">
+          <p
+            className="line-clamp-2 text-sm font-semibold leading-snug"
+            title={video.name}
+          >
+            {video.name}
+          </p>
+
+          <dl className="grid grid-cols-3 gap-2 text-[11px]">
+            <MetaTile label="مدت" value={formatDuration(durationSec)} />
+            <MetaTile
+              label="حجم"
+              value={
+                video.sizeBytes != null ? formatFileSize(video.sizeBytes) : "—"
+              }
+            />
+            <MetaTile
+              label="تاریخ"
+              value={dateValue ? formatDate(dateValue) : "—"}
+            />
+          </dl>
+
+          {locked ? (
+            <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+              {video.accessMessage ||
+                "پس از تسویه پرداخت، پخش و دانلود فعال می‌شود."}
+            </p>
+          ) : null}
+
+          {video.status === "REVISION_REQUESTED" && video.revisionNotes ? (
+            <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
+              <span className="font-medium text-foreground">درخواست اصلاح: </span>
+              {video.revisionNotes}
+            </p>
+          ) : null}
+
+          {video.status === "APPROVED_BY_CUSTOMER" ? (
+            <p className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              این ویدیو تأیید شده است.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="mt-auto space-y-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {canPlay ? (
+              <Button
+                size="sm"
+                variant="brand"
+                className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
+                onClick={() => onView(video)}
               >
-                {video.name}
-              </p>
-
-              <dl className="grid grid-cols-2 gap-2 text-[11px]">
-                <InfoCell label="مدت" value={formatDuration(durationSec)} />
-                <InfoCell
-                  label="حجم"
-                  value={
-                    video.sizeBytes != null
-                      ? formatFileSize(video.sizeBytes)
-                      : "—"
-                  }
-                />
-                <InfoCell
-                  label="تاریخ"
-                  value={dateValue ? formatDate(dateValue) : "—"}
-                  className="col-span-2"
-                />
-              </dl>
-
-              {locked ? (
-                <p className="rounded-lg bg-amber-500/5 px-2.5 py-2 text-[11px] leading-5 text-muted-foreground">
-                  {video.accessMessage ||
-                    "پس از تسویه پرداخت، پخش و دانلود فعال می‌شود."}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="mt-auto flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-              {canPlay ? (
-                <Button
-                  size="sm"
-                  variant="brand"
-                  className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
-                  onClick={() => onView(video)}
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                  مشاهده ویدیو
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
-                  asChild
-                >
-                  <Link href={paymentDetailsHref}>
-                    <Wallet className="h-3.5 w-3.5" />
-                    مشاهده جزئیات پرداخت
-                  </Link>
-                </Button>
-              )}
-
+                <Eye className="h-3.5 w-3.5" />
+                مشاهده ویدیو
+              </Button>
+            ) : (
               <Button
                 size="sm"
                 variant="outline"
                 className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
-                disabled={!canDownload || downloading}
-                onClick={async () => {
-                  if (!canDownload || !video) return;
-                  setDownloading(true);
-                  try {
-                    await downloadMediaFile(video.id, video.name);
-                  } catch (e) {
-                    toast.error(
-                      e instanceof Error ? e.message : "دانلود ناموفق بود",
-                    );
-                  } finally {
-                    setDownloading(false);
-                  }
-                }}
+                asChild
               >
-                {downloading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : locked ? (
-                  <Lock className="h-3.5 w-3.5" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-                دانلود ویدیو
+                <Link href={paymentDetailsHref}>
+                  <Wallet className="h-3.5 w-3.5" />
+                  جزئیات پرداخت
+                </Link>
               </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
+              disabled={!canDownload || downloading}
+              onClick={async () => {
+                if (!canDownload) return;
+                setDownloading(true);
+                try {
+                  await downloadMediaFile(video.id, video.name);
+                } catch (e) {
+                  toast.error(
+                    e instanceof Error ? e.message : "دانلود ناموفق بود",
+                  );
+                } finally {
+                  setDownloading(false);
+                }
+              }}
+            >
+              {downloading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : locked ? (
+                <Lock className="h-3.5 w-3.5" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              دانلود ویدیو
+            </Button>
+          </div>
+
+          {showDecisionActions ? (
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-2.5">
+              <p className="mb-2 text-[10px] font-medium text-muted-foreground">
+                تأیید یا رد این ویدیو
+              </p>
+              {canApprove && variant === "CLEAN" ? (
+                <p className="mb-2 text-[11px] leading-5 text-muted-foreground">
+                  با تأیید نسخه بدون واترمارک، در صورت تسویه کامل پرداخت، پروژه
+                  تکمیل می‌شود.
+                </p>
+              ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row">
+                {canApprove ? (
+                  <Button
+                    variant="brand"
+                    size="sm"
+                    className="h-9 flex-1 gap-1.5 text-xs"
+                    disabled={isApproving || isRequesting}
+                    onClick={() =>
+                      onApprove?.({
+                        videoType: variant,
+                        fileId: video.id,
+                      })
+                    }
+                  >
+                    {isApproving ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    )}
+                    تأیید
+                  </Button>
+                ) : null}
+                {canRequestRevision ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 flex-1 gap-1.5 text-xs"
+                    disabled={isApproving || isRequesting}
+                    onClick={() => onRequestRevision(video)}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    رد / درخواست اصلاح
+                  </Button>
+                ) : null}
+              </div>
             </div>
-          </>
-        ) : (
-          <p className="py-2 text-center text-xs text-muted-foreground">
-            {emptyLabel}
-          </p>
-        )}
+          ) : null}
+        </div>
       </div>
     </article>
   );
 }
 
-function InfoCell({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
+function MetaTile({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      className={cn(
-        "rounded-lg bg-muted/40 px-2.5 py-1.5",
-        className,
-      )}
-    >
+    <div className="rounded-lg bg-muted/45 px-2.5 py-2">
       <dt className="text-[10px] text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 truncate font-medium text-foreground">{value}</dd>
+      <dd className="mt-0.5 truncate text-xs font-medium text-foreground">
+        {value}
+      </dd>
     </div>
   );
 }

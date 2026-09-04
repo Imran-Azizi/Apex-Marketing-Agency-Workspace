@@ -9,14 +9,26 @@ import {
   PROMPT_VERSION,
   getModelConfig,
   resolveGenerationParams,
-  resolveModelsForAgent,
 } from './models.config.js';
 import { getAgentPrompt } from './prompts/index.js';
-import { getLlmProvider, getActiveProviderInfo } from './provider.factory.js';
+import {
+  getActiveProviderInfo,
+  listConfiguredLlmProviders,
+  modelsForProvider,
+} from './provider.factory.js';
 import { openRouterService } from './openrouter.service.js';
-import { extractJson, validateAgentOutput, normalizePipelineOutputs } from './validate.js';
+import { extractJson, validateAgentOutput, normalizePipelineOutputs, synthesizeStoryboardFromInput } from './validate.js';
 import { formatAiError, createAiError } from './errors.js';
 import { mockOutput } from './mock.service.js';
+import {
+  capFreeMaxTokens,
+  clearFreeModelCooldown,
+  cooldownMsForError,
+  getFreeModelRuntime,
+  isCatalogModelFree,
+  markFreeModelUnavailable,
+  resolveFreeModelsForTask,
+} from './openrouter-free-models.js';
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -77,44 +89,215 @@ export function sanitizeAiInput(input = {}) {
   };
 }
 
-async function completeWithModelFallback({
-  provider,
+function parseAgentCompletion(agentType, text, projectId) {
+  const parsed = extractJson(text);
+  if (!parsed || typeof parsed !== 'object' || parsed.raw) {
+    const err = createAiError('پاسخ هوش مصنوعی معتبر نبود. دوباره تولید کنید.', {
+      code: 'invalid_response',
+      status: 400,
+    });
+    throw err;
+  }
+  if (projectId && !parsed.projectId) parsed.projectId = projectId;
+  return validateAgentOutput(agentType, parsed, projectId);
+}
+
+async function completeWithPaidProviders({
   agentType,
   system,
   userContent,
   modelOverride,
+  params,
+  accept,
 }) {
-  const models = resolveModelsForAgent(agentType, modelOverride);
-  const params = resolveGenerationParams(agentType);
+  const providers = listConfiguredLlmProviders();
   let lastError;
 
-  for (const model of models) {
-    try {
-      const result = await provider.completeChatWithRetry({
-        model,
-        system,
-        userContent,
-        temperature: params.temperature,
-        maxTokens: params.maxTokens,
-        responseFormat: params.responseFormat,
-        timeoutMs: params.timeoutMs,
-      });
-      return result;
-    } catch (err) {
-      lastError = err;
-      const info = formatAiError(err, provider.id);
-      // Try backup model on not-found / server errors; stop on auth/quota.
-      if (
-        info.code === 'invalid_api_key' ||
-        info.code === 'insufficient_quota' ||
-        info.code === 'bad_request'
-      ) {
-        throw Object.assign(err, info);
+  for (const provider of providers) {
+    const models = modelsForProvider(provider.id, agentType, modelOverride);
+    for (const model of models) {
+      try {
+        const result = await provider.completeChatWithRetry({
+          model,
+          system,
+          userContent,
+          temperature: params.temperature,
+          maxTokens: params.maxTokens,
+          responseFormat: params.responseFormat,
+          timeoutMs: params.timeoutMs,
+        });
+        if (typeof accept === 'function') {
+          result.parsed = accept(result);
+        }
+        if (provider.id !== (env.aiProvider || 'openrouter')) {
+          console.warn(
+            `[AI] fell back to ${provider.id}/${model} after ${lastError?.message || 'primary failure'}`,
+          );
+        }
+        return result;
+      } catch (err) {
+        lastError = err;
+        const info = formatAiError(err, provider.id);
+        console.warn(
+          `[AI] ${provider.id}/${model} failed:`,
+          info.code || err.code,
+          err.status || info.status || '',
+          String(err.body || err.message || '').slice(0, 180),
+        );
+        if (info.code === 'invalid_api_key') break;
+        if (info.code === 'invalid_response') {
+          console.warn(
+            `[AI] ${provider.id}/${model} JSON invalid:`,
+            String(err.message || '').slice(0, 120),
+          );
+        }
       }
     }
   }
 
-  throw lastError || createAiError('All AI models failed', { provider: provider.id });
+  throw lastError || createAiError('All AI models failed', { provider: env.aiProvider });
+}
+
+async function completeWithFreeOpenRouterModels({
+  agentType,
+  system,
+  userContent,
+  modelOverride,
+  params,
+  accept,
+}) {
+  if (!openRouterService.isConfigured()) {
+    throw createAiError('OPENROUTER_API_KEY is not configured', {
+      code: 'invalid_api_key',
+      status: 401,
+      provider: 'openrouter',
+    });
+  }
+
+  const models = await resolveFreeModelsForTask(agentType, modelOverride);
+  if (!models.length) {
+    throw createAiError('هیچ مدل رایگان OpenRouter در دسترس نیست.', {
+      code: 'model_not_found',
+      status: 404,
+      provider: 'openrouter',
+    });
+  }
+
+  let lastError;
+  for (const model of models) {
+    if (!isCatalogModelFree(model)) {
+      console.warn(`[AI] skipped non-free OpenRouter model ${model.id}`);
+      continue;
+    }
+    try {
+      const result = await openRouterService.completeChatWithRetry({
+        model: model.id,
+        system,
+        userContent,
+        temperature: params.temperature,
+        maxTokens: capFreeMaxTokens(params.maxTokens, model),
+        responseFormat: model.supportsJson ? params.responseFormat : null,
+        timeoutMs: params.timeoutMs,
+        retries: 1,
+      });
+      if (typeof accept === 'function') {
+        result.parsed = accept(result);
+      }
+      clearFreeModelCooldown(model.id);
+      return result;
+    } catch (err) {
+      lastError = err;
+      const info = formatAiError(err, 'openrouter');
+      console.warn(
+        `[AI] openrouter/${model.id} failed:`,
+        info.code || err.code,
+        err.status || info.status || '',
+        String(err.body || err.message || '').slice(0, 180),
+      );
+      if (info.code === 'invalid_api_key') throw Object.assign(err, info);
+      if (
+        info.code === 'model_not_found' ||
+        info.code === 'rate_limit' ||
+        info.code === 'insufficient_quota' ||
+        info.code === 'server_error' ||
+        info.code === 'timeout' ||
+        info.code === 'context_length'
+      ) {
+        markFreeModelUnavailable(model.id, cooldownMsForError(info.code));
+      }
+    }
+  }
+
+  throw lastError || createAiError('All free OpenRouter models failed', {
+    provider: 'openrouter',
+  });
+}
+
+/**
+ * Shared LLM entry used by content pipeline, portfolio copy, and sales assistant.
+ * Free-only mode never calls Gemini/OpenAI/paid OpenRouter slugs.
+ */
+export async function completeWithModelFallback({
+  agentType,
+  system,
+  userContent,
+  modelOverride,
+  accept,
+}) {
+  const params = resolveGenerationParams(agentType);
+  const runtime = await getFreeModelRuntime();
+  const override =
+    runtime.freeModelsOnly &&
+    modelOverride &&
+    !String(modelOverride).endsWith(':free')
+      ? undefined
+      : modelOverride;
+
+  if (runtime.freeModelsOnly) {
+    return completeWithFreeOpenRouterModels({
+      agentType,
+      system,
+      userContent,
+      modelOverride: override,
+      params,
+      accept,
+    });
+  }
+
+  let lastFreeError = null;
+  if (runtime.allowPaidFallback) {
+    try {
+      return await completeWithFreeOpenRouterModels({
+        agentType,
+        system,
+        userContent,
+        modelOverride: override,
+        params,
+        accept,
+      });
+    } catch (err) {
+      lastFreeError = err;
+      const info = formatAiError(err, 'openrouter');
+      if (info.code === 'invalid_api_key') throw err;
+      console.warn(
+        `[AI] free OpenRouter pool failed; paid fallback enabled:`,
+        info.code || err.code,
+      );
+    }
+  }
+
+  try {
+    return await completeWithPaidProviders({
+      agentType,
+      system,
+      userContent,
+      modelOverride,
+      params,
+      accept,
+    });
+  } catch (err) {
+    throw err || lastFreeError;
+  }
 }
 
 /**
@@ -161,8 +344,8 @@ export async function runAgent({
     };
   }
 
-  const provider = getLlmProvider();
-  if (!provider.isConfigured()) {
+  const configuredProviders = listConfiguredLlmProviders();
+  if (!configuredProviders.length) {
     if (cfg.allowMockFallback) {
       const output = validateAgentOutput(
         agentType,
@@ -179,43 +362,65 @@ export async function runAgent({
         feature: agentType,
         usedFallback: true,
         fallbackCode: 'invalid_api_key',
-        fallbackError: `کلید API برای ${provider.id} تنظیم نشده است.`,
+        fallbackError: 'هیچ سرویس AI پیکربندی نشده است.',
       };
     }
-    throw createAiError(`AI provider ${provider.id} is not configured`, {
+    throw createAiError('No AI provider is configured', {
       code: 'invalid_api_key',
       status: 401,
-      provider: provider.id,
+      provider: cfg.provider,
     });
   }
 
   try {
     const completion = await completeWithModelFallback({
-      provider,
       agentType,
       system,
       userContent: safeInput,
       modelOverride: model,
+      accept: (result) => parseAgentCompletion(agentType, result.text, input?.projectId),
     });
 
-    const parsed = extractJson(completion.text);
-    if (parsed && typeof parsed === 'object' && !parsed.projectId && input?.projectId) {
-      parsed.projectId = input.projectId;
-    }
-
-    const output = validateAgentOutput(agentType, parsed, input?.projectId);
+    const output =
+      completion.parsed ||
+      parseAgentCompletion(agentType, completion.text, input?.projectId);
 
     return {
       model: completion.model,
       promptVersion,
       output,
-      provider: completion.provider || provider.id,
+      provider: completion.provider || cfg.provider,
       tokenUsage: completion.usage,
       durationMs: Date.now() - started,
       feature: agentType,
     };
   } catch (err) {
-    const info = formatAiError(err, provider.id);
+    const info = formatAiError(err, err.provider || cfg.provider);
+    if (
+      agentType === 'STORYBOARD' &&
+      info.code !== 'invalid_api_key' &&
+      safeInput?.priorOutputs?.scenario
+    ) {
+      try {
+        const synthesized = synthesizeStoryboardFromInput(safeInput);
+        const output = validateAgentOutput('STORYBOARD', synthesized, input?.projectId);
+        console.warn(
+          '[AI] storyboard recovered from scenario after',
+          info.code || err.code,
+        );
+        return {
+          model: 'storyboard-from-scenario',
+          promptVersion,
+          output,
+          provider: 'derived',
+          tokenUsage: null,
+          durationMs: Date.now() - started,
+          feature: agentType,
+        };
+      } catch (synthErr) {
+        console.warn('[AI] storyboard synthesis failed:', synthErr.message);
+      }
+    }
     if (cfg.allowMockFallback) {
       const output = validateAgentOutput(
         agentType,
@@ -238,7 +443,7 @@ export async function runAgent({
     const failed = createAiError(info.messageFa || err.message, {
       code: info.code,
       status: info.status || 502,
-      provider: provider.id,
+      provider: err.provider || cfg.provider,
       cause: err,
     });
     Object.assign(failed, info);
@@ -366,7 +571,7 @@ export const aiProvider = {
   generatePipelineLocal: generatePipeline,
   async generateImagesFromPrompts(
     prompts = [],
-    { size = '1920x1080', seeds = [], enhance = false } = {},
+    { size = '1920x1080', seeds = [], enhance = false, preferQuality = false } = {},
   ) {
     const list = Array.isArray(prompts) ? prompts.map((p) => String(p || '')) : [];
     if (!list.length) {
@@ -454,8 +659,9 @@ export const aiProvider = {
       if (!env.openrouterApiKey) return null;
       const model = env.openrouterImageModel;
       const images = [];
-      const batchSize = 3;
-      for (let start = 0; start < promptList.length; start += batchSize) {
+      let quotaFailed = false;
+      const batchSize = 2;
+      for (let start = 0; start < promptList.length && !quotaFailed; start += batchSize) {
         const batch = promptList.slice(start, start + batchSize);
         await Promise.all(
           batch.map(async (prompt, batchIndex) => {
@@ -477,6 +683,8 @@ export const aiProvider = {
                 b64: result.b64 || null,
               });
             } catch (err) {
+              const info = formatAiError(err, 'openrouter');
+              if (info.code === 'insufficient_quota') quotaFailed = true;
               images.push({
                 index,
                 prompt,
@@ -489,7 +697,16 @@ export const aiProvider = {
           }),
         );
       }
+      for (let index = images.length; index < promptList.length; index += 1) {
+        images.push({
+          index,
+          prompt: promptList[index],
+          error: quotaFailed ? 'OpenRouter image quota' : 'skipped',
+          url: null,
+        });
+      }
       images.sort((a, b) => a.index - b.index);
+      if (quotaFailed && !images.some((img) => img.url || img.b64)) return null;
       return { provider: 'openrouter', model, images };
     }
 
@@ -604,7 +821,44 @@ export const aiProvider = {
     const hasSuccess = (result) =>
       Boolean(result?.images?.some((img) => img.url || img.b64));
 
+    function mergeImageResults(primary, fallback) {
+      if (!primary) return fallback;
+      if (!fallback) return primary;
+      const images = list.map((prompt, index) => {
+        const a = primary.images?.find((img) => img.index === index);
+        if (a?.url || a?.b64) return a;
+        const b = fallback.images?.find((img) => img.index === index);
+        if (b?.url || b?.b64) return { ...b, index };
+        return a || b || { index, prompt, url: null };
+      });
+      const fromPrimary = images.some((img) => {
+        const a = primary.images?.find((row) => row.index === img.index);
+        return Boolean((img.url || img.b64) && (a?.url || a?.b64));
+      });
+      return {
+        provider: fromPrimary && hasSuccess(fallback)
+          ? `${primary.provider}+${fallback.provider}`
+          : hasSuccess(primary)
+            ? primary.provider
+            : fallback.provider,
+        model: (hasSuccess(primary) ? primary.model : null) || fallback.model,
+        images,
+      };
+    }
+
     const mode = env.aiImageProvider || 'auto';
+
+    if (preferQuality) {
+      const orResult = await generateViaOpenRouter(list);
+      if (hasSuccess(orResult) && orResult.images.every((img) => img.url || img.b64 || !list[img.index])) {
+        return orResult;
+      }
+      const freeResult = await generateViaPollinations(list);
+      const merged = mergeImageResults(orResult, freeResult);
+      if (hasSuccess(merged)) return merged;
+      if (hasSuccess(orResult)) return orResult;
+      if (hasSuccess(freeResult)) return freeResult;
+    }
 
     if (mode === 'free' || mode === 'pollinations') {
       return (await generateViaPollinations(list)) || {

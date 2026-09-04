@@ -15,6 +15,12 @@ import {
   Inbox,
   Presentation,
   Handshake,
+  Kanban,
+  Wallet,
+  Receipt,
+  Banknote,
+  TrendingUp,
+  Bot,
 } from "lucide-react";
 
 export type InternalRole =
@@ -23,7 +29,8 @@ export type InternalRole =
   | "SALES"
   | "FINANCE"
   | "EDITOR"
-  | "NARRATOR";
+  | "NARRATOR"
+  | "PROJECT_MANAGER";
 
 export const INTERNAL_ROLES: InternalRole[] = [
   "MANAGER",
@@ -32,6 +39,7 @@ export const INTERNAL_ROLES: InternalRole[] = [
   "FINANCE",
   "EDITOR",
   "NARRATOR",
+  "PROJECT_MANAGER",
 ];
 
 export const ROLE_LABELS: Record<InternalRole, string> = {
@@ -41,6 +49,7 @@ export const ROLE_LABELS: Record<InternalRole, string> = {
   FINANCE: "مالی",
   EDITOR: "ادیتور",
   NARRATOR: "نریتور",
+  PROJECT_MANAGER: "مدیر پروژه",
 };
 
 export interface NavItem {
@@ -64,11 +73,11 @@ export function flattenNavLinks(items: NavItem[]): NavItem[] {
 export const ROLE_HOME: Record<InternalRole, string> = {
   MANAGER: "/manager/dashboard",
   ADMIN: "/manager/dashboard",
-  SALES: "/sales/dashboard",
-  /** Finance module removed — payment ops live in CRM / project detail. */
-  FINANCE: "/crm",
+  SALES: "/crm-sales",
+  FINANCE: "/finance",
   EDITOR: "/editor/dashboard",
   NARRATOR: "/narrator/dashboard",
+  PROJECT_MANAGER: "/project-manager/dashboard",
 };
 
 const MANAGER_NAV: NavItem[] = [
@@ -77,6 +86,8 @@ const MANAGER_NAV: NavItem[] = [
     label: "داشبورد مدیریت",
     icon: LayoutDashboard,
   },
+  { href: "/finance", label: "مالی", icon: Wallet },
+  { href: "/crm-sales", label: "CRM و فروش", icon: Kanban },
   { href: "/crm", label: "مدیریت مشتریان", icon: Users },
   { href: "/projects", label: "پروژه‌ها", icon: FolderKanban },
   {
@@ -116,18 +127,20 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
   MANAGER: MANAGER_NAV,
   ADMIN: MANAGER_NAV,
   SALES: [
-    { href: "/sales/dashboard", label: "داشبورد فروش", icon: LayoutDashboard },
-    { href: "/crm", label: "سرنخ و مشتری", icon: Users },
-    { href: "/projects", label: "پروژه‌ها (مشاهده)", icon: FolderKanban },
+    { href: "/crm-sales", label: "CRM و فروش", icon: Kanban },
+    { href: "/crm", label: "مدیریت مشتریان", icon: Users },
     {
       href: "/sales/interactions",
       label: "تعاملات مشتری",
       icon: MessageSquare,
     },
+    { href: "/sales/messages", label: "پیام‌های تماس", icon: Inbox },
   ],
   FINANCE: [
-    { href: "/crm", label: "CRM و پرداخت‌ها", icon: Users },
-    { href: "/projects", label: "پروژه‌ها", icon: FolderKanban },
+    { href: "/finance", label: "داشبورد مالی", icon: Wallet },
+    { href: "/finance/expenses", label: "مصارف شرکت", icon: Receipt },
+    { href: "/finance/salaries", label: "معاشات کارمندان", icon: Banknote },
+    { href: "/finance/pnl", label: "سود و زیان", icon: TrendingUp },
   ],
   EDITOR: [
     {
@@ -144,6 +157,14 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
       icon: LayoutDashboard,
     },
     { href: "/narrator/projects", label: "همه پروژه‌های", icon: Mic2 },
+  ],
+  PROJECT_MANAGER: [
+    {
+      href: "/project-manager/dashboard",
+      label: "داشبورد",
+      icon: LayoutDashboard,
+    },
+    { href: "/projects", label: "پروژه‌ها", icon: FolderKanban },
   ],
 };
 
@@ -181,13 +202,56 @@ export function canAssignProjectEditor(
   return hasPermission(permissions, "projects.assign", role);
 }
 
+/** Poster approve/reject is exclusive to Manager (and Admin). Editors never get these actions. */
+export function canReviewProjectPosters(
+  permissions: string[] | null | undefined,
+  role?: string | null,
+): boolean {
+  if (role === "EDITOR") return false;
+  if (!isFullAccessRole(role)) return false;
+  return hasPermission(permissions, "poster.approve", role);
+}
+
+/** Sending an approved poster to the customer is exclusive to Manager (and Admin). */
+export function canSendProjectPosters(
+  permissions: string[] | null | undefined,
+  role?: string | null,
+): boolean {
+  if (role === "EDITOR") return false;
+  if (!isFullAccessRole(role)) return false;
+  return hasPermission(permissions, "poster.send", role);
+}
+
+/** Final-video approve/revision is exclusive to Manager (and Admin). Editors never get these actions. */
+export function canReviewFinalVideos(
+  permissions: string[] | null | undefined,
+  role?: string | null,
+): boolean {
+  if (role === "EDITOR") return false;
+  if (!isFullAccessRole(role)) return false;
+  return hasPermission(permissions, "video.approve", role);
+}
+
+/** Sending approved final videos to the customer is exclusive to Manager (and Admin). */
+export function canSendFinalVideos(
+  permissions: string[] | null | undefined,
+  role?: string | null,
+): boolean {
+  if (role === "EDITOR") return false;
+  if (!isFullAccessRole(role)) return false;
+  return hasPermission(permissions, "video.send", role);
+}
+
 export function getHomePath(role: string | null | undefined): string {
   if (isInternalRole(role)) return ROLE_HOME[role];
   return "/login";
 }
 
 const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
+  { prefix: "/business-assistant", permission: "business_assistant.view" },
+  { prefix: "/sales-assistant", permission: "sales_assistant.view" },
   { prefix: "/sales/interactions", permission: "crm.view" },
+  { prefix: "/sales/messages", permission: "contact.view" },
   { prefix: "/manager/messages", permission: "contact.view" },
   { prefix: "/manager/customers", permission: "customers.view" },
   { prefix: "/manager/portfolio", permission: "portfolio.view" },
@@ -196,16 +260,32 @@ const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
   { prefix: "/sales", permission: "dashboard.view" },
   { prefix: "/editor", permission: "video.view" },
   { prefix: "/narrator", permission: "narration.view" },
+  { prefix: "/project-manager", permission: "dashboard.view" },
   { prefix: "/employees", permission: "employees.view" },
   { prefix: "/catalog/services", permission: "services.view" },
   { prefix: "/backup", permission: "backup.view" },
   { prefix: "/settings", permission: "settings.view" },
+  { prefix: "/crm-sales", permission: "crm.view" },
   { prefix: "/crm", permission: "crm.view" },
+  { prefix: "/finance/projects", permission: "projects.view" },
+  { prefix: "/finance", permission: "finance.view" },
   { prefix: "/projects", permission: "projects.view" },
   { prefix: "/dashboard", permission: "dashboard.view" },
 ];
 
 const EXTRA_NAV: Array<NavItem & { permission: string }> = [
+  {
+    href: "/finance",
+    label: "مالی",
+    icon: Wallet,
+    permission: "finance.view",
+  },
+  {
+    href: "/crm-sales",
+    label: "CRM و فروش",
+    icon: Kanban,
+    permission: "crm.view",
+  },
   {
     href: "/crm",
     label: "مدیریت مشتریان",
@@ -290,6 +370,94 @@ function filterNavItem(
   return canAccessPath(role, item.href, permissions) ? item : null;
 }
 
+const FINANCE_EXTRA_NAV_BLOCKLIST = new Set([
+  "/crm",
+  "/crm-sales",
+  "/projects",
+]);
+
+const SALES_EXTRA_NAV_BLOCKLIST = new Set([
+  "/finance",
+  "/projects",
+  "/manager/messages",
+]);
+
+const ASSISTANT_NAV_CHILDREN: Array<NavItem & { permission: string }> = [
+  {
+    href: "/business-assistant",
+    label: "دستیار مدیریت",
+    icon: BriefcaseBusiness,
+    permission: "business_assistant.view",
+  },
+  {
+    href: "/sales-assistant",
+    label: "دستیار فروش",
+    icon: Bot,
+    permission: "sales_assistant.view",
+  },
+];
+
+const ASSISTANT_PATHS = new Set(
+  ASSISTANT_NAV_CHILDREN.map((item) => item.href),
+);
+
+function buildAssistantsNavGroup(
+  role: InternalRole,
+  permissions?: string[] | null,
+): NavItem | null {
+  const children = ASSISTANT_NAV_CHILDREN.filter((child) =>
+    hasPermission(permissions, child.permission, role),
+  ).map(({ permission: _permission, ...item }) => item);
+
+  if (!children.length) return null;
+
+  return {
+    href: "group:assistants",
+    label: "دستیارها",
+    icon: Bot,
+    children,
+  };
+}
+
+function stripAssistantEntries(items: NavItem[]): NavItem[] {
+  return items.filter(
+    (item) =>
+      item.href !== "group:assistants" && !ASSISTANT_PATHS.has(item.href),
+  );
+}
+
+function insertAssistantsGroup(
+  items: NavItem[],
+  group: NavItem,
+  role: InternalRole,
+): NavItem[] {
+  const next = stripAssistantEntries(items);
+
+  if (role === "SALES") {
+    return [group, ...next];
+  }
+
+  const financeIdx = next.findIndex((item) => item.href === "/finance");
+  if (financeIdx >= 0) {
+    const out = [...next];
+    out.splice(financeIdx + 1, 0, group);
+    return out;
+  }
+
+  const dashboardIdx = next.findIndex((item) => item.href.includes("/dashboard"));
+  if (dashboardIdx >= 0) {
+    const out = [...next];
+    out.splice(dashboardIdx + 1, 0, group);
+    return out;
+  }
+
+  return [group, ...next];
+}
+
+export function contactMessagesPath(role: string | null | undefined): string {
+  return role === "SALES" ? "/sales/messages" : "/manager/messages";
+}
+
 export function getNavItems(
   role: string | null | undefined,
   permissions?: string[] | null,
@@ -304,6 +472,12 @@ export function getNavItems(
   const seen = new Set(flattenNavLinks(filtered).map((item) => item.href));
   for (const extra of EXTRA_NAV) {
     if (seen.has(extra.href)) continue;
+    if (role === "FINANCE" && FINANCE_EXTRA_NAV_BLOCKLIST.has(extra.href)) {
+      continue;
+    }
+    if (role === "SALES" && SALES_EXTRA_NAV_BLOCKLIST.has(extra.href)) {
+      continue;
+    }
     if (!hasPermission(permissions, extra.permission, role)) continue;
     filtered.push({
       href: extra.href,
@@ -312,7 +486,13 @@ export function getNavItems(
     });
     seen.add(extra.href);
   }
-  return filtered;
+
+  const assistantsGroup = buildAssistantsNavGroup(role, permissions);
+  if (assistantsGroup) {
+    return insertAssistantsGroup(filtered, assistantsGroup, role);
+  }
+
+  return stripAssistantEntries(filtered);
 }
 
 export function canAccessPath(
@@ -321,6 +501,22 @@ export function canAccessPath(
   permissions?: string[] | null,
 ): boolean {
   if (!isInternalRole(role)) return false;
+
+  if (role === "FINANCE") {
+    for (const blocked of FINANCE_EXTRA_NAV_BLOCKLIST) {
+      if (pathname === blocked || pathname.startsWith(`${blocked}/`)) {
+        return false;
+      }
+    }
+  }
+
+  if (role === "SALES") {
+    for (const blocked of SALES_EXTRA_NAV_BLOCKLIST) {
+      if (pathname === blocked || pathname.startsWith(`${blocked}/`)) {
+        return false;
+      }
+    }
+  }
 
   const required = requiredPermissionForPath(pathname);
   if (!required) return false;

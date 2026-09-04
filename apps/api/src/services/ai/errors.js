@@ -10,6 +10,21 @@ const PROVIDER_LABEL = {
   mock: 'Mock',
 };
 
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_ABORTED',
+]);
+
 export function providerLabel(provider = 'openrouter') {
   return PROVIDER_LABEL[provider] || provider;
 }
@@ -29,6 +44,15 @@ export function formatAiError(err, provider = 'openrouter') {
   const type = parsed?.error?.type || parsed?.error?.status || null;
   const label = providerLabel(provider);
 
+  const causeCode = String(err?.cause?.code || err?.errno || '');
+  const networkHint = `${code || ''} ${causeCode} ${raw} ${err?.cause?.message || ''}`;
+  const isTransientNetwork =
+    TRANSIENT_NETWORK_CODES.has(String(code || '')) ||
+    TRANSIENT_NETWORK_CODES.has(causeCode) ||
+    /ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|fetch failed|socket hang up|other side closed|^terminated$|UND_ERR_|unavailable/i.test(
+      networkHint,
+    );
+
   if (code === 'ABORT_ERR' || err?.name === 'AbortError' || /timeout|aborted/i.test(raw)) {
     return {
       code: 'timeout',
@@ -40,9 +64,14 @@ export function formatAiError(err, provider = 'openrouter') {
   }
 
   if (
+    status === 402 ||
+    code === 402 ||
+    code === '402' ||
     code === 'insufficient_quota' ||
     type === 'insufficient_quota' ||
-    /insufficient_quota|insufficient.?credits|RESOURCE_EXHAUSTED|quota/i.test(raw)
+    /insufficient_quota|insufficient.?credits|more credits|can only afford|RESOURCE_EXHAUSTED|quota|payment required|insufficient funds/i.test(
+      raw,
+    )
   ) {
     return {
       code: 'insufficient_quota',
@@ -77,13 +106,26 @@ export function formatAiError(err, provider = 'openrouter') {
     };
   }
 
-  if (status === 404 || /model.?not.?found|NOT_FOUND|no endpoints found/i.test(raw)) {
+  if (status === 404 || /model.?not.?found|NOT_FOUND|no endpoints found|invalid model/i.test(raw)) {
     return {
       code: 'model_not_found',
       messageFa: 'مدل درخواستی در دسترس نیست. مدل پیش‌فرض یا پشتیبان را بررسی کنید.',
       messageEn: 'Requested model is not available.',
       retryable: true,
       status: 404,
+    };
+  }
+
+  if (
+    /context.?length|maximum context|too many tokens|prompt is too long|max.?context/i.test(raw)
+    && !/can only afford/i.test(raw)
+  ) {
+    return {
+      code: 'context_length',
+      messageFa: 'متن ورودی برای این مدل خیلی طولانی است. مدل دیگری با پنجره بزرگ‌تر امتحان می‌شود.',
+      messageEn: 'Prompt exceeds the model context window.',
+      retryable: true,
+      status: status || 400,
     };
   }
 
@@ -103,7 +145,7 @@ export function formatAiError(err, provider = 'openrouter') {
     };
   }
 
-  if (status >= 500 || /ECONNREFUSED|ENOTFOUND|fetch failed|unavailable/i.test(raw)) {
+  if (status >= 500 || isTransientNetwork) {
     return {
       code: 'server_error',
       messageFa: `سرویس ${label} موقتاً در دسترس نیست. دوباره تلاش کنید.`,
@@ -115,9 +157,13 @@ export function formatAiError(err, provider = 'openrouter') {
 
   return {
     code: `${provider}_error`,
-    messageFa: `ارتباط با ${label} برقرار نشد.`,
-    messageEn: `${label} request failed.`,
-    retryable: false,
+    messageFa: status
+      ? `ارتباط با ${label} برقرار نشد (کد ${status}).`
+      : `ارتباط با ${label} برقرار نشد.`,
+    messageEn: status
+      ? `${label} request failed (${status}).`
+      : `${label} request failed.`,
+    retryable: !status || status >= 500 || status === 408 || status === 409,
     status: status || 502,
   };
 }

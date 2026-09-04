@@ -72,15 +72,25 @@ const DATE_OPTIONS = [
 ];
 
 function TaskCard({ task }: { task: NarratorTaskSummary }) {
+  const projectCompleted = task.projectStatus === "COMPLETED";
+  const statusLabel = projectCompleted
+    ? "تکمیل‌شده"
+    : NARRATION_STATUS_LABEL[task.status] || task.status;
+  const statusVariant = projectCompleted
+    ? "success"
+    : narrationStatusVariant(task.status);
+
   return (
     <article
       className={cn(
         "flex h-full flex-col gap-3 rounded-2xl border bg-card p-4 shadow-sm transition-all hover:border-brand/35 hover:shadow-md",
-        task.status === "REVISION_REQUESTED"
-          ? ALERT_CARD_BORDER
-          : task.overdue
-            ? "border-destructive/30"
-            : "border-border/70",
+        projectCompleted
+          ? "border-emerald-500/25"
+          : task.status === "REVISION_REQUESTED"
+            ? ALERT_CARD_BORDER
+            : task.overdue
+              ? "border-destructive/30"
+              : "border-border/70",
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -95,10 +105,10 @@ function TaskCard({ task }: { task: NarratorTaskSummary }) {
           )}
         </div>
         <Badge
-          variant={narrationStatusVariant(task.status)}
+          variant={statusVariant}
           className="shrink-0 font-normal"
         >
-          {NARRATION_STATUS_LABEL[task.status] || task.status}
+          {statusLabel}
         </Badge>
       </div>
 
@@ -375,10 +385,16 @@ export default function NarratorProjectsPage() {
                   {task.scriptPreview || "—"}
                 </p>
                 <Badge
-                  variant={narrationStatusVariant(task.status)}
+                  variant={
+                    task.projectStatus === "COMPLETED"
+                      ? "success"
+                      : narrationStatusVariant(task.status)
+                  }
                   className="w-fit font-normal"
                 >
-                  {NARRATION_STATUS_LABEL[task.status] || task.status}
+                  {task.projectStatus === "COMPLETED"
+                    ? "تکمیل‌شده"
+                    : NARRATION_STATUS_LABEL[task.status] || task.status}
                 </Badge>
                 <span className="hidden text-sm tabular-nums text-muted-foreground md:inline">
                   {task.deadline ? formatDate(task.deadline) : "—"}

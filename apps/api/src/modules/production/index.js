@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
-import { requireInternal, requirePermission, denyRoles } from "../../middleware/rbac.js";
+import { requireInternal, requirePermission, requireRoles, denyRoles } from "../../middleware/rbac.js";
 import { requireCsrf } from "../../middleware/csrf.js";
 import { ok } from "../../utils/response.js";
 import { productionService } from "./service.js";
+import { posterService } from "./posterService.js";
 
 const router = Router();
 router.use(requireAuth, requireInternal);
@@ -218,6 +219,8 @@ router.post(
 router.post(
   "/projects/:projectId/final-products/:fileId/review",
   requireCsrf,
+  denyRoles("EDITOR"),
+  requireRoles("MANAGER", "ADMIN"),
   requirePermission("video.approve"),
   async (req, res, next) => {
     try {
@@ -240,6 +243,8 @@ router.post(
 router.post(
   "/projects/:projectId/final-products/send",
   requireCsrf,
+  denyRoles("EDITOR"),
+  requireRoles("MANAGER", "ADMIN"),
   requirePermission("video.send"),
   async (req, res, next) => {
     try {
@@ -247,6 +252,87 @@ router.post(
         res,
         await productionService.sendFinalVideos(
           req.params.projectId,
+          req.body || {},
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
+  "/projects/:projectId/posters",
+  requirePermission("poster.view", "video.view"),
+  async (req, res, next) => {
+    try {
+      ok(res, await posterService.list(req.params.projectId, req.auth));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  "/projects/:projectId/posters",
+  requireCsrf,
+  requirePermission("poster.upload", "video.upload"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await posterService.upload(
+          req.params.projectId,
+          req.body || {},
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  "/projects/:projectId/posters/:posterId/review",
+  requireCsrf,
+  denyRoles("EDITOR"),
+  requireRoles("MANAGER", "ADMIN"),
+  requirePermission("poster.approve"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await posterService.review(
+          req.params.projectId,
+          req.params.posterId,
+          req.body || {},
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  "/projects/:projectId/posters/:posterId/send",
+  requireCsrf,
+  denyRoles("EDITOR"),
+  requireRoles("MANAGER", "ADMIN"),
+  requirePermission("poster.send"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await posterService.send(
+          req.params.projectId,
+          req.params.posterId,
           req.body || {},
           req.auth,
           req,

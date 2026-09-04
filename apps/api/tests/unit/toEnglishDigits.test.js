@@ -48,6 +48,6 @@ test('normalizeDigitsDeep walks body/query-like objects', () => {
   });
 });
 
-test('normalizeWhatsapp accepts Persian local numbers', () => {
+test('normalizeWhatsapp accepts Persian digits and normalizes Afghan local numbers', () => {
   assert.equal(normalizeWhatsapp('۰۷۰۰۱۲۳۴۵۶'), '93700123456');
 });

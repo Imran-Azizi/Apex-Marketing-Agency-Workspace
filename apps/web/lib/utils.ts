@@ -105,37 +105,23 @@ export function formatCurrency(amount: number) {
 
 /**
  * Display-only phone formatting. Does not mutate stored values.
- * Supports common Afghanistan WhatsApp/mobile patterns.
  */
 export function formatPhoneDisplay(value: string | null | undefined): string {
   if (!value?.trim()) return "—";
 
   const raw = toEnglishDigits(value.trim());
-  const digits = raw.replace(/\D/g, "");
+  if (raw.startsWith("+")) return raw;
 
-  // Local Afghan mobile: 07XXXXXXXX (10 digits) → 0789 577 024
+  const digits = raw.replace(/\D/g, "");
   if (/^07\d{8}$/.test(digits)) {
     return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
   }
-
-  // Country code without plus: 937XXXXXXXX → +93 789 577 024
-  if (/^93\d{9}$/.test(digits)) {
-    return `+93 ${digits.slice(2, 5)} ${digits.slice(5, 8)} ${digits.slice(8)}`;
-  }
-
-  // Already international with leading 0 after country strip handled above;
-  // 9-digit national (no leading 0): 7XXXXXXXX → 789 577 024
-  if (/^7\d{8}$/.test(digits)) {
-    return `${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
-  }
-
-  // Preserve original if pattern is unknown, but normalize internal spaces lightly
-  return raw.replace(/\s+/g, " ");
+  if (/^\d{8,15}$/.test(digits)) return `+${digits}`;
+  return raw;
 }
 
 /**
  * Normalize a phone/WhatsApp value to international digits for wa.me links.
- * Returns null when the number cannot be used for WhatsApp.
  */
 export function toWhatsAppDigits(value: string | null | undefined): string | null {
   if (!value?.trim()) return null;
@@ -151,8 +137,7 @@ export function toWhatsAppDigits(value: string | null | undefined): string | nul
     digits = `93${digits}`;
   }
 
-  // Accept standard Afghanistan WhatsApp or other E.164-ish numbers.
-  if (/^93\d{9}$/.test(digits) || /^\d{10,15}$/.test(digits)) {
+  if (/^\d{8,15}$/.test(digits)) {
     return digits;
   }
 

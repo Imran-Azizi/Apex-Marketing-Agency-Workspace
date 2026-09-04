@@ -2,6 +2,8 @@ import dns from "dns";
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { startBackupScheduler } from "./services/backupScheduler.js";
+import { startSalesAssistantScheduler } from "./modules/sales-assistant/scheduler.js";
+import { attachChatRealtime } from "./realtime/chatSocket.js";
 
 try {
   dns.setDefaultResultOrder("ipv4first");
@@ -78,7 +80,17 @@ const server = app.listen(env.port, "0.0.0.0", () => {
   startBackupScheduler().catch((err) =>
     console.error("[boot] backup scheduler:", err?.message || err),
   );
+  startSalesAssistantScheduler().catch((err) =>
+    console.error("[boot] sales assistant scheduler:", err?.message || err),
+  );
 });
+
+try {
+  attachChatRealtime(server);
+  console.log("[boot] chat realtime attached");
+} catch (err) {
+  console.error("[boot] chat realtime failed:", err?.message || err);
+}
 
 // Large Cloudinary video uploads can exceed Node's default request timeout.
 server.requestTimeout = 20 * 60 * 1000;

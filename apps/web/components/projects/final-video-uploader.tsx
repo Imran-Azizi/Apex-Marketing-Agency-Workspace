@@ -650,15 +650,23 @@ export function FinalVideoUploader({
   disabled,
   existingItems,
   onUploaded,
+  showHistory = true,
+  seedExisting = true,
 }: {
   projectId: string;
   disabled?: boolean;
   existingItems?: FinalVideoItem[];
   onUploaded?: () => void;
+  showHistory?: boolean;
+  seedExisting?: boolean;
 }) {
   const qc = useQueryClient();
-  const existingWm = latestByType(existingItems, "WATERMARKED");
-  const existingClean = latestByType(existingItems, "CLEAN");
+  const existingWm = seedExisting
+    ? latestByType(existingItems, "WATERMARKED")
+    : null;
+  const existingClean = seedExisting
+    ? latestByType(existingItems, "CLEAN")
+    : null;
 
   const [wm, setWm] = useState<SlotState>(() => emptySlot(existingWm));
   const [clean, setClean] = useState<SlotState>(() => emptySlot(existingClean));
@@ -907,7 +915,7 @@ export function FinalVideoUploader({
         </div>
       </div>
 
-      <EditorVersionHistory items={existingItems} />
+      <EditorVersionHistory items={showHistory ? existingItems : undefined} />
 
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
         <DialogContent className="max-w-3xl text-start sm:max-w-3xl" dir="rtl">

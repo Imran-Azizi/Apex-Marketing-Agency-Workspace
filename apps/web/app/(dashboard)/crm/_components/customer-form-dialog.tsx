@@ -28,6 +28,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { whatsappFieldSchema } from "@/lib/phone";
+import { WhatsAppPhoneInput } from "@/components/shared/whatsapp-phone-input";
 import { parseLeadSource } from "./constants";
 import type { CrmCustomer, CrmFormOptions } from "./types";
 
@@ -35,7 +37,7 @@ const NONE = "__none__";
 
 const formSchema = z.object({
   personName: z.string().min(2, "نام باید حداقل ۲ حرف باشد"),
-  whatsapp: z.string().min(8, "شماره واتساپ معتبر وارد کنید"),
+  whatsapp: whatsappFieldSchema,
   companyName: z.string().optional(),
   jobTitle: z.string().optional(),
   phone: z.string().optional(),
@@ -136,7 +138,9 @@ export function CustomerFormDialog({
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["crm-customers"] });
     if (customer?.id) {
-      queryClient.invalidateQueries({ queryKey: ["crm-customer", customer.id] });
+      queryClient.invalidateQueries({
+        queryKey: ["crm-customer", customer.id],
+      });
     }
   };
 
@@ -174,7 +178,7 @@ export function CustomerFormDialog({
     },
     onSuccess: () => {
       toast.success(
-        isEdit ? "اطلاعات مشتری به‌روزرسانی شد" : "مشتری با موفقیت ایجاد شد"
+        isEdit ? "اطلاعات مشتری به‌روزرسانی شد" : "مشتری با موفقیت ایجاد شد",
       );
       invalidate();
       onOpenChange(false);
@@ -198,7 +202,7 @@ export function CustomerFormDialog({
           ? err.message
           : isEdit
             ? "به‌روزرسانی مشتری ناموفق بود"
-            : "ایجاد مشتری ناموفق بود"
+            : "ایجاد مشتری ناموفق بود",
       );
     },
   });
@@ -207,9 +211,7 @@ export function CustomerFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>
-            {isEdit ? "ویرایش مشتری" : "مشتری جدید"}
-          </DialogTitle>
+          <DialogTitle>{isEdit ? "ویرایش مشتری" : "مشتری جدید"}</DialogTitle>
           <DialogDescription>
             {isEdit
               ? "اطلاعات مشتری را ویرایش کنید. شماره واتساپ قابل تغییر نیست."
@@ -236,12 +238,19 @@ export function CustomerFormDialog({
               <Label htmlFor="whatsapp">
                 واتساپ <span className="text-destructive">*</span>
               </Label>
-              <Input
-                id="whatsapp"
-                dir="ltr"
-                placeholder="0700123456"
-                disabled={isEdit}
-                {...register("whatsapp")}
+              <Controller
+                name="whatsapp"
+                control={control}
+                render={({ field }) => (
+                  <WhatsAppPhoneInput
+                    id="whatsapp"
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    disabled={isEdit}
+                    aria-invalid={!!errors.whatsapp}
+                  />
+                )}
               />
               {errors.whatsapp && (
                 <p className="text-sm text-destructive">

@@ -788,7 +788,14 @@ export const aiService = {
 
     setImmediate(() => {
       executePipelineJob(jobArgs).catch((err) => {
-        console.error('[AI pipeline]', workflow.id, err.message);
+        console.error(
+          '[AI pipeline]',
+          workflow.id,
+          err.status || '',
+          err.code || '',
+          err.message,
+          String(err.body || '').slice(0, 180),
+        );
       });
     });
 

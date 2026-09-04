@@ -8,6 +8,7 @@ import {
   resolveClientAuthPanel,
   type AuthPanel,
 } from "@/lib/auth-panel";
+import { silentRefresh } from "@/lib/auth-refresh";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api/v1";
@@ -152,54 +153,41 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
   const ax = error as AxiosError<ApiEnvelope>;
-  const status = ax.response?.status ?? 500;
+  const status = ax.response?.status ?? 0;
+  const networkCode = String(ax.code || "");
+  const networkMessage = String(ax.message || "");
+  if (
+    !ax.response &&
+    (networkCode === "ERR_NETWORK" ||
+      networkCode === "ECONNRESET" ||
+      networkCode === "ECONNABORTED" ||
+      networkCode === "ETIMEDOUT" ||
+      /network error|err_connection_reset|econnreset|failed to fetch|socket hang up/i.test(
+        networkMessage,
+      ))
+  ) {
+    return new ApiError(
+      "ارتباط با سرور قطع شد. چند لحظه بعد دوباره تلاش کنید.",
+      503,
+      "NETWORK_ERROR",
+    );
+  }
   const payload = ax.response?.data;
+  const httpStatus = status || 500;
   const message =
     payload?.error?.message ||
-    (status === 409
+    (httpStatus === 409
       ? "این رکورد تکراری است"
       : ax.message || "درخواست ناموفق بود");
   return new ApiError(
     message,
-    status,
+    httpStatus,
     payload?.error?.code || "REQUEST_FAILED",
     payload?.error?.details
   );
 }
 
 type RetryConfig = AxiosRequestConfig & { _retry?: boolean };
-
-/** Per-panel refresh locks so Manager/Editor/Portal tabs never rotate each other’s tokens. */
-const refreshPromises = new Map<string, Promise<boolean>>();
-
-async function silentRefresh(panel?: AuthPanel | null): Promise<boolean> {
-  const activePanel = panel ?? resolveClientAuthPanel();
-  const key = activePanel || "_default";
-
-  const existing = refreshPromises.get(key);
-  if (existing) return existing;
-
-  const promise = (async () => {
-    try {
-      const headers: Record<string, string> = {};
-      if (activePanel) headers[AUTH_PANEL_HEADER] = activePanel;
-
-      const { data } = await axios.post<ApiEnvelope<{ refreshed: boolean }>>(
-        `${API_BASE}/auth/refresh`,
-        {},
-        { withCredentials: true, headers }
-      );
-      return !!data.success;
-    } catch {
-      return false;
-    } finally {
-      refreshPromises.delete(key);
-    }
-  })();
-
-  refreshPromises.set(key, promise);
-  return promise;
-}
 
 api.interceptors.response.use(
   (response) => response,

@@ -12,13 +12,18 @@ import {
   resolveVideoType,
 } from '../production/finalProduct.js';
 import { PORTFOLIO_PROMPT } from '../../services/ai/prompts/portfolio.prompt.js';
-import {
-  getModelConfig,
-  resolveGenerationParams,
-  resolveModelsForAgent,
-} from '../../services/ai/models.config.js';
-import { openRouterService } from '../../services/ai/openrouter.service.js';
+import { getModelConfig } from '../../services/ai/models.config.js';
+import { completeWithModelFallback } from '../../services/ai/ai.service.js';
+import { listConfiguredLlmProviders } from '../../services/ai/provider.factory.js';
 import { createAiError } from '../../services/ai/errors.js';
+import {
+  PORTFOLIO_DESCRIPTION_MAX,
+  PORTFOLIO_SUCCESS_STORY_MAX,
+  PORTFOLIO_TITLE_MAX,
+  buildPortfolioAiInput,
+  mockPortfolioCopy,
+  parsePortfolioAiJson,
+} from './copy.js';
 
 const FINAL_KINDS = ['CLEAN_FINAL', 'WATERMARKED_FINAL'];
 const ELIGIBLE_STATUSES = new Set([
@@ -28,22 +33,38 @@ const ELIGIBLE_STATUSES = new Set([
   'APPROVED_BY_CUSTOMER',
 ]);
 
+const optionalLongText = (max) =>
+  z
+    .union([z.string().trim().max(max), z.literal(''), z.null()])
+    .optional()
+    .transform((v) => (v ? v : v === '' || v === null ? null : undefined));
+
 export const publishPortfolioSchema = z.object({
-  title: z.string().trim().min(3, 'عنوان حداقل ۳ کاراکتر باشد').max(120),
+  title: z
+    .string()
+    .trim()
+    .min(3, 'عنوان حداقل ۳ کاراکتر باشد')
+    .max(PORTFOLIO_TITLE_MAX),
   description: z
     .string()
     .trim()
     .min(20, 'توضیحات حداقل ۲۰ کاراکتر باشد')
-    .max(2000),
-  videoFileId: z.string().min(1).optional(),
+    .max(PORTFOLIO_DESCRIPTION_MAX),
+  successStory: optionalLongText(PORTFOLIO_SUCCESS_STORY_MAX),
+  videoFileId: z
+    .string()
+    .trim()
+    .min(1, 'لطفاً یک ویدیو را برای نمونه‌کارها انتخاب کنید'),
+});
+
+export const generatePortfolioSchema = z.object({
+  videoFileId: z.string().trim().min(1).optional(),
 });
 
 export const updatePortfolioSchema = z.object({
-  title: z.string().trim().min(3).max(120).optional(),
-  description: z
-    .union([z.string().trim().max(2000), z.literal(''), z.null()])
-    .optional()
-    .transform((v) => (v ? v : v === '' || v === null ? null : undefined)),
+  title: z.string().trim().min(3).max(PORTFOLIO_TITLE_MAX).optional(),
+  description: optionalLongText(PORTFOLIO_DESCRIPTION_MAX),
+  successStory: optionalLongText(PORTFOLIO_SUCCESS_STORY_MAX),
   status: z.enum(['PUBLISHED', 'UNPUBLISHED']).optional(),
   videoFileId: z.string().min(1).optional(),
   storageKey: z
@@ -124,26 +145,6 @@ function isEligibleFinalFile(file, projectStatus) {
   return sent || ELIGIBLE_STATUSES.has(status);
 }
 
-function publicSafeBrief(brief) {
-  if (!brief || typeof brief !== 'object') return null;
-  const safe = {};
-  for (const key of [
-    'goal',
-    'audience',
-    'message',
-    'styleNotes',
-    'tone',
-    'platforms',
-    'language',
-    'industry',
-    'product',
-    'theme',
-  ]) {
-    if (brief[key] != null && brief[key] !== '') safe[key] = brief[key];
-  }
-  return Object.keys(safe).length ? safe : null;
-}
-
 export function serializeAdminItem(item) {
   const videoType = resolveVideoType(item.videoFile?.kind, asMeta(item.videoFile?.meta));
   const categories = (item.categories || [])
@@ -153,6 +154,7 @@ export function serializeAdminItem(item) {
     id: item.id,
     title: item.title,
     description: item.description || '',
+    successStory: item.successStory || '',
     slug: item.slug,
     status: item.status,
     sortOrder: item.sortOrder ?? 0,
@@ -216,6 +218,7 @@ export function serializePublicItem(item) {
     slug: item.slug,
     title: item.title,
     description: item.description || null,
+    successStory: item.successStory || null,
     publishedAt: item.publishedAt,
     thumbnailUrl: mediaUrlFor(item.thumbnailKey),
     category: categories[0]
@@ -290,7 +293,21 @@ async function loadProjectForPortfolio(projectId) {
       durationSec: true,
       brief: true,
       service: { select: { id: true, name: true } },
-      format: { select: { id: true, name: true } },
+      format: { select: { id: true, name: true, ratio: true } },
+      crmCustomer: { select: { companyName: true } },
+      contentVersions: {
+        orderBy: { versionNumber: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          versionNumber: true,
+          status: true,
+          publishedToClient: true,
+          scenario: true,
+          narration: true,
+          storyboard: true,
+        },
+      },
       files: {
         where: { kind: { in: FINAL_KINDS }, deletedAt: null },
         orderBy: [{ version: 'desc' }, { createdAt: 'desc' }],
@@ -314,6 +331,7 @@ async function loadProjectForPortfolio(projectId) {
           id: true,
           title: true,
           description: true,
+          successStory: true,
           slug: true,
           status: true,
           publishedAt: true,
@@ -334,19 +352,41 @@ function pickBestVideo(project, preferredFileId = null) {
   if (preferredFileId) {
     const preferred = eligible.find((f) => f.id === preferredFileId);
     if (preferred) return preferred;
+    return null;
   }
   return [...eligible].sort(
     (a, b) => scoreFinalFile(b, project.status) - scoreFinalFile(a, project.status),
   )[0];
 }
 
-function assertPublishable(project) {
+function assertPublishable(project, preferredFileId = null) {
   if (project.status !== 'COMPLETED' || !project.completedAt) {
     throw new AppError(
       'فقط پروژه‌های تکمیل‌شده می‌توانند به نمونه‌کارها ارسال شوند',
       400,
       'PROJECT_NOT_COMPLETED',
     );
+  }
+  if (preferredFileId) {
+    const belongsToProject = (project.files || []).some(
+      (f) => f.id === preferredFileId && !f.deletedAt,
+    );
+    if (!belongsToProject) {
+      throw new AppError(
+        'ویدیوی انتخاب‌شده متعلق به این پروژه نیست',
+        400,
+        'VIDEO_NOT_IN_PROJECT',
+      );
+    }
+    const video = pickBestVideo(project, preferredFileId);
+    if (!video) {
+      throw new AppError(
+        'ویدیوی انتخاب‌شده واجد شرایط انتشار نیست',
+        400,
+        'INVALID_VIDEO',
+      );
+    }
+    return video;
   }
   const video = pickBestVideo(project);
   if (!video) {
@@ -357,56 +397,6 @@ function assertPublishable(project) {
     );
   }
   return video;
-}
-
-function parsePortfolioAiJson(raw) {
-  let text = typeof raw === 'string' ? raw.trim() : '';
-  if (!text && raw && typeof raw === 'object') {
-    const title = String(raw.title || '').trim();
-    const description = String(raw.description || '').trim();
-    if (title && description) {
-      return {
-        title: title.slice(0, 120),
-        description: description.slice(0, 2000),
-      };
-    }
-  }
-  text = text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw createAiError('خروجی هوش مصنوعی نامعتبر است', {
-      code: 'invalid_json',
-      status: 502,
-    });
-  }
-  const title = String(parsed?.title || '').trim();
-  const description = String(parsed?.description || '').trim();
-  if (title.length < 3 || description.length < 20) {
-    throw createAiError('عنوان یا توضیحات تولیدشده کافی نیست', {
-      code: 'invalid_portfolio_output',
-      status: 502,
-    });
-  }
-  return {
-    title: title.slice(0, 120),
-    description: description.slice(0, 2000),
-  };
-}
-
-function mockPortfolioCopy(project) {
-  const service = project.service?.name || 'ویدیوی تبلیغاتی';
-  const title = `${service} حرفه‌ای`.slice(0, 120);
-  const description =
-    `نمونه‌کاری از تولید ${service} با رویکردی حرفه‌ای و متناسب با برند.` +
-    (project.format?.name ? ` قالب ${project.format.name}.` : '') +
-    (project.tone ? ` لحن ${project.tone}.` : '') +
-    ' این اثر برای نمایش کیفیت تولید ویدیو در اپیکس منتشر شده است.';
-  return { title, description };
 }
 
 export const portfolioService = {
@@ -447,6 +437,7 @@ export const portfolioService = {
             id: existing.id,
             title: existing.title,
             description: existing.description,
+            successStory: existing.successStory || '',
             slug: existing.slug,
             status: existing.status,
             publishedAt: existing.publishedAt,
@@ -456,27 +447,23 @@ export const portfolioService = {
     };
   },
 
-  async generateCopy(projectId) {
+  async generateCopy(projectId, body = {}) {
     const project = await loadProjectForPortfolio(projectId);
-    assertPublishable(project);
-
-    const input = {
-      projectId: project.id,
-      projectTitle: project.title,
-      serviceName: project.service?.name || null,
-      formatName: project.format?.name || null,
-      language: project.language || 'fa',
-      tone: project.tone || null,
-      platforms: project.platforms || null,
-      durationSec: project.durationSec || null,
-      brief: publicSafeBrief(project.brief),
-    };
+    const preferredFileId = body?.videoFileId
+      ? String(body.videoFileId).trim()
+      : null;
+    const video = assertPublishable(project, preferredFileId || null);
+    const input = buildPortfolioAiInput(project, {
+      name: video.name,
+      kind: video.kind,
+      videoType: resolveVideoType(video.kind, asMeta(video.meta)),
+    });
 
     const cfg = getModelConfig();
-    if (!openRouterService.isConfigured() && cfg.allowMockFallback) {
+    if (!listConfiguredLlmProviders().length && cfg.allowMockFallback) {
       return mockPortfolioCopy(project);
     }
-    if (!openRouterService.isConfigured()) {
+    if (!listConfiguredLlmProviders().length) {
       throw new AppError(
         'سرویس هوش مصنوعی پیکربندی نشده است',
         503,
@@ -484,41 +471,41 @@ export const portfolioService = {
       );
     }
 
-    const params = resolveGenerationParams('PORTFOLIO');
-    const models = resolveModelsForAgent('PORTFOLIO');
-    let lastError = null;
-    for (const model of models) {
-      try {
-        const raw = await openRouterService.completeChat({
-          model,
-          system: PORTFOLIO_PROMPT.system,
-          userContent: input,
-          temperature: params.temperature,
-          maxTokens: params.maxTokens,
-        });
-        return parsePortfolioAiJson(raw?.text ?? raw);
-      } catch (err) {
-        lastError = err;
-      }
+    try {
+      const completion = await completeWithModelFallback({
+        agentType: 'PORTFOLIO',
+        system: PORTFOLIO_PROMPT.system,
+        userContent: input,
+      });
+      return parsePortfolioAiJson(completion?.text ?? completion, createAiError);
+    } catch (err) {
+      if (cfg.allowMockFallback) return mockPortfolioCopy(project);
+      throw new AppError(
+        err?.messageFa || err?.message || 'تولید داستان موفقیت ناموفق بود',
+        err?.status || 502,
+        err?.code || 'AI_FAILED',
+      );
     }
-    if (cfg.allowMockFallback) return mockPortfolioCopy(project);
-    throw new AppError(
-      lastError?.messageFa || lastError?.message || 'تولید عنوان و توضیحات ناموفق بود',
-      lastError?.status || 502,
-      lastError?.code || 'AI_FAILED',
-    );
   },
 
   async publishFromProject(projectId, body, actor, req) {
     const project = await loadProjectForPortfolio(projectId);
-    assertPublishable(project);
-    const video = pickBestVideo(project, body.videoFileId);
-    if (!video) {
-      throw new AppError('ویدیوی انتخاب‌شده واجد شرایط نیست', 400, 'INVALID_VIDEO');
+    const videoFileId = String(body?.videoFileId || '').trim();
+    if (!videoFileId) {
+      throw new AppError(
+        'لطفاً یک ویدیو را برای نمونه‌کارها انتخاب کنید',
+        400,
+        'VIDEO_REQUIRED',
+      );
     }
+    const video = assertPublishable(project, videoFileId);
 
     const title = body.title.trim();
     const description = body.description.trim();
+    const successStory =
+      body.successStory === undefined
+        ? undefined
+        : String(body.successStory || '').trim() || null;
     const now = new Date();
 
     const existing = await prisma.portfolioItem.findFirst({
@@ -532,6 +519,7 @@ export const portfolioService = {
         data: {
           title,
           description,
+          successStory,
           videoFileId: video.id,
           status: 'PUBLISHED',
           publishedAt: existing.publishedAt || now,
@@ -554,6 +542,7 @@ export const portfolioService = {
           data: {
             title,
             description,
+            successStory,
             videoFileId: video.id,
             status: 'PUBLISHED',
             publishedAt: now,
@@ -570,6 +559,7 @@ export const portfolioService = {
             videoFileId: video.id,
             title,
             description,
+            successStory: successStory ?? null,
             slug: await uniqueSlug(title),
             status: 'PUBLISHED',
             publishedAt: now,
@@ -586,11 +576,17 @@ export const portfolioService = {
       entityType: 'PortfolioItem',
       entityId: item.id,
       before: existing
-        ? { title: existing.title, description: existing.description, status: existing.status }
+        ? {
+            title: existing.title,
+            description: existing.description,
+            successStory: existing.successStory,
+            status: existing.status,
+          }
         : null,
       after: {
         title: item.title,
         description: item.description,
+        successStory: item.successStory,
         status: item.status,
         projectId,
         videoFileId: video.id,
@@ -625,6 +621,7 @@ export const portfolioService = {
             OR: [
               { title: { contains: q, mode: 'insensitive' } },
               { description: { contains: q, mode: 'insensitive' } },
+              { successStory: { contains: q, mode: 'insensitive' } },
               { project: { title: { contains: q, mode: 'insensitive' } } },
               { project: { code: { contains: q, mode: 'insensitive' } } },
             ],
@@ -675,6 +672,7 @@ export const portfolioService = {
     const data = {};
     if (body.title != null) data.title = body.title.trim();
     if (body.description !== undefined) data.description = body.description;
+    if (body.successStory !== undefined) data.successStory = body.successStory;
     if (body.storageKey !== undefined) data.storageKey = body.storageKey;
     if (body.thumbnailKey !== undefined) data.thumbnailKey = body.thumbnailKey;
     if (body.sortOrder != null) data.sortOrder = body.sortOrder;
@@ -723,11 +721,13 @@ export const portfolioService = {
       before: {
         title: existing.title,
         description: existing.description,
+        successStory: existing.successStory,
         status: existing.status,
       },
       after: {
         title: item.title,
         description: item.description,
+        successStory: item.successStory,
         status: item.status,
       },
       req,

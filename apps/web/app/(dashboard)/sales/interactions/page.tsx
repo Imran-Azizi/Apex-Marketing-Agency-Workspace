@@ -56,10 +56,10 @@ export default function SalesInteractionsPage() {
       {data && data.items.length === 0 && (
         <EmptyState
           title="تعاملی ثبت نشده"
-          description="با ایجاد مشتری در CRM، تعاملات اینجا نمایش داده می‌شود."
+          description="با ایجاد سرنخ در CRM و فروش، تعاملات اینجا نمایش داده می‌شود."
           action={
             <Button asChild variant="brand">
-              <Link href="/crm">رفتن به CRM</Link>
+              <Link href="/crm-sales">رفتن به CRM و فروش</Link>
             </Button>
           }
         />
@@ -80,12 +80,9 @@ export default function SalesInteractionsPage() {
               {data.items.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell>
-                    <Link
-                      href={`/crm/${c.id}`}
-                      className="font-medium text-brand hover:underline"
-                    >
+                    <span className="font-medium">
                       {c.personName}
-                    </Link>
+                    </span>
                     {c.companyName && (
                       <span className="block text-xs text-muted-foreground">
                         {c.companyName}

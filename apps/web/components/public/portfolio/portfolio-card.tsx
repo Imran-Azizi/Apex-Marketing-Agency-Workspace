@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { Play } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
-import { portfolioWorkPath, type PublicPortfolioItem } from "@/lib/portfolio";
+import {
+  portfolioCardExcerpt,
+  portfolioWorkPath,
+  type PublicPortfolioItem,
+} from "@/lib/portfolio";
 
 export function PortfolioCard({
   item,
@@ -13,6 +17,7 @@ export function PortfolioCard({
   className?: string;
 }) {
   const categoryName = item.category?.name;
+  const excerpt = portfolioCardExcerpt(item);
 
   return (
     <article className={cn("h-full", className)}>
@@ -55,9 +60,9 @@ export function PortfolioCard({
           <span className="line-clamp-1 text-base font-semibold tracking-tight text-foreground">
             {item.title}
           </span>
-          {item.description ? (
+          {excerpt ? (
             <span className="line-clamp-2 text-sm leading-6 text-muted-foreground">
-              {item.description}
+              {excerpt}
             </span>
           ) : null}
           {item.publishedAt ? (

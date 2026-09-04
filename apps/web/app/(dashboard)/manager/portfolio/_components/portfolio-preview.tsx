@@ -63,6 +63,14 @@ export function PortfolioPreview({
               {item.project?.title ? `پروژه: ${item.project.title}` : "آپلود مستقیم"}
               {item.publishedAt ? ` · انتشار ${formatDate(item.publishedAt)}` : ""}
             </p>
+            {item.successStory ? (
+              <div className="rounded-xl border border-border/70 bg-muted/20 p-3">
+                <p className="text-xs font-semibold text-foreground">داستان موفقیت</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-muted-foreground">
+                  {item.successStory}
+                </p>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </DialogContent>

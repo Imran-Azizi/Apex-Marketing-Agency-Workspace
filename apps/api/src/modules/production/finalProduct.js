@@ -27,6 +27,29 @@ export const STATUS_LABELS = {
   APPROVED_BY_CUSTOMER: 'ویدیو تایید شد',
 };
 
+/** Per-file delivery grouping for manager/editor/portal workflows. */
+export const DELIVERY_STATES = {
+  PENDING_REVIEW: 'PENDING_REVIEW',
+  AWAITING_DELIVERY: 'AWAITING_DELIVERY',
+  REVISION: 'REVISION',
+  SENT: 'SENT',
+};
+
+export const DELIVERY_STATE_LABELS = {
+  PENDING_REVIEW: 'ویدیوی جدید — در انتظار بررسی',
+  AWAITING_DELIVERY: 'آماده ارسال به مشتری',
+  REVISION: 'نیازمند اصلاح',
+  SENT: 'ارسال‌شده به مشتری',
+};
+
+/** Project statuses that must not be rolled back when extra videos are uploaded or sent. */
+export const PRESERVE_PROJECT_STATUSES = [
+  'WAITING_CLIENT_FINAL_APPROVAL',
+  'WAITING_PAYMENT',
+  'READY_TO_DOWNLOAD',
+  'COMPLETED',
+];
+
 const CLIENT_VISIBLE_PROJECT_STATUSES = [
   'WAITING_CLIENT_FINAL_APPROVAL',
   'WAITING_PAYMENT',
@@ -69,21 +92,119 @@ export function isSentToCustomer(file, projectStatus) {
   );
 }
 
-export function serializeFinalVideo(file, { projectStatus, uploaderName, customerApproved = false } = {}) {
+/** True only when this file was actually released — never inferred from project status. */
+export function wasExplicitlySent(file) {
+  const meta = asMeta(file.meta);
+  if (meta.sentToCustomer === true) return true;
+  const status = resolveVideoStatus(meta);
+  return (
+    status === 'SENT_TO_CUSTOMER' ||
+    POST_SEND_STATUSES.has(status)
+  );
+}
+
+export function isAlreadyDelivered(file, projectStatus) {
+  return wasExplicitlySent(file) || isSentToCustomer(file, projectStatus);
+}
+
+export function shouldPreserveProjectStatus(status) {
+  return PRESERVE_PROJECT_STATUSES.includes(status);
+}
+
+export function projectStatusPatchAfterSend(currentStatus) {
+  if (shouldPreserveProjectStatus(currentStatus)) return null;
+  return {
+    status: 'WAITING_CLIENT_FINAL_APPROVAL',
+    customerFacingStatus: 'WAITING_YOUR_APPROVAL',
+  };
+}
+
+export function resolveDeliveryState(file, projectStatus) {
+  const meta = asMeta(file.meta);
+  const raw = resolveVideoStatus(meta);
+  if (isAlreadyDelivered(file, projectStatus) || POST_SEND_STATUSES.has(raw) || raw === 'SENT_TO_CUSTOMER') {
+    return DELIVERY_STATES.SENT;
+  }
+  if (raw === 'REVISION_REQUESTED') return DELIVERY_STATES.REVISION;
+  if (raw === 'APPROVED') return DELIVERY_STATES.AWAITING_DELIVERY;
+  return DELIVERY_STATES.PENDING_REVIEW;
+}
+
+/**
+ * Portal "جدید" badge — only for videos the manager explicitly released
+ * and the customer has not opened yet.
+ */
+export function isNewForCustomer(file, projectStatus) {
+  if (!isSentToCustomer(file, projectStatus)) return false;
+  const meta = asMeta(file.meta);
+  if (meta.sentToCustomer !== true && !meta.sentAt) return false;
+  if (meta.viewedAt) return false;
+  const status = resolveVideoStatus(meta);
+  if (POST_SEND_STATUSES.has(status)) return false;
+  return true;
+}
+
+export function isCustomerApprovedFile(file) {
+  const meta = asMeta(file.meta);
+  const status = resolveVideoStatus(meta);
+  return (
+    status === 'APPROVED_BY_CUSTOMER' ||
+    meta.approvedByCustomer === true ||
+    !!meta.customerApprovedAt
+  );
+}
+
+export function sentToCustomerFiles(files, projectStatus) {
+  return (files || []).filter((f) => isSentToCustomer(f, projectStatus));
+}
+
+/** True when every manager-sent video has been accepted by the customer. */
+export function allSentFilesCustomerApproved(files, projectStatus) {
+  const sent = sentToCustomerFiles(files, projectStatus);
+  if (!sent.length) return false;
+  return sent.every((f) => isCustomerApprovedFile(f));
+}
+
+function portalSortTimestamp(file) {
+  const meta = asMeta(file.meta);
+  const raw = meta.sentAt || file.createdAt;
+  const ms = raw ? new Date(raw).getTime() : 0;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/** Newly sent videos first, then most recently sent; stable version tie-break. */
+export function sortPortalFinalVideos(files, projectStatus) {
+  return [...files].sort((a, b) => {
+    const aNew = isNewForCustomer(a, projectStatus);
+    const bNew = isNewForCustomer(b, projectStatus);
+    if (aNew !== bNew) return aNew ? -1 : 1;
+    const sentCmp = portalSortTimestamp(b) - portalSortTimestamp(a);
+    if (sentCmp !== 0) return sentCmp;
+    return (b.version || 0) - (a.version || 0);
+  });
+}
+
+export function serializeFinalVideo(file, {
+  projectStatus,
+  uploaderName,
+  sentByName,
+  customerApproved = false,
+} = {}) {
   const meta = asMeta(file.meta);
   const videoType = resolveVideoType(file.kind, meta);
   const rawStatus = resolveVideoStatus(meta);
   const sent = isSentToCustomer(file, projectStatus);
+  const deliveryState = resolveDeliveryState(file, projectStatus);
 
   let status =
     sent && !POST_SEND_STATUSES.has(rawStatus) ? 'SENT_TO_CUSTOMER' : rawStatus;
 
-  // Customer confirmed final product → watermarked (and sent clean) show as approved.
-  const treatAsCustomerApproved =
-    customerApproved === true ||
+  // Customer confirmation is per delivered file — never paint unsent uploads as approved.
+  const fileCustomerApproved =
     rawStatus === 'APPROVED_BY_CUSTOMER' ||
     meta.approvedByCustomer === true ||
     !!meta.customerApprovedAt;
+  const treatAsCustomerApproved = sent && (customerApproved === true || fileCustomerApproved);
 
   if (treatAsCustomerApproved) {
     if (file.kind === 'WATERMARKED_FINAL' || videoType === 'WATERMARKED') {
@@ -101,6 +222,11 @@ export function serializeFinalVideo(file, { projectStatus, uploaderName, custome
     videoTypeLabel: VIDEO_TYPE_LABELS[videoType] || videoType,
     status,
     statusLabel: STATUS_LABELS[status] || status,
+    deliveryState,
+    deliveryStateLabel: DELIVERY_STATE_LABELS[deliveryState] || deliveryState,
+    isNew: deliveryState === DELIVERY_STATES.PENDING_REVIEW,
+    awaitingDelivery: deliveryState === DELIVERY_STATES.AWAITING_DELIVERY,
+    alreadySent: deliveryState === DELIVERY_STATES.SENT,
     version: file.version,
     mimeType: file.mimeType,
     sizeBytes: file.sizeBytes,
@@ -109,15 +235,18 @@ export function serializeFinalVideo(file, { projectStatus, uploaderName, custome
     uploadedByName: uploaderName || null,
     createdAt: file.createdAt,
     updatedAt: file.updatedAt,
-    sentToCustomer: sent || status === 'APPROVED_BY_CUSTOMER',
+    sentToCustomer: sent,
     sentAt: meta.sentAt || null,
+    sentBy: meta.sentBy || null,
+    sentByName: sentByName || null,
     allowDownload: meta.allowDownload === true,
     approvedAt: meta.approvedAt || null,
     revisionNotes: meta.revisionNotes || null,
     revisionRequestedAt: meta.revisionRequestedAt || null,
     reviewedBy: meta.reviewedBy || null,
     viewedAt: meta.viewedAt || null,
-    customerApprovedAt: meta.customerApprovedAt || null,
+    isNewForCustomer: sent ? isNewForCustomer(file, projectStatus) : false,
+    customerApprovedAt: sent ? (meta.customerApprovedAt || null) : null,
     meta,
   };
 }
@@ -140,12 +269,14 @@ export function buildFinalFileMeta({
   };
 }
 
-export function markSentMeta(meta, { allowDownload = false, sentAt = new Date() } = {}) {
+export function markSentMeta(meta, { allowDownload = false, sentAt = new Date(), sentBy = null } = {}) {
+  const current = asMeta(meta);
   return {
-    ...asMeta(meta),
+    ...current,
     status: 'SENT_TO_CUSTOMER',
     sentToCustomer: true,
     sentAt: sentAt.toISOString(),
+    sentBy: sentBy || current.sentBy || null,
     allowDownload: Boolean(allowDownload),
     hiddenFromCustomer: false,
   };
@@ -224,6 +355,9 @@ export async function markSentFinalsApprovedByCustomer(db, projectId, {
         meta.status === 'VIEWED_BY_CUSTOMER' ||
         meta.status === 'APPROVED_BY_CUSTOMER');
 
+    // Newly uploaded files are stored with sentToCustomer: false and must
+    // stay pending until a manager explicitly releases them.
+    if (meta.sentToCustomer === false) continue;
     if (!isWatermarked && !cleanWasSent) continue;
 
     const nextMeta = markCustomerApprovedMeta(file.meta, approvedAt);

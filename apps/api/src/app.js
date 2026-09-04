@@ -30,6 +30,10 @@ import servicesRoutes from "./modules/services/index.js";
 import contactRoutes from "./modules/contact/index.js";
 import heroRoutes from "./modules/hero/index.js";
 import customersRoutes from "./modules/customers/index.js";
+import financeRoutes from "./modules/finance/index.js";
+import chatRoutes from "./modules/chat/index.js";
+import salesAssistantRoutes from "./modules/sales-assistant/index.js";
+import businessAssistantRoutes from "./modules/business-assistant/index.js";
 import { storage } from "./services/storage.js";
 
 export function createApp() {
@@ -79,11 +83,11 @@ export function createApp() {
   app.use(cookieParser());
   // Convert Persian/Arabic-Indic digits → English before any route logic
   app.use(normalizeDigitsMiddleware);
-  app.use(globalLimiter);
-  app.use(issueCsrf);
 
-  // /files/<key> → resolved Cloudinary / R2 / S3 URL (compatibility for frontend previews)
-  app.use("/files", async (req, res, next) => {
+  // Public file preview redirect. Keep this off the rate limiter and never call
+  // Cloudinary Admin API here — that lookup hangs and RST's <img> loads while
+  // «تولید محتوا» is running outbound HTTPS.
+  app.use("/files", (req, res, next) => {
     const key = String(req.path || "").replace(/^\/+/, "");
     if (!key) {
       res.status(404).json({
@@ -94,10 +98,11 @@ export function createApp() {
     }
     try {
       const decoded = decodeURIComponent(key);
-      const url = await storage.resolveDeliveryUrl(decoded);
+      const url = storage.publicUrl(decoded);
+      res.setHeader("Cache-Control", "private, max-age=300");
       res.redirect(302, url);
     } catch (err) {
-      if (err?.statusCode === 404 || err?.code === "NOT_FOUND") {
+      if (err?.statusCode === 404 || err?.status === 404 || err?.code === "NOT_FOUND") {
         res.status(404).json({
           success: false,
           error: { code: "NOT_FOUND", message: "فایل یافت نشد" },
@@ -107,6 +112,9 @@ export function createApp() {
       next(err);
     }
   });
+
+  app.use(globalLimiter);
+  app.use(issueCsrf);
 
   app.use("/api/v1/auth", authRoutes);
   app.use("/api/v1/public", publicRoutes);
@@ -129,6 +137,10 @@ export function createApp() {
   app.use("/api/v1/contact", contactRoutes);
   app.use("/api/v1/hero", heroRoutes);
   app.use("/api/v1/customers", customersRoutes);
+  app.use("/api/v1/finance", financeRoutes);
+  app.use("/api/v1/chat", chatRoutes);
+  app.use("/api/v1/sales-assistant", salesAssistantRoutes);
+  app.use("/api/v1/business-assistant", businessAssistantRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

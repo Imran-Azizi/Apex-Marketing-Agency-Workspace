@@ -20,7 +20,8 @@ function resolveWorkspaceParam(
     value === "customer" ||
     value === "ai" ||
     value === "narration" ||
-    value === "final"
+    value === "final" ||
+    value === "poster"
   ) {
     return value;
   }

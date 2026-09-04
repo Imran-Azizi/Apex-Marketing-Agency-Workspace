@@ -1,4 +1,5 @@
 import { prisma } from '../db/prisma.js';
+import { getCustomerPersonName } from '../utils/crmCustomerName.js';
 
 export function mapProjectStatusToCustomer(status) {
   const map = {
@@ -85,7 +86,7 @@ export async function rebuildProjectContext(projectId, tx = prisma) {
     `# Project ${project.code}`,
     '',
     `- Status: ${project.status}`,
-    `- Customer: ${project.crmCustomer.companyName || project.crmCustomer.personName}`,
+    `- Customer: ${getCustomerPersonName(project.crmCustomer)}`,
     `- Duration: ${project.durationSec || '-'}s`,
     `- Language: ${project.language || '-'}`,
     '',

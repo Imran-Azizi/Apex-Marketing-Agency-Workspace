@@ -11,6 +11,7 @@ import { portfolioPublicStreamUrl } from "@/lib/media";
 import type { PublicPortfolioDetail } from "@/lib/portfolio";
 import { cn, formatDate } from "@/lib/utils";
 import { PortfolioRelated } from "./portfolio-related";
+import { PortfolioSuccessStory } from "./portfolio-success-story";
 
 export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
   const [copied, setCopied] = useState(false);
@@ -24,7 +25,7 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
       if (typeof navigator.share === "function") {
         await navigator.share({
           title: item.title,
-          text: item.description || item.title,
+          text: item.successStory || item.description || item.title,
           url,
         });
         return;
@@ -85,7 +86,16 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
             <h1 className="text-balance text-2xl font-bold tracking-tight text-foreground sm:text-3xl lg:text-[2rem]">
               {item.title}
             </h1>
-            {item.description ? (
+            {item.description &&
+            item.successStory &&
+            item.description.trim() !== item.successStory.trim() ? (
+              <p className="mt-4 max-w-3xl text-pretty text-sm leading-8 text-muted-foreground sm:text-base sm:leading-8">
+                {item.description}
+              </p>
+            ) : null}
+            {item.successStory ? (
+              <PortfolioSuccessStory text={item.successStory} />
+            ) : item.description ? (
               <p className="mt-4 max-w-3xl text-pretty text-sm leading-8 text-muted-foreground sm:text-base sm:leading-8">
                 {item.description}
               </p>

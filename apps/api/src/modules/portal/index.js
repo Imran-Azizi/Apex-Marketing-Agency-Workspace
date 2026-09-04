@@ -71,6 +71,21 @@ router.post('/projects/:id/final/request-changes', requireCsrf, async (req, res,
   try { ok(res, await portalService.requestFinalChanges(req.params.id, req.body, req.auth, req)); } catch (e) { next(e); }
 });
 
+router.post('/projects/:id/final-videos/:fileId/view', requireCsrf, async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await portalService.markFinalVideoViewed(
+        req.params.id,
+        req.params.fileId,
+        req.auth,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/orders', requireCsrf, async (req, res, next) => {
   try { created(res, await portalService.newOrder(req.body, req.auth, req)); } catch (e) { next(e); }
 });

@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { FloatingChatLauncher } from "@/components/chat/floating-chat";
 
 export default function DashboardLayout({
   children,
@@ -114,6 +115,7 @@ export default function DashboardLayout({
         />
         <main className="min-w-0 flex-1 overflow-auto p-3 sm:p-4 lg:p-6">{children}</main>
       </div>
+      <FloatingChatLauncher />
     </div>
   );
 }

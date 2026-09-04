@@ -33,6 +33,7 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: "/narrators", destination: "/", permanent: true },
+      { source: "/chat", destination: "/dashboard", permanent: false },
     ];
   },
   async rewrites() {

@@ -60,6 +60,7 @@ const optionalText = (max) =>
 export const createPortfolioItemSchema = z.object({
   title: z.string().trim().min(3, "عنوان حداقل ۳ کاراکتر باشد").max(120),
   description: optionalText(2000),
+  successStory: optionalText(4000),
   storageKey: z.string().trim().min(1, "ویدیوی نمونه‌کار الزامی است").max(500),
   thumbnailKey: optionalText(500),
   categoryIds: z.array(z.string().min(1)).optional().default([]),
@@ -406,6 +407,7 @@ export async function createItem(body, actor, req) {
     data: {
       title,
       description: body.description || null,
+      successStory: body.successStory || null,
       slug: await uniqueSlug(title),
       storageKey: body.storageKey,
       thumbnailKey: body.thumbnailKey || null,

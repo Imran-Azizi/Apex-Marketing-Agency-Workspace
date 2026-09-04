@@ -11,6 +11,7 @@ import {
 
 function canAccessProject(project, auth) {
   if (auth.roleCode === 'MANAGER' || auth.roleCode === 'ADMIN' || auth.roleCode === 'FINANCE' || auth.roleCode === 'SALES') return true;
+  if (auth.roleCode === 'PROJECT_MANAGER') return true;
   if (auth.roleCode === 'EDITOR' || auth.roleCode === 'NARRATOR') {
     return project.assignments?.some(
       (a) => a.isActive && (a.userId === auth.userId || a.teamProfile?.userId === auth.userId),
@@ -20,36 +21,134 @@ function canAccessProject(project, auth) {
 }
 
 function stripFinanceForRole(project, roleCode) {
-  if (['EDITOR', 'NARRATOR', 'SALES'].includes(roleCode)) {
+  if (['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(roleCode)) {
     const { finance, invoices, payables, ...rest } = project;
     return rest;
   }
   return project;
 }
 
-export const projectService = {
-  async list(auth, { status, q }) {
-    if (auth.roleCode === 'NARRATOR' || auth.roleCode === 'EDITOR') {
-      throw new AppError(
-        auth.roleCode === 'EDITOR'
-          ? 'دسترسی به فهرست پروژه‌ها برای ادیتور مجاز نیست — از میز کار ادیت استفاده کنید'
-          : 'دسترسی به فهرست پروژه‌ها برای نریتور مجاز نیست',
-        403,
-        'FORBIDDEN',
-      );
-    }
-    const where = { deletedAt: null };
-    if (status) where.status = status;
-    if (q) where.OR = [{ code: { contains: q, mode: 'insensitive' } }, { title: { contains: q, mode: 'insensitive' } }];
+function assertCanListProjects(auth) {
+  if (auth.roleCode === 'NARRATOR' || auth.roleCode === 'EDITOR') {
+    throw new AppError(
+      auth.roleCode === 'EDITOR'
+        ? 'دسترسی به فهرست پروژه‌ها برای ادیتور مجاز نیست — از میز کار ادیت استفاده کنید'
+        : 'دسترسی به فهرست پروژه‌ها برای نریتور مجاز نیست',
+      403,
+      'FORBIDDEN',
+    );
+  }
+}
 
-    if (auth.roleCode === 'EDITOR' || auth.roleCode === 'NARRATOR') {
-      where.assignments = {
+function startOfLocalDay(d = new Date()) {
+  const next = new Date(d);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function endOfLocalDay(d = new Date()) {
+  const next = new Date(d);
+  next.setHours(23, 59, 59, 999);
+  return next;
+}
+
+function resolveCreatedAtRange({ createdPreset, createdFrom, createdTo }) {
+  const preset = String(createdPreset || '').trim().toLowerCase();
+  const from = String(createdFrom || '').trim();
+  const to = String(createdTo || '').trim();
+  const now = new Date();
+
+  if (preset === 'today') {
+    return { gte: startOfLocalDay(now), lte: endOfLocalDay(now) };
+  }
+  if (preset === 'week') {
+    const start = startOfLocalDay(now);
+    start.setDate(start.getDate() - 6);
+    return { gte: start, lte: endOfLocalDay(now) };
+  }
+  if (preset === 'month') {
+    return {
+      gte: new Date(now.getFullYear(), now.getMonth(), 1),
+      lte: endOfLocalDay(now),
+    };
+  }
+
+  if (preset === 'custom' || from || to) {
+    const range = {};
+    if (from) {
+      const parsed = new Date(from);
+      if (!Number.isNaN(parsed.getTime())) range.gte = startOfLocalDay(parsed);
+    }
+    if (to) {
+      const parsed = new Date(to);
+      if (!Number.isNaN(parsed.getTime())) range.lte = endOfLocalDay(parsed);
+    }
+    return Object.keys(range).length ? range : null;
+  }
+
+  return null;
+}
+
+function buildListWhere(auth, query = {}) {
+  const status = String(query.status || '').trim();
+  const q = String(query.q || '').trim();
+  const customerId = String(query.customerId || '').trim();
+  const editorId = String(query.editorId || '').trim();
+  const deliveryStatus = String(query.deliveryStatus || '').trim();
+
+  const where = { deletedAt: null };
+  const and = [];
+
+  if (status) where.status = status;
+  if (customerId) where.crmCustomerId = customerId;
+  if (deliveryStatus) where.deliveryStatus = deliveryStatus;
+
+  const createdAt = resolveCreatedAtRange(query);
+  if (createdAt) where.createdAt = createdAt;
+
+  if (q) {
+    and.push({
+      OR: [
+        { id: { equals: q } },
+        { code: { contains: q, mode: 'insensitive' } },
+        { title: { contains: q, mode: 'insensitive' } },
+        { crmCustomer: { personName: { contains: q, mode: 'insensitive' } } },
+        { crmCustomer: { companyName: { contains: q, mode: 'insensitive' } } },
+      ],
+    });
+  }
+
+  if (editorId) {
+    and.push({
+      assignments: {
+        some: {
+          isActive: true,
+          role: 'EDITOR',
+          OR: [{ userId: editorId }, { teamProfile: { userId: editorId } }],
+        },
+      },
+    });
+  }
+
+  if (auth.roleCode === 'EDITOR' || auth.roleCode === 'NARRATOR') {
+    and.push({
+      assignments: {
         some: {
           isActive: true,
           OR: [{ userId: auth.userId }, { teamProfile: { userId: auth.userId } }],
         },
-      };
-    }
+      },
+    });
+  }
+
+  if (and.length) where.AND = and;
+  return where;
+}
+
+export const projectService = {
+  async list(auth, query = {}) {
+    assertCanListProjects(auth);
+    const where = buildListWhere(auth, query);
 
     const items = await prisma.project.findMany({
       where,
@@ -58,11 +157,11 @@ export const projectService = {
         assignments: {
           where: { isActive: true },
           include: {
-            teamProfile: { select: { displayName: true } },
+            teamProfile: { select: { displayName: true, userId: true } },
             user: { select: { id: true, fullName: true } },
           },
         },
-        finance: ['EDITOR', 'NARRATOR', 'SALES'].includes(auth.roleCode) ? false : true,
+        finance: ['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(auth.roleCode) ? false : true,
       },
       orderBy: { updatedAt: 'desc' },
       take: 100,
@@ -71,6 +170,70 @@ export const projectService = {
       items.map((p) => stripFinanceForRole(p, auth.roleCode)),
       'internal',
     );
+  },
+
+  async filterOptions(auth) {
+    assertCanListProjects(auth);
+
+    const [customers, editorAssignments] = await Promise.all([
+      prisma.crmCustomer.findMany({
+        where: {
+          deletedAt: null,
+          projects: { some: { deletedAt: null } },
+        },
+        select: { id: true, personName: true, companyName: true },
+        orderBy: { personName: 'asc' },
+        take: 300,
+      }),
+      prisma.projectAssignment.findMany({
+        where: {
+          isActive: true,
+          role: 'EDITOR',
+          project: { deletedAt: null },
+        },
+        select: {
+          userId: true,
+          user: { select: { id: true, fullName: true } },
+          teamProfile: {
+            select: {
+              userId: true,
+              displayName: true,
+              user: { select: { id: true, fullName: true } },
+            },
+          },
+        },
+        take: 500,
+      }),
+    ]);
+
+    const editorsById = new Map();
+    for (const assignment of editorAssignments) {
+      const id =
+        assignment.user?.id ||
+        assignment.userId ||
+        assignment.teamProfile?.user?.id ||
+        assignment.teamProfile?.userId ||
+        null;
+      if (!id || editorsById.has(id)) continue;
+      const name =
+        assignment.user?.fullName ||
+        assignment.teamProfile?.displayName ||
+        assignment.teamProfile?.user?.fullName ||
+        null;
+      if (!name) continue;
+      editorsById.set(id, { id, fullName: name });
+    }
+
+    return {
+      customers: customers.map((c) => ({
+        id: c.id,
+        personName: c.personName,
+        companyName: c.companyName,
+      })),
+      editors: [...editorsById.values()].sort((a, b) =>
+        a.fullName.localeCompare(b.fullName, 'fa'),
+      ),
+    };
   },
 
   async get(id, auth) {
@@ -326,7 +489,7 @@ export const projectService = {
       if (project.opportunity) {
         await tx.opportunity.update({
           where: { id: project.opportunity.id },
-          data: { projectId: null, pipelineStage: 'ORDER_CONFIRMED' },
+          data: { projectId: null, pipelineStage: 'DEPOSIT_CONFIRMED' },
         });
       }
 
@@ -342,7 +505,7 @@ export const projectService = {
       if (!otherProject) {
         await tx.crmCustomer.update({
           where: { id: project.crmCustomerId },
-          data: { pipelineStage: 'ORDER_CONFIRMED' },
+          data: { pipelineStage: 'DEPOSIT_CONFIRMED' },
         });
       }
 

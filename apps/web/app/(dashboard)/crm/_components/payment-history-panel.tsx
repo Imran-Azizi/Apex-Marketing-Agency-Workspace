@@ -119,8 +119,8 @@ export function PaymentHistoryPanel({
 
   const verifyMut = useMutation({
     mutationFn: (paymentId: string) =>
-      apiPost(`/crm/payments/${paymentId}/verify`),
-    onSuccess: async () => {
+      apiPost<{ customerConverted?: boolean }>(`/crm/payments/${paymentId}/verify`),
+    onSuccess: async (res) => {
       toast.success("پرداخت تأیید شد و در محاسبات مالی اعمال گردید");
       await onChanged();
     },

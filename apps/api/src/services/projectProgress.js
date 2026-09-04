@@ -292,7 +292,9 @@ export function buildProjectStageProgressNotification({
   const isComplete = stageKey === 'COMPLETED';
   return {
     eventKey: `project.progress:${projectId}:${stageKey}`,
-    title: isComplete ? 'پروژه تکمیل شد' : 'به‌روزرسانی پیشرفت پروژه',
+    title: isComplete
+      ? `پروژه «${projectTitle || 'پروژه'}» تکمیل شد`
+      : 'به‌روزرسانی پیشرفت پروژه',
     body: [
       bodyMessage,
       projectTitle ? `پروژه: ${projectTitle}` : null,

@@ -2,17 +2,64 @@
  * JSON extraction + response validation / normalization for content agents.
  */
 
+function stripJsonFences(text) {
+  return String(text || '')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+}
+
+/** Close truncated JSON so a partial storyboard is still usable. */
+export function repairTruncatedJson(text) {
+  let s = stripJsonFences(text);
+  const objStart = s.indexOf('{');
+  const arrStart = s.indexOf('[');
+  if (objStart < 0 && arrStart < 0) return null;
+  const start = objStart >= 0 && (arrStart < 0 || objStart < arrStart) ? objStart : arrStart;
+  s = s.slice(start);
+
+  let inStr = false;
+  let escape = false;
+  const stack = [];
+  for (const ch of s) {
+    if (inStr) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+  if (inStr) s += '"';
+  s = s.replace(/,\s*$/, '');
+  while (stack.length) s += stack.pop();
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
 export function extractJson(text) {
   if (!text) return {};
   if (typeof text === 'object') return text;
+  const cleaned = stripJsonFences(text);
   try {
-    return JSON.parse(text);
+    return JSON.parse(cleaned);
   } catch {
-    const match = String(text).match(/\{[\s\S]*\}/);
+    const repaired = repairTruncatedJson(cleaned);
+    if (repaired) return repaired;
+    const match = cleaned.match(/\{[\s\S]*\}/);
     if (match) {
       try {
         return JSON.parse(match[0]);
       } catch {
+        const nested = repairTruncatedJson(match[0]);
+        if (nested) return nested;
         return { raw: text };
       }
     }
@@ -177,19 +224,43 @@ export function normalizeNarrationOutput(output, projectId) {
   };
 }
 
-export function normalizeStoryboardOutput(output, projectId) {
+function collectStoryboardScenes(output) {
+  if (Array.isArray(output)) return output.filter(Boolean);
   const o = asObject(output);
+  if (!o) return [];
+  const keys = ['storyboard', 'scenes', 'shots', 'frames', 'panels', 'storyboards'];
+  for (const key of keys) {
+    if (Array.isArray(o[key]) && o[key].length) return o[key].filter(Boolean);
+  }
+  return [];
+}
+
+function sceneVisualText(scene = {}) {
+  return String(
+    scene.visualDescription ||
+      scene.visual ||
+      scene.notes ||
+      scene.description ||
+      scene.action ||
+      scene.characterActions ||
+      scene.imagePrompt ||
+      scene.image_prompt ||
+      scene.title ||
+      scene.environment ||
+      '',
+  ).trim();
+}
+
+export function normalizeStoryboardOutput(output, projectId) {
+  const rawRoot = Array.isArray(output) ? { scenes: output } : output;
+  const o = asObject(rawRoot);
   if (!o) {
     const err = new Error('Storyboard response is not an object');
     err.code = 'invalid_response';
     throw err;
   }
 
-  const rawScenes = Array.isArray(o.storyboard)
-    ? o.storyboard
-    : Array.isArray(o.scenes)
-      ? o.scenes
-      : [];
+  let rawScenes = collectStoryboardScenes(o);
 
   if (!rawScenes.length) {
     const err = new Error('Storyboard response missing scenes');
@@ -197,13 +268,10 @@ export function normalizeStoryboardOutput(output, projectId) {
     throw err;
   }
 
-  const scenes = rawScenes.filter(Boolean).map((scene, i) => {
-    const visual =
-      scene.visualDescription ||
-      scene.visual ||
-      scene.notes ||
-      scene.description ||
-      '';
+  const scenes = rawScenes
+    .filter(Boolean)
+    .map((scene, i) => {
+    const visual = sceneVisualText(scene);
     const camera = scene.camera || scene.cameraAngle || scene.camera_direction || '';
     const action =
       scene.characterActions || scene.action || scene.motion || '';
@@ -226,9 +294,7 @@ export function normalizeStoryboardOutput(output, projectId) {
           ? scene.image_prompt.trim()
           : '';
     if (!String(visual).trim()) {
-      const err = new Error(`Storyboard scene ${i + 1} missing visual`);
-      err.code = 'invalid_response';
-      throw err;
+      return null;
     }
     return {
       ...scene,
@@ -255,13 +321,26 @@ export function normalizeStoryboardOutput(output, projectId) {
       visualStyle: scene.visualStyle || '',
       notes: scene.notes || visual,
       imagePrompt,
-      // Preserve previously generated stills when re-normalizing edits
+      // Preserve previously generated stills / collage when re-normalizing edits
       imageUrl: scene.imageUrl || scene.image_url || null,
       imageStorageKey: scene.imageStorageKey || null,
       imageProvider: scene.imageProvider || null,
       imageModel: scene.imageModel || null,
       imageGeneratedAt: scene.imageGeneratedAt || null,
     };
+  })
+    .filter(Boolean);
+
+  if (!scenes.length) {
+    const err = new Error('Storyboard response missing scenes');
+    err.code = 'invalid_response';
+    throw err;
+  }
+
+  scenes.forEach((scene, i) => {
+    scene.sceneNumber = i + 1;
+    scene.scene_number = i + 1;
+    scene.shot = scene.shot || i + 1;
   });
 
   const imagePrompts = Array.isArray(o.imagePrompts)
@@ -293,6 +372,12 @@ export function normalizeStoryboardOutput(output, projectId) {
     videoPrompts,
     openaiImagePrompts: scenes.map((s, i) => s.imagePrompt || imagePrompts[i] || ''),
     soraVideoPrompts: videoPrompts,
+    collageImageUrl: o.collageImageUrl || o.collage_image_url || null,
+    collageImageStorageKey:
+      o.collageImageStorageKey || o.collage_image_storage_key || null,
+    collageImagePrompt: o.collageImagePrompt || o.collage_image_prompt || null,
+    collageLayout: o.collageLayout || o.collage_layout || null,
+    collageImageError: o.collageImageError || o.collage_image_error || null,
   };
 }
 
@@ -302,6 +387,60 @@ export function normalizePipelineOutputs(outputs, projectId) {
     scenario: normalizeScenarioOutput(outputs.scenario, projectId),
     narration: normalizeNarrationOutput(outputs.narration, projectId),
     storyboard: normalizeStoryboardOutput(outputs.storyboard, projectId),
+  };
+}
+
+export function synthesizeStoryboardFromInput(input = {}) {
+  const scenario = asObject(input.priorOutputs?.scenario) || {};
+  const breakdown = Array.isArray(scenario.sceneBreakdown)
+    ? scenario.sceneBreakdown.filter(Boolean)
+    : [];
+  let beats = breakdown;
+  if (!beats.length) {
+    const flow = String(
+      scenario.storyFlow || scenario.content || scenario.concept || scenario.hook || '',
+    ).trim();
+    const parts = flow
+      .split(/(?<=[.!?؟])\s+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 8);
+    const n = Math.min(6, Math.max(4, parts.length ? Math.min(parts.length, 6) : 4));
+    const duration = Math.max(4, Math.round((Number(scenario.totalDurationSec) || 30) / n));
+    beats = Array.from({ length: n }, (_, i) => ({
+      title: `صحنه ${i + 1}`,
+      description: parts[i] || parts[parts.length - 1] || scenario.title || `Scene ${i + 1}`,
+      durationSec: duration,
+    }));
+  }
+
+  const scenes = beats.slice(0, 8).map((beat, i) => {
+    const visual = String(
+      beat.description || beat.visual || beat.hook || beat.title || '',
+    ).trim() || `Scene ${i + 1} of the commercial`;
+    const camera = i === 0 ? 'Wide' : i === beats.length - 1 ? 'Close-up' : 'Medium';
+    return {
+      scene_number: i + 1,
+      title: beat.title || `صحنه ${i + 1}`,
+      duration: `${beat.durationSec || beat.duration || 5}s`,
+      visual,
+      camera,
+      action: beat.action || visual,
+      transition: i >= beats.length - 1 ? 'Fade out' : 'Cut',
+      environment: beat.environment || '',
+      lighting: scenario.emotionalDirection || '',
+      visualDirection:
+        scenario.emotionalDirection || scenario.marketingAngle || 'Cinematic commercial lighting',
+      dialogue: '',
+      imagePrompt: visual,
+    };
+  });
+
+  return {
+    projectId: input.projectId || scenario.projectId,
+    visualStyleGuide:
+      scenario.emotionalDirection ||
+      'Cinematic commercial photography, consistent color grade and lighting',
+    scenes,
   };
 }
 

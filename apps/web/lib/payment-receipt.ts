@@ -27,7 +27,10 @@ function sanitizeFilenamePart(value: string) {
     .replace(/^-|-$/g, "");
 }
 
-export function receiptPdfFilename(paymentNumber?: string | null, paymentId?: string) {
+export function receiptPdfFilename(
+  paymentNumber?: string | null,
+  paymentId?: string,
+) {
   const part =
     sanitizeFilenamePart(paymentNumber || "") ||
     sanitizeFilenamePart(paymentId || "") ||
@@ -43,12 +46,15 @@ export async function printPaymentReceipt(paymentId: string) {
   const html = await fetchReceiptHtml(paymentId, true);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
-  const win = window.open(url, "apex-payment-receipt-print", "noopener,noreferrer");
+  const win = window.open(
+    url,
+    "apex-payment-receipt-print",
+    "noopener,noreferrer",
+  );
   if (!win) {
     URL.revokeObjectURL(url);
     throw new Error("پنجره چاپ مسدود شد. لطفاً pop-up را مجاز کنید.");
   }
-  // Keep blob alive long enough for print rendering
   const revoke = () => URL.revokeObjectURL(url);
   win.addEventListener("afterprint", revoke, { once: true });
   setTimeout(revoke, 120_000);
@@ -70,7 +76,7 @@ async function renderReceiptSheet(html: string): Promise<{
 
   const iframe = document.createElement("iframe");
   iframe.setAttribute("title", "receipt-pdf-render");
-  iframe.style.cssText = "width:120mm;height:170mm;border:0;background:#fff;";
+  iframe.style.cssText = "width:120mm;height:180mm;border:0;background:#fff;";
   host.appendChild(iframe);
 
   const doc = iframe.contentDocument;
@@ -83,7 +89,6 @@ async function renderReceiptSheet(html: string): Promise<{
   doc.write(html);
   doc.close();
 
-  // Wait for iframe document + fonts/layout
   await wait(80);
   if (doc.fonts?.ready) {
     try {
@@ -94,7 +99,9 @@ async function renderReceiptSheet(html: string): Promise<{
   }
   await wait(120);
 
-  const sheet = doc.querySelector(".sheet") as HTMLElement | null;
+  const sheet =
+    (doc.querySelector(".receipt-sheet") as HTMLElement | null) ||
+    (doc.querySelector(".sheet") as HTMLElement | null);
   if (!sheet) {
     host.remove();
     throw new Error("قالب رسید یافت نشد");
@@ -124,8 +131,7 @@ async function renderReceiptSheet(html: string): Promise<{
 }
 
 /**
- * Generate an A6 PDF of the payment receipt and download it in-place
- * (no new tab / navigation).
+ * Generate a compact PDF of the payment receipt and download it in-place.
  */
 export async function downloadPaymentReceiptPdf(paymentId: string) {
   const [receipt, html] = await Promise.all([
@@ -141,15 +147,20 @@ export async function downloadPaymentReceiptPdf(paymentId: string) {
   const { canvas, cleanup } = await renderReceiptSheet(html);
   try {
     const { jsPDF } = await import("jspdf");
+    const pdfW = 105;
+    const pdfH = Math.max(
+      148,
+      Math.min(200, (canvas.height * pdfW) / canvas.width),
+    );
     const pdf = new jsPDF({
       orientation: "portrait",
       unit: "mm",
-      format: [105, 148],
+      format: [pdfW, pdfH],
       compress: true,
     });
 
     const img = canvas.toDataURL("image/png");
-    pdf.addImage(img, "PNG", 0, 0, 105, 148, undefined, "FAST");
+    pdf.addImage(img, "PNG", 0, 0, pdfW, pdfH, undefined, "FAST");
     pdf.save(filename);
   } finally {
     cleanup();

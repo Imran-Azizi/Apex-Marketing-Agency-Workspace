@@ -16,6 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { WhatsAppPhoneInput } from "@/components/shared/whatsapp-phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -174,18 +175,21 @@ export function ContactForm({
 
         <div className="space-y-1.5">
           <Label htmlFor="contact-phone">شماره</Label>
-          <Input
-            id="contact-phone"
-            type="tel"
-            dir="ltr"
-            autoComplete="tel"
-            placeholder="07XX XXX XXXX"
-            disabled={busy}
-            aria-invalid={errors.phone ? true : undefined}
-            aria-describedby={errors.phone ? "contact-phone-error" : undefined}
-            aria-required
-            className={cn(FIELD_CLASS, "text-start")}
-            {...register("phone")}
+          <Controller
+            name="phone"
+            control={control}
+            render={({ field }) => (
+              <WhatsAppPhoneInput
+                id="contact-phone"
+                value={field.value}
+                onChange={field.onChange}
+                onBlur={field.onBlur}
+                disabled={busy}
+                aria-invalid={!!errors.phone}
+                aria-describedby={errors.phone ? "contact-phone-error" : undefined}
+                inputClassName={cn(FIELD_CLASS, "text-start h-12 rounded-xl")}
+              />
+            )}
           />
           <FieldError id="contact-phone-error" message={errors.phone?.message} />
         </div>

@@ -24,6 +24,7 @@ const STAFF_ROLES = [
   "EDITOR",
   "NARRATOR",
   "FINANCE",
+  "PROJECT_MANAGER",
 ];
 
 const employeeSelect = {

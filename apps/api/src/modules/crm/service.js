@@ -1,30 +1,70 @@
-import { z } from 'zod';
-import { prisma } from '../../db/prisma.js';
-import { env } from '../../config/env.js';
-import { AppError } from '../../utils/response.js';
-import { normalizeWhatsapp } from '../../utils/whatsappNormalize.js';
-import { writeAudit } from '../../middleware/audit.js';
-import { randomToken } from '../../utils/tokens.js';
+import { z } from "zod";
+import { prisma } from "../../db/prisma.js";
+import { env } from "../../config/env.js";
+import { AppError } from "../../utils/response.js";
+import { getCustomerPersonName } from "../../utils/crmCustomerName.js";
+import {
+  normalizeWhatsapp,
+  parseInternationalPhone,
+  getWhatsappLookupKeys,
+  whatsappNumbersMatch,
+} from "../../utils/whatsappNormalize.js";
+import { writeAudit } from "../../middleware/audit.js";
+import { randomToken } from "../../utils/tokens.js";
 import {
   notifyManagersOnce,
   buildLeadCreatedNotification,
+  buildCustomerConvertedNotification,
   createNotificationOnce,
-} from '../../services/notifications.js';
+} from "../../services/notifications.js";
 import {
   LEAD_SOURCE_CODES,
   LEAD_SOURCE_LABELS,
   SALES_REP_ROLE_CODES,
-} from './constants.js';
-import { buildPaymentReceiptHtml } from './paymentReceiptHtml.js';
+} from "./constants.js";
+import { buildPaymentReceiptHtml } from "./paymentReceiptHtml.js";
+import {
+  allocateCustomerCode,
+  normalizeCustomerCodeQuery,
+} from "./customerCode.js";
+import {
+  applyCrmEvent,
+  maybeAutoConvertAfterFirstVerifiedPayment,
+} from "./sync.js";
+import {
+  openFreshCycleOpportunity,
+  snapshotCustomerProfile,
+} from "./repeatCycle.js";
+import { listCrmActivities, recordCrmActivity } from "./activity.js";
+import {
+  ACTIVITY_TYPES,
+  CRM_EVENTS,
+  CRM_STAGES,
+  canManuallySetStage,
+  canonicalizeStage,
+  pipelineCatalog,
+  buildCategoryWhere,
+  isClosedStage,
+} from "./pipeline.js";
+import { serializeListItem, withCrmView } from "./serialize.js";
+import { serializePortalCredentials } from "./portalInvites.js";
+import { customerListScopeCondition } from "./visibility.js";
+import {
+  assertSalesCustomerAccess,
+  assertSalesCustomerListOwnerFilter,
+  salesCustomerListFilter,
+} from "./salesAccess.js";
+import { ingestWhatsAppMessage } from "./ingestion.js";
 import {
   assertPaymentWithinRemaining,
   batchOpportunityFinanceSnapshots,
   computeFinanceSnapshot,
   getAvailableRemaining,
+  roundMoney,
   syncCustomerOpportunitiesFinance,
   syncOpportunityFinance,
   syncProjectFinanceFromPayments,
-} from './paymentFinance.js';
+} from "./paymentFinance.js";
 import {
   assertPaymentApprover,
   buildPaymentApprovedNotification,
@@ -32,50 +72,145 @@ import {
   buildPaymentRejectedNotification,
   resolvePaymentContext,
   shouldAutoApprovePayment,
-} from './paymentApproval.js';
+} from "./paymentApproval.js";
 import {
   CUSTOMER_PAYMENT_METHODS,
+  INVOICE_PAYMENT_METHODS,
   formatPaymentMethod,
-} from './paymentMethods.js';
+  formatPaymentMethodMetaRows,
+  sanitizePaymentMethodMeta,
+  assertPaymentMethodMeta,
+} from "./paymentMethods.js";
+import {
+  resolveReceiptPaymentMethod,
+  resolveReceiptVideoCount,
+  toPositiveInt,
+} from "./receiptDisplay.js";
 
-const optionalId = z.string().min(1).optional().or(z.literal('')).transform((v) => v || undefined);
-const patchId = z.union([z.string().min(1), z.literal(''), z.null()]).optional();
+const optionalId = z
+  .string()
+  .min(1)
+  .optional()
+  .or(z.literal(""))
+  .transform((v) => v || undefined);
+const patchId = z
+  .union([z.string().min(1), z.literal(""), z.null()])
+  .optional();
 
 export const createCustomerSchema = z.object({
-  personName: z.string().min(2),
+  personName: z.string().trim().optional().or(z.literal("")),
   companyName: z.string().optional(),
   jobTitle: z.string().optional(),
   phone: z.string().optional(),
   whatsapp: z.string().min(8),
   city: z.string().optional(),
   address: z.string().optional(),
-  email: z.string().email().optional().or(z.literal('')),
+  email: z.string().email().optional().or(z.literal("")),
   source: z.string().optional(),
   sourceOther: z.string().optional(),
   salesOwnerId: optionalId,
   notes: z.string().optional(),
+  asManagedCustomer: z.boolean().optional(),
 });
 
 export const updateCustomerSchema = z.object({
-  personName: z.string().min(2).optional(),
+  personName: z.string().trim().min(1).optional(),
   companyName: z.string().optional(),
   jobTitle: z.string().optional(),
   phone: z.string().optional(),
+  whatsapp: z.string().min(8).optional(),
   city: z.string().optional(),
   address: z.string().optional(),
-  email: z.string().email().optional().or(z.literal('')),
+  email: z.string().email().optional().or(z.literal("")),
   source: z.string().optional(),
   sourceOther: z.string().optional(),
   salesOwnerId: patchId,
   notes: z.string().optional(),
-  nextFollowUpAt: z.string().datetime().optional().or(z.literal('')),
+  nextFollowUpAt: z.string().datetime().optional().or(z.literal("")),
+  saveCustomerInfo: z.boolean().optional(),
+});
+
+export const addInteractionSchema = z.object({
+  type: z
+    .enum([
+      "CONTACT",
+      "CALL",
+      "MESSAGE",
+      "WHATSAPP",
+      "INFORMATION_SENT",
+      "PROPOSAL_SENT",
+      "PRICE_SENT",
+      "WAITING_DECISION",
+      "NOTE",
+    ])
+    .default("CONTACT"),
+  body: z.string().trim().min(1).max(4000),
+});
+
+export const changeStageSchema = z.object({
+  stage: z.string().min(1),
+});
+
+export const transferCustomersSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(100),
+});
+
+const paymentMethodMetaSchema = z
+  .object({
+    hesabPayAccount: z.string().trim().max(200).optional(),
+    officeAddress: z.string().trim().max(400).optional(),
+    responsibleName: z.string().trim().max(120).optional(),
+    responsiblePhone: z.string().trim().max(40).optional(),
+    bankInfo: z.string().trim().max(800).optional(),
+    bankCardNumber: z.string().trim().max(80).optional(),
+  })
+  .optional();
+
+export const createInvoiceSchema = z.object({
+  videoCount: z.coerce.number().int().positive().optional(),
+  description: z.string().trim().max(2000).optional(),
+  amount: z.coerce.number().positive().optional(),
+  totalAmount: z.coerce.number().positive().optional(),
+  paidAmount: z.coerce.number().min(0).optional(),
+  dueAt: z.string().datetime().optional().or(z.literal("")),
+  notes: z.string().trim().max(4000).optional(),
+  paymentMethod: z.enum(CUSTOMER_PAYMENT_METHODS).optional(),
+  paymentMethodMeta: paymentMethodMetaSchema,
+  items: z
+    .array(
+      z.object({
+        description: z.string().trim().min(1).max(400),
+        quantity: z.coerce.number().positive().default(1),
+        unitPrice: z.coerce.number().nonnegative(),
+      }),
+    )
+    .optional(),
+});
+
+export const createCustomerInvoiceSchema = z.object({
+  videoCount: z.coerce.number().int().positive(),
+  description: z.string().trim().max(2000).optional(),
+  totalAmount: z.coerce.number().positive(),
+  paidAmount: z.coerce.number().min(0).optional().default(0),
+  notes: z.string().trim().max(4000).optional(),
+  paymentMethod: z.enum(INVOICE_PAYMENT_METHODS),
+  paymentMethodMeta: paymentMethodMetaSchema,
+});
+
+export const ingestWhatsappSchema = z.object({
+  from: z.string().min(5),
+  text: z.string().max(4000).optional(),
+  name: z.string().max(120).optional(),
+  profileName: z.string().max(120).optional(),
 });
 
 export const updateOpportunityDetailsSchema = z.object({
-  agreedPrice: z.coerce.number().positive({ message: 'قیمت مجموعی پروژه الزامی است' }),
+  agreedPrice: z.coerce
+    .number()
+    .positive({ message: "قیمت مجموعی پروژه الزامی است" }),
   /** @deprecated Ignored — advance/total paid is always derived from payment records. */
   advancePayment: z.coerce.number().nonnegative().optional().nullable(),
-  agreedTerms: z.string().min(1, { message: 'شرایط توافق‌شده الزامی است' }),
+  agreedTerms: z.string().min(1, { message: "شرایط توافق‌شده الزامی است" }),
   /** ADMIN/MANAGER only — allow editing a locked contract. */
   adminOverride: z.boolean().optional(),
 });
@@ -85,9 +220,10 @@ export const recordPaymentSchema = z.object({
   opportunityId: z.string().min(1).optional(),
   amount: z.coerce.number().positive(),
   method: z.enum(CUSTOMER_PAYMENT_METHODS, {
-    required_error: 'روش پرداخت الزامی است',
-    invalid_type_error: 'روش پرداخت معتبر نیست',
+    required_error: "روش پرداخت الزامی است",
+    invalid_type_error: "روش پرداخت معتبر نیست",
   }),
+  paymentMethodMeta: paymentMethodMetaSchema,
   reference: z.string().optional(),
   attachmentKey: z.string().optional(),
   allowOverpayment: z.boolean().optional(),
@@ -97,7 +233,7 @@ export const updatePaymentSchema = z.object({
   amount: z.coerce.number().positive().optional(),
   method: z
     .enum(CUSTOMER_PAYMENT_METHODS, {
-      invalid_type_error: 'روش پرداخت معتبر نیست',
+      invalid_type_error: "روش پرداخت معتبر نیست",
     })
     .optional(),
   notes: z.string().optional().nullable(),
@@ -108,16 +244,16 @@ export const rejectPaymentSchema = z.object({
   rejectionReason: z
     .string()
     .trim()
-    .min(3, { message: 'دلیل رد پرداخت الزامی است' })
+    .min(3, { message: "دلیل رد پرداخت الزامی است" })
     .max(1000),
 });
 
 function normalizeSource(source, sourceOther) {
   if (!source?.trim()) return null;
   const code = source.trim().toUpperCase();
-  if (code === 'OTHER') {
+  if (code === "OTHER") {
     const detail = sourceOther?.trim();
-    return detail ? `OTHER:${detail}` : 'OTHER';
+    return detail ? `OTHER:${detail}` : "OTHER";
   }
   if (LEAD_SOURCE_CODES.includes(code)) return code;
   return source.trim();
@@ -125,8 +261,8 @@ function normalizeSource(source, sourceOther) {
 
 function sourceAuditValue(source) {
   if (!source) return null;
-  if (source.startsWith('OTHER:')) {
-    return { code: 'OTHER', detail: source.slice(6) };
+  if (source.startsWith("OTHER:")) {
+    return { code: "OTHER", detail: source.slice(6) };
   }
   return { code: source, label: LEAD_SOURCE_LABELS[source] || source };
 }
@@ -143,7 +279,11 @@ async function assertSalesOwnerId(salesOwnerId) {
     select: { id: true },
   });
   if (!user) {
-    throw new AppError('مسئول فروش انتخاب‌شده معتبر نیست', 400, 'INVALID_SALES_OWNER');
+    throw new AppError(
+      "مسئول فروش انتخاب‌شده معتبر نیست",
+      400,
+      "INVALID_SALES_OWNER",
+    );
   }
   return salesOwnerId;
 }
@@ -157,7 +297,7 @@ export const crmService = {
         role: { code: { in: SALES_REP_ROLE_CODES } },
       },
       select: { id: true, fullName: true, role: { select: { code: true } } },
-      orderBy: { fullName: 'asc' },
+      orderBy: { fullName: "asc" },
     });
 
     return {
@@ -174,67 +314,180 @@ export const crmService = {
         fullName: u.fullName,
         roleCode: u.role.code,
       })),
+      ...pipelineCatalog(),
     };
   },
 
-  async listCustomers({
-    q,
-    source,
-    salesOwnerId,
-    page = 1,
-    pageSize = 20,
-  }) {
+  async listCustomers(
+    {
+      q,
+      source,
+      salesOwnerId,
+      stage,
+      category,
+      dateFrom,
+      dateTo,
+      sort,
+      scope,
+      page = 1,
+      pageSize = 20,
+    },
+    auth,
+  ) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safePageSize = Math.min(100, Math.max(1, Number(pageSize) || 20));
     const where = { deletedAt: null };
+    const and = [];
+    const scopeCondition = customerListScopeCondition(scope);
+    if (scopeCondition) and.push(scopeCondition);
     if (source) {
-      where.source = source === 'OTHER' ? { startsWith: 'OTHER' } : source;
+      where.source = source === "OTHER" ? { startsWith: "OTHER" } : source;
     }
-    if (salesOwnerId) where.salesOwnerId = salesOwnerId;
+    assertSalesCustomerListOwnerFilter(salesOwnerId, auth);
+    const salesFilter = salesCustomerListFilter(auth);
+    if (salesFilter) {
+      and.push(salesFilter);
+    } else if (salesOwnerId) {
+      where.salesOwnerId = salesOwnerId;
+    }
+    if (stage) where.pipelineStage = canonicalizeStage(stage);
+    if (category) {
+      const catWhere = buildCategoryWhere(String(category).toUpperCase());
+      if (catWhere) and.push(catWhere);
+    }
+    if (dateFrom || dateTo) {
+      const createdAt = {};
+      if (dateFrom) createdAt.gte = new Date(dateFrom);
+      if (dateTo) {
+        const end = new Date(dateTo);
+        end.setHours(23, 59, 59, 999);
+        createdAt.lte = end;
+      }
+      where.createdAt = createdAt;
+    }
     if (q) {
       const trimmed = q.trim();
-      const digits = trimmed.replace(/\D/g, '');
+      const digits = trimmed.replace(/\D/g, "");
+      const code = normalizeCustomerCodeQuery(trimmed);
       const or = [
-        { personName: { contains: trimmed, mode: 'insensitive' } },
-        { companyName: { contains: trimmed, mode: 'insensitive' } },
-        { source: { contains: trimmed, mode: 'insensitive' } },
-        { salesOwner: { fullName: { contains: trimmed, mode: 'insensitive' } } },
+        { personName: { contains: trimmed, mode: "insensitive" } },
+        { companyName: { contains: trimmed, mode: "insensitive" } },
+        { customerCode: { contains: code, mode: "insensitive" } },
+        { source: { contains: trimmed, mode: "insensitive" } },
+        {
+          salesOwner: { fullName: { contains: trimmed, mode: "insensitive" } },
+        },
       ];
       if (digits) {
         or.push({ normalizedWhatsapp: { contains: digits } });
         or.push({ phone: { contains: digits } });
+        or.push({ whatsappRaw: { contains: digits } });
       }
-      where.OR = or;
+      and.push({ OR: or });
     }
+    if (and.length) where.AND = and;
+
+    const orderBy =
+      sort === "createdAt"
+        ? { createdAt: "desc" }
+        : sort === "lastContact"
+          ? { lastContactAt: "desc" }
+          : sort === "name"
+            ? { personName: "asc" }
+            : { updatedAt: "desc" };
+
     const [items, total] = await Promise.all([
       prisma.crmCustomer.findMany({
         where,
         include: {
           salesOwner: { select: { id: true, fullName: true } },
+          opportunities: {
+            where: { deletedAt: null },
+            orderBy: { updatedAt: "desc" },
+            take: 1,
+            select: { agreedPrice: true, pipelineStage: true },
+          },
+          payments: {
+            where: { verification: "VERIFIED" },
+            select: { id: true },
+            take: 1,
+          },
+          _count: {
+            select: {
+              projects: { where: { deletedAt: null } },
+              invoices: true,
+              payments: true,
+            },
+          },
         },
-        orderBy: { updatedAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        orderBy,
+        skip: (safePage - 1) * safePageSize,
+        take: safePageSize,
       }),
       prisma.crmCustomer.count({ where }),
     ]);
-    return { items, total, page, pageSize };
+    return {
+      items: items.map((row) => serializeListItem(row, auth)),
+      total,
+      page: safePage,
+      pageSize: safePageSize,
+    };
   },
-  async getCustomer(id) {
+
+  async getDashboard(auth, { scope } = {}) {
+    const where = { deletedAt: null };
+    const and = [];
+    const scopeCondition = customerListScopeCondition(scope);
+    if (scopeCondition) and.push(scopeCondition);
+    const salesFilter = salesCustomerListFilter(auth);
+    if (salesFilter) and.push(salesFilter);
+    if (and.length) where.AND = and;
+    const activeWhere = where;
+    const grouped = await prisma.crmCustomer.groupBy({
+      by: ["pipelineStage"],
+      where: activeWhere,
+      _count: { _all: true },
+    });
+    const byStage = Object.fromEntries(CRM_STAGES.map((s) => [s, 0]));
+    let total = 0;
+    for (const row of grouped) {
+      const stage = canonicalizeStage(row.pipelineStage);
+      byStage[stage] = (byStage[stage] || 0) + row._count._all;
+      total += row._count._all;
+    }
+    const categories = {};
+    for (const code of ["GHOST", "INTERESTED", "FOLLOW_UP", "OUR_CUSTOMERS"]) {
+      const catWhere = buildCategoryWhere(code);
+      categories[code] = catWhere
+        ? await prisma.crmCustomer.count({ where: { AND: [activeWhere, catWhere] } })
+        : 0;
+    }
+    return {
+      total,
+      stages: byStage,
+      categories,
+    };
+  },
+  async getCustomer(id, extras = {}) {
     const customer = await prisma.crmCustomer.findFirst({
       where: { id, deletedAt: null },
       include: {
-        opportunities: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' } },
+        opportunities: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: "desc" },
+        },
         portalAccount: true,
         clientAssets: { where: { deletedAt: null } },
-        projects: { where: { deletedAt: null }, select: { id: true, code: true, status: true, title: true } },
+        projects: {
+          where: { deletedAt: null },
+          select: { id: true, code: true, status: true, title: true },
+        },
         invoices: {
           where: {
-            status: { not: 'CANCELED' },
-            OR: [
-              { projectId: null },
-              { project: { deletedAt: null } },
-            ],
+            status: { not: "CANCELED" },
+            OR: [{ projectId: null }, { project: { deletedAt: null } }],
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           take: 20,
         },
         payments: {
@@ -243,11 +496,8 @@ export const crmService = {
               { invoiceId: null },
               {
                 invoice: {
-                  status: { not: 'CANCELED' },
-                  OR: [
-                    { projectId: null },
-                    { project: { deletedAt: null } },
-                  ],
+                  status: { not: "CANCELED" },
+                  OR: [{ projectId: null }, { project: { deletedAt: null } }],
                 },
               },
             ],
@@ -255,20 +505,17 @@ export const crmService = {
           include: {
             invoice: { select: { id: true, invoiceNumber: true } },
           },
-          orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
+          orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
           take: 100,
         },
         salesOwner: true,
       },
     });
-    if (!customer) throw new AppError('مشتری یافت نشد', 404, 'NOT_FOUND');
+    if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
+    assertSalesCustomerAccess(customer, extras.auth);
 
     const recorderIds = [
-      ...new Set(
-        customer.payments
-          .map((p) => p.recordedById)
-          .filter(Boolean),
-      ),
+      ...new Set(customer.payments.map((p) => p.recordedById).filter(Boolean)),
     ];
     const recorders = recorderIds.length
       ? await prisma.user.findMany({
@@ -290,7 +537,8 @@ export const crmService = {
       customer.opportunities,
     );
     const opportunities = customer.opportunities.map((opp) => {
-      const finance = financeByOpp.get(opp.id) || computeFinanceSnapshot(opp.agreedPrice, 0);
+      const finance =
+        financeByOpp.get(opp.id) || computeFinanceSnapshot(opp.agreedPrice, 0);
       return {
         ...opp,
         advancePayment: finance.totalPaid,
@@ -298,99 +546,185 @@ export const crmService = {
       };
     });
 
-    return {
-      ...customer,
-      opportunities,
-      payments,
-    };
+    const activities = await listCrmActivities(prisma, customer.id);
+
+    const portal = customer.portalAccount;
+    const portalAccount = portal
+      ? {
+          id: portal.id,
+          crmCustomerId: portal.crmCustomerId,
+          normalizedWhatsapp: portal.normalizedWhatsapp,
+          isActive: portal.isActive,
+          registeredAt: portal.registeredAt,
+          createdAt: portal.createdAt,
+          updatedAt: portal.updatedAt,
+          deletedAt: portal.deletedAt,
+        }
+      : null;
+    const portalCredentials = serializePortalCredentials(customer, extras.auth);
+
+    return withCrmView(
+      {
+        ...customer,
+        portalAccount,
+        portalCredentials,
+        opportunities,
+        payments,
+        activities,
+      },
+      extras.auth,
+      {
+        hasProject: customer.projects.length > 0,
+        hasInvoice: customer.invoices.length > 0,
+        hasPayment: payments.length > 0,
+        hasVerifiedPayment: payments.some((p) => p.verification === "VERIFIED"),
+      },
+    );
   },
 
   async createCustomer(data, auth, req) {
-    const normalized = normalizeWhatsapp(data.whatsapp);
+    const parsed = parseInternationalPhone(data.whatsapp);
+    const normalized = parsed.digits;
 
-    const existing = await prisma.crmCustomer.findUnique({ where: { normalizedWhatsapp: normalized } });
+    const lookupKeys = getWhatsappLookupKeys(data.whatsapp);
+    const existing = await prisma.crmCustomer.findFirst({
+      where: { normalizedWhatsapp: { in: lookupKeys } },
+    });
     if (existing && !existing.deletedAt) {
-      throw new AppError('مشتری با این شماره واتساپ موجود است', 409, 'DUPLICATE_WHATSAPP', {
-        customerId: existing.id,
-      });
+      throw new AppError(
+        "مشتری با این شماره واتساپ موجود است",
+        409,
+        "DUPLICATE_WHATSAPP",
+        {
+          customerId: existing.id,
+          customerCode: existing.customerCode,
+        },
+      );
     }
 
     // Number belongs to a customer merged into another profile — point to the survivor (P-03).
-    if (existing?.deletedAt && existing.notes?.startsWith('MERGED_INTO:')) {
-      const survivorId = existing.notes.slice('MERGED_INTO:'.length);
-      throw new AppError('این شماره قبلاً در یک پروفایل دیگر ادغام شده است', 409, 'DUPLICATE_WHATSAPP', {
-        customerId: survivorId,
-      });
+    if (existing?.deletedAt && existing.notes?.startsWith("MERGED_INTO:")) {
+      const survivorId = existing.notes.slice("MERGED_INTO:".length);
+      throw new AppError(
+        "این شماره قبلاً در یک پروفایل دیگر ادغام شده است",
+        409,
+        "DUPLICATE_WHATSAPP",
+        {
+          customerId: survivorId,
+        },
+      );
     }
 
-    const stage = 'NEW_LEAD';
+    const stage = "NEW_LEAD";
+    const personName = String(data.personName || "").trim() || "سرنخ جدید";
 
-    const normalizedSource = normalizeSource(data.source, data.sourceOther);
-    const salesOwnerId = await assertSalesOwnerId(data.salesOwnerId || auth.userId);
+    const normalizedSource =
+      normalizeSource(data.source, data.sourceOther) || "MANUAL";
+    const salesOwnerId = await assertSalesOwnerId(
+      data.salesOwnerId || auth.userId,
+    );
 
     const customer = await prisma.$transaction(async (tx) => {
+      const customerCode =
+        existing?.customerCode || (await allocateCustomerCode(tx));
       const baseData = {
-        personName: data.personName,
+        customerCode,
+        personName,
         companyName: data.companyName,
         jobTitle: data.jobTitle,
-        phone: data.phone,
-        whatsappRaw: data.whatsapp,
+        phone: data.phone || parsed.e164,
+        whatsappRaw: parsed.e164,
         normalizedWhatsapp: normalized,
+        phoneCountryIso: parsed.country,
         city: data.city,
         address: data.address,
         email: data.email || null,
         source: normalizedSource,
         salesOwnerId,
         pipelineStage: stage,
-        portalStatus: 'NOT_ELIGIBLE',
+        portalStatus: "NOT_ELIGIBLE",
         notes: data.notes,
+        lastContactAt: new Date(),
         lostReason: null,
+        convertedAt: data.asManagedCustomer ? new Date() : null,
       };
 
       // Unique constraint covers soft-deleted rows too — restore instead of insert.
       const created = existing
         ? await tx.crmCustomer.update({
             where: { id: existing.id },
-            data: { ...baseData, deletedAt: null },
+            data: {
+              ...baseData,
+              deletedAt: null,
+              convertedAt: data.asManagedCustomer ? new Date() : null,
+            },
           })
         : await tx.crmCustomer.create({ data: baseData });
 
       await tx.opportunity.create({
         data: {
           crmCustomerId: created.id,
-          title: `فرصت اولیه — ${data.companyName || data.personName}`,
+          title: `فرصت اولیه — ${getCustomerPersonName({ personName, companyName: data.companyName })}`,
           pipelineStage: stage,
           serviceId: null,
           lostReason: null,
         },
       });
 
+      await applyCrmEvent(tx, {
+        customerId: created.id,
+        event: CRM_EVENTS.LEAD_CREATED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: normalizedSource,
+        title: "سرنخ ایجاد شد",
+        note: data.notes,
+        notify: false,
+      });
+
       await notifyManagersOnce(
         buildLeadCreatedNotification({
           customerId: created.id,
-          personName: data.personName,
-          phone: normalized,
+          personName,
+          phone: parsed.e164,
+          customerCode: created.customerCode,
+          source: normalizedSource,
         }),
         tx,
       );
+
+      if (salesOwnerId && salesOwnerId !== auth.userId) {
+        await createNotificationOnce(
+          {
+            userId: salesOwnerId,
+            eventKey: `lead.assigned:${created.id}:${salesOwnerId}`,
+            title: "سرنخ جدید به شما اختصاص یافت",
+            body: `${personName} — ${created.customerCode}`,
+            link: `/crm/${created.id}`,
+            meta: { type: "LEAD_ASSIGNED", customerId: created.id },
+          },
+          tx,
+        );
+      }
 
       return created;
     });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'CRM_LEAD_CREATE',
-      entityType: 'CrmCustomer',
+      action: "CRM_LEAD_CREATE",
+      entityType: "CrmCustomer",
       entityId: customer.id,
       after: {
         whatsapp: normalized,
+        customerCode: customer.customerCode,
         source: sourceAuditValue(customer.source),
         salesOwnerId: customer.salesOwnerId,
       },
       req,
     });
 
-    return this.getCustomer(customer.id);
+    return this.getCustomer(customer.id, { auth });
   },
 
   async updateCustomer(id, data, auth, req) {
@@ -406,11 +740,13 @@ export const crmService = {
     if (data.email !== undefined) patch.email = data.email || null;
     if (data.notes !== undefined) patch.notes = data.notes;
     if (data.nextFollowUpAt !== undefined) {
-      patch.nextFollowUpAt = data.nextFollowUpAt ? new Date(data.nextFollowUpAt) : null;
+      patch.nextFollowUpAt = data.nextFollowUpAt
+        ? new Date(data.nextFollowUpAt)
+        : null;
     }
     if (data.source !== undefined || data.sourceOther !== undefined) {
       patch.source = normalizeSource(
-        data.source ?? before.source?.split(':')[0] ?? '',
+        data.source ?? before.source?.split(":")[0] ?? "",
         data.sourceOther,
       );
     }
@@ -419,14 +755,104 @@ export const crmService = {
         ? await assertSalesOwnerId(data.salesOwnerId)
         : null;
     }
+    if (data.whatsapp) {
+      const parsed = parseInternationalPhone(data.whatsapp);
+      if (!whatsappNumbersMatch(parsed.digits, before.normalizedWhatsapp)) {
+        const clashKeys = getWhatsappLookupKeys(data.whatsapp);
+        const clash = await prisma.crmCustomer.findFirst({
+          where: {
+            normalizedWhatsapp: { in: clashKeys },
+            deletedAt: null,
+            id: { not: id },
+          },
+          select: { id: true, customerCode: true },
+        });
+        if (clash) {
+          throw new AppError(
+            "این شماره واتساپ متعلق به سرنخ دیگری است",
+            409,
+            "DUPLICATE_WHATSAPP",
+            {
+              customerId: clash.id,
+              customerCode: clash.customerCode,
+            },
+          );
+        }
+        patch.whatsappRaw = parsed.e164;
+        patch.normalizedWhatsapp = parsed.digits;
+        patch.phoneCountryIso = parsed.country;
+        const history = Array.isArray(before.previousWhatsapp)
+          ? before.previousWhatsapp
+          : [];
+        patch.previousWhatsapp = [
+          ...history,
+          {
+            digits: before.normalizedWhatsapp,
+            raw: before.whatsappRaw,
+            changedAt: new Date().toISOString(),
+          },
+        ];
+      }
+    }
+    if (data.saveCustomerInfo) {
+      patch.customerInfoSavedAt = new Date();
+    }
 
-    await prisma.crmCustomer.update({ where: { id }, data: patch });
-    const updated = await this.getCustomer(id);
+    await prisma.$transaction(async (tx) => {
+      await tx.crmCustomer.update({ where: { id }, data: patch });
+      if (
+        patch.normalizedWhatsapp &&
+        patch.normalizedWhatsapp !== before.normalizedWhatsapp
+      ) {
+        await recordCrmActivity(tx, {
+          crmCustomerId: id,
+          type: ACTIVITY_TYPES.PHONE_CHANGED,
+          title: "شماره واتساپ به‌روزرسانی شد",
+          body: `${before.normalizedWhatsapp} → ${patch.normalizedWhatsapp}`,
+          actorId: auth.userId,
+          actorType: "USER",
+        });
+      }
+      if (data.saveCustomerInfo) {
+        await recordCrmActivity(tx, {
+          crmCustomerId: id,
+          type: ACTIVITY_TYPES.CUSTOMER_INFO_SAVED,
+          title: "اطلاعات مشتری ذخیره شد",
+          actorId: auth.userId,
+          actorType: "USER",
+        });
+      }
+      if (patch.salesOwnerId && patch.salesOwnerId !== before.salesOwnerId) {
+        await recordCrmActivity(tx, {
+          crmCustomerId: id,
+          type: ACTIVITY_TYPES.ASSIGNED,
+          title: "مسئول فروش تعیین شد",
+          actorId: auth.userId,
+          actorType: "USER",
+          relatedType: "User",
+          relatedId: patch.salesOwnerId,
+        });
+        if (patch.salesOwnerId !== auth.userId) {
+          await createNotificationOnce(
+            {
+              userId: patch.salesOwnerId,
+              eventKey: `lead.assigned:${id}:${patch.salesOwnerId}:${Date.now()}`,
+              title: "سرنخ به شما اختصاص یافت",
+              body: `${before.personName}`,
+              link: `/crm/${id}`,
+              meta: { type: "LEAD_ASSIGNED", customerId: id },
+            },
+            tx,
+          );
+        }
+      }
+    });
+    const updated = await this.getCustomer(id, { auth });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'CRM_CUSTOMER_UPDATE',
-      entityType: 'CrmCustomer',
+      action: "CRM_CUSTOMER_UPDATE",
+      entityType: "CrmCustomer",
       entityId: id,
       before: {
         personName: before.personName,
@@ -449,25 +875,27 @@ export const crmService = {
     auth,
     req,
   ) {
-    const opp = await prisma.opportunity.findFirst({ where: { id: opportunityId, deletedAt: null } });
-    if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+    const opp = await prisma.opportunity.findFirst({
+      where: { id: opportunityId, deletedAt: null },
+    });
+    if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
 
     const price = Number(agreedPrice);
-    const terms = String(agreedTerms || '').trim();
+    const terms = String(agreedTerms || "").trim();
     if (!(price > 0) || Number.isNaN(price)) {
-      throw new AppError('قیمت مجموعی پروژه الزامی است', 400, 'VALIDATION');
+      throw new AppError("قیمت مجموعی پروژه الزامی است", 400, "VALIDATION");
     }
     if (!terms) {
-      throw new AppError('شرایط توافق‌شده الزامی است', 400, 'VALIDATION');
+      throw new AppError("شرایط توافق‌شده الزامی است", 400, "VALIDATION");
     }
 
-    const isAdmin = auth?.roleCode === 'ADMIN' || auth?.roleCode === 'MANAGER';
+    const isAdmin = auth?.roleCode === "ADMIN" || auth?.roleCode === "MANAGER";
     if (opp.contractLocked) {
       if (!(adminOverride && isAdmin)) {
         throw new AppError(
-          'این قرارداد قفل شده و دیگر قابل ویرایش نمی‌باشد.',
+          "این قرارداد قفل شده و دیگر قابل ویرایش نمی‌باشد.",
           403,
-          'CONTRACT_LOCKED',
+          "CONTRACT_LOCKED",
         );
       }
     }
@@ -479,8 +907,11 @@ export const crmService = {
       contractLocked: opp.contractLocked,
     };
 
-    const shouldConfirmOrder =
-      !['COMPLETED', 'CANCELED'].includes(opp.pipelineStage);
+    const shouldConfirmOrder = ![
+      "DELIVERED",
+      "LOST_CANCELED",
+      "REPEAT_CUSTOMER",
+    ].includes(canonicalizeStage(opp.pipelineStage));
 
     // advancePayment is never set manually — always derived from payment records.
     const updated = await prisma.$transaction(async (tx) => {
@@ -492,18 +923,28 @@ export const crmService = {
           contractLocked: true,
           contractLockedAt: opp.contractLockedAt || new Date(),
           contractLockedById: opp.contractLockedById || auth.userId,
-          ...(shouldConfirmOrder && { pipelineStage: 'ORDER_CONFIRMED', lostReason: null }),
         },
       });
       if (shouldConfirmOrder) {
-        await tx.crmCustomer.update({
-          where: { id: opp.crmCustomerId },
-          data: { pipelineStage: 'ORDER_CONFIRMED', lostReason: null },
+        await applyCrmEvent(tx, {
+          customerId: opp.crmCustomerId,
+          opportunityId,
+          event: CRM_EVENTS.ORDER_CONFIRMED,
+          actorId: auth.userId,
+          actorType: "USER",
+          source: "CONTRACT",
+          relatedType: "Opportunity",
+          relatedId: opportunityId,
+          title: "سفارش تأیید شد",
         });
       }
-      const { opportunity, finance } = await syncOpportunityFinance(tx, opportunityId, {
-        persist: true,
-      });
+      const { opportunity, finance } = await syncOpportunityFinance(
+        tx,
+        opportunityId,
+        {
+          persist: true,
+        },
+      );
       const locked = await tx.opportunity.findUnique({
         where: { id: opportunityId },
         select: {
@@ -520,8 +961,8 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'OPPORTUNITY_DETAILS_UPDATE',
-      entityType: 'Opportunity',
+      action: "OPPORTUNITY_DETAILS_UPDATE",
+      entityType: "Opportunity",
       entityId: opportunityId,
       before,
       after: {
@@ -539,11 +980,17 @@ export const crmService = {
 
   /** ADMIN/MANAGER — unlock contract price & terms for authorized correction. */
   async unlockContractDetails(opportunityId, auth, req) {
-    if (auth?.roleCode !== 'ADMIN' && auth?.roleCode !== 'MANAGER') {
-      throw new AppError('فقط مدیر مجاز به بازکردن قفل قرارداد است', 403, 'FORBIDDEN');
+    if (auth?.roleCode !== "ADMIN" && auth?.roleCode !== "MANAGER") {
+      throw new AppError(
+        "فقط مدیر مجاز به بازکردن قفل قرارداد است",
+        403,
+        "FORBIDDEN",
+      );
     }
-    const opp = await prisma.opportunity.findFirst({ where: { id: opportunityId, deletedAt: null } });
-    if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+    const opp = await prisma.opportunity.findFirst({
+      where: { id: opportunityId, deletedAt: null },
+    });
+    if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
     if (!opp.contractLocked) {
       return {
         id: opp.id,
@@ -570,8 +1017,8 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'OPPORTUNITY_CONTRACT_UNLOCK',
-      entityType: 'Opportunity',
+      action: "OPPORTUNITY_CONTRACT_UNLOCK",
+      entityType: "Opportunity",
       entityId: opportunityId,
       before: { contractLocked: true },
       after: { contractLocked: false },
@@ -581,64 +1028,344 @@ export const crmService = {
     return updated;
   },
 
-  async createDepositInvoice(opportunityId, { amount, dueAt, notes }, auth, req) {
+  async createDepositInvoice(opportunityId, body, auth, req) {
+    return this.createInvoice(opportunityId, body, auth, req);
+  },
+
+  async ensureOpenOpportunity(tx, customer) {
+    const existing = await tx.opportunity.findFirst({
+      where: {
+        crmCustomerId: customer.id,
+        deletedAt: null,
+        pipelineStage: { not: "LOST_CANCELED" },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existing) return existing;
+    return tx.opportunity.create({
+      data: {
+        crmCustomerId: customer.id,
+        title: `فرصت — ${getCustomerPersonName(customer)}`,
+        pipelineStage: canonicalizeStage(customer.pipelineStage),
+        serviceId: null,
+        lostReason: null,
+      },
+    });
+  },
+
+  async createCustomerInvoice(customerId, body = {}, auth, req) {
+    const customer = await prisma.crmCustomer.findFirst({
+      where: { id: customerId, deletedAt: null },
+    });
+    if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
+    if (isClosedStage(customer.pipelineStage)) {
+      throw new AppError(
+        "برای سرنخ لغوشده نمی‌توان فاکتور صادر کرد",
+        400,
+        "LEAD_CLOSED",
+      );
+    }
+
+    const total = roundMoney(body.totalAmount);
+    if (!(total > 0)) {
+      throw new AppError("مبلغ کل فاکتور الزامی است", 400, "VALIDATION");
+    }
+    const paidAmount = roundMoney(body.paidAmount || 0);
+    if (paidAmount > total) {
+      throw new AppError(
+        "مبلغ پرداخت‌شده نمی‌تواند از مبلغ کل بیشتر باشد",
+        400,
+        "VALIDATION",
+      );
+    }
+    if (!body.paymentMethod) {
+      throw new AppError("روش پرداخت الزامی است", 400, "VALIDATION");
+    }
+    assertPaymentMethodMeta(body.paymentMethod, body.paymentMethodMeta);
+
+    const videoCount = Number(body.videoCount);
+    const opportunity = await prisma.$transaction(async (tx) => {
+      const opp = await this.ensureOpenOpportunity(tx, customer);
+      if (!opp.contractLocked) {
+        await tx.opportunity.update({
+          where: { id: opp.id },
+          data: {
+            agreedPrice:
+              opp.agreedPrice != null && Number(opp.agreedPrice) > 0
+                ? opp.agreedPrice
+                : total,
+            agreedTerms:
+              opp.agreedTerms?.trim() ||
+              body.notes?.trim() ||
+              `فاکتور CRM — ${videoCount} ویدیو`,
+          },
+        });
+      } else if (
+        opp.agreedPrice == null ||
+        Number(opp.agreedPrice) <= 0 ||
+        !opp.agreedTerms?.trim()
+      ) {
+        await tx.opportunity.update({
+          where: { id: opp.id },
+          data: {
+            agreedPrice:
+              opp.agreedPrice != null && Number(opp.agreedPrice) > 0
+                ? opp.agreedPrice
+                : total,
+            agreedTerms:
+              opp.agreedTerms?.trim() || `فاکتور CRM — ${videoCount} ویدیو`,
+          },
+        });
+      }
+      return opp;
+    });
+
+    const invoice = await this.createInvoice(
+      opportunity.id,
+      {
+        ...body,
+        amount: total,
+        totalAmount: total,
+        videoCount,
+        description: body.description || `تولید ${videoCount} ویدیو`,
+      },
+      auth,
+      req,
+    );
+
+    let customerConverted = false;
+    let paymentId = null;
+    if (paidAmount > 0) {
+      const paymentResult = await this.recordPayment(
+        {
+          invoiceId: invoice.id,
+          opportunityId: opportunity.id,
+          amount: paidAmount,
+          method: body.paymentMethod,
+          paymentMethodMeta: body.paymentMethodMeta,
+          reference: invoice.invoiceNumber,
+        },
+        auth,
+        req,
+      );
+      customerConverted = paymentResult.customerConverted === true;
+      paymentId = paymentResult.id || null;
+    }
+
+    const latest = await prisma.crmCustomer.findFirst({
+      where: { id: customerId, deletedAt: null },
+      select: { convertedAt: true },
+    });
+    customerConverted = Boolean(latest?.convertedAt);
+
+    const view = await this.getInvoiceView(invoice.id);
+    return {
+      ...view,
+      customerId,
+      customerConverted,
+      paymentId,
+    };
+  },
+
+  async createInvoice(opportunityId, body = {}, auth, req) {
     const opp = await prisma.opportunity.findFirst({
       where: { id: opportunityId, deletedAt: null },
       include: { crmCustomer: true },
     });
-    if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+    if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
     if (opp.agreedPrice == null || Number(opp.agreedPrice) <= 0) {
-      throw new AppError('ابتدا قیمت مجموعی پروژه را ثبت کنید', 400, 'AGREED_PRICE_REQUIRED');
+      throw new AppError(
+        "ابتدا قیمت مجموعی پروژه را ثبت کنید",
+        400,
+        "AGREED_PRICE_REQUIRED",
+      );
     }
     if (!opp.agreedTerms?.trim()) {
-      throw new AppError('ابتدا شرایط توافق‌شده را ثبت کنید', 400, 'AGREED_TERMS_REQUIRED');
+      throw new AppError(
+        "ابتدا شرایط توافق‌شده را ثبت کنید",
+        400,
+        "AGREED_TERMS_REQUIRED",
+      );
     }
 
-    const count = await prisma.invoice.count();
-    const invoiceNumber = `INV-${new Date().getFullYear()}-${String(count + 1).padStart(5, '0')}`;
-    const total = Number(amount);
+    const agreed = roundMoney(opp.agreedPrice);
+    const requested = body.totalAmount ?? body.amount;
+    const total = roundMoney(
+      requested != null && requested !== "" ? requested : agreed,
+    );
+    if (!(total > 0)) {
+      throw new AppError("مبلغ فاکتور نامعتبر است", 400, "VALIDATION");
+    }
+
+    const qty = body.videoCount ? Number(body.videoCount) : 1;
+    const unit = qty > 0 ? roundMoney(total / qty) : total;
+    const items =
+      Array.isArray(body.items) && body.items.length
+        ? body.items.map((item) => {
+            const quantity = roundMoney(item.quantity || 1);
+            const unitPrice = roundMoney(item.unitPrice);
+            return {
+              description: item.description,
+              quantity,
+              unitPrice,
+              amount: roundMoney(quantity * unitPrice),
+            };
+          })
+        : [
+            {
+              description: body.description || "خدمات تولید محتوای ویدیویی",
+              quantity: qty,
+              unitPrice: unit,
+              amount: total,
+            },
+          ];
+
+    const itemsTotal = roundMoney(
+      items.reduce((sum, item) => sum + Number(item.amount), 0),
+    );
+    const invoiceTotal = itemsTotal > 0 ? itemsTotal : total;
+    const paymentMethod = body.paymentMethod || null;
+    const paymentMethodMeta = paymentMethod
+      ? sanitizePaymentMethodMeta(paymentMethod, body.paymentMethodMeta)
+      : undefined;
 
     const invoice = await prisma.$transaction(async (tx) => {
+      const count = await tx.invoice.count();
+      const invoiceNumber = `INV-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
+      const paidSnap = await syncOpportunityFinance(tx, opportunityId, {
+        persist: false,
+      });
+      const paidAmount = roundMoney(paidSnap.finance.totalPaid);
+      const remainingAmount = roundMoney(
+        Math.max(0, invoiceTotal - paidAmount),
+      );
+
       const inv = await tx.invoice.create({
         data: {
           invoiceNumber,
           crmCustomerId: opp.crmCustomerId,
           opportunityId: opp.id,
-          status: 'ISSUED',
+          status:
+            paidAmount <= 0
+              ? "ISSUED"
+              : remainingAmount <= 0
+                ? "PAID"
+                : "PARTIALLY_PAID",
           issuedAt: new Date(),
-          dueAt: dueAt ? new Date(dueAt) : null,
-          subtotal: total,
-          total,
-          notes: notes || 'فاکتور بیعانه',
-          items: {
-            create: [{ description: 'بیعانه پروژه', quantity: 1, unitPrice: total, amount: total }],
-          },
+          dueAt: body.dueAt ? new Date(body.dueAt) : null,
+          subtotal: invoiceTotal,
+          total: invoiceTotal,
+          notes: body.notes || null,
+          videoCount: toPositiveInt(body.videoCount) || toPositiveInt(qty) || null,
+          paymentMethod,
+          paymentMethodMeta,
+          items: { create: items },
         },
         include: { items: true },
       });
-      return inv;
+
+      await applyCrmEvent(tx, {
+        customerId: opp.crmCustomerId,
+        opportunityId,
+        event: CRM_EVENTS.INVOICE_CREATED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "INVOICE",
+        relatedType: "Invoice",
+        relatedId: inv.id,
+        title: "فاکتور ایجاد شد",
+        note: `شماره فاکتور ${invoiceNumber}`,
+        meta: { invoiceNumber, total: invoiceTotal, remainingAmount },
+      });
+
+      return { ...inv, paidAmount, remainingAmount };
     });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'DEPOSIT_INVOICE_CREATE',
-      entityType: 'Invoice',
+      action: "INVOICE_CREATE",
+      entityType: "Invoice",
       entityId: invoice.id,
-      after: { total, opportunityId },
+      after: {
+        total: invoiceTotal,
+        opportunityId,
+        invoiceNumber: invoice.invoiceNumber,
+      },
       req,
     });
     return invoice;
   },
 
+  async getInvoiceView(invoiceId) {
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: invoiceId },
+      include: {
+        items: true,
+        crmCustomer: {
+          select: {
+            id: true,
+            customerCode: true,
+            personName: true,
+            companyName: true,
+            phone: true,
+            whatsappRaw: true,
+            email: true,
+          },
+        },
+      },
+    });
+    if (!invoice) throw new AppError("فاکتور یافت نشد", 404, "NOT_FOUND");
+
+    let paidAmount = 0;
+    const verified = await prisma.payment.aggregate({
+      where: { invoiceId: invoice.id, verification: "VERIFIED" },
+      _sum: { amount: true },
+    });
+    paidAmount = roundMoney(verified._sum.amount || 0);
+    if (invoice.opportunityId) {
+      const snap = await syncOpportunityFinance(prisma, invoice.opportunityId, {
+        persist: false,
+      });
+      paidAmount = roundMoney(snap.finance.totalPaid);
+    }
+    const total = roundMoney(invoice.total);
+    const remainingAmount = roundMoney(Math.max(0, total - paidAmount));
+
+    return {
+      ...invoice,
+      paymentMethodLabel: formatPaymentMethod(invoice.paymentMethod),
+      paidAmount,
+      remainingAmount,
+      customer: {
+        id: invoice.crmCustomer.id,
+        customerCode: invoice.crmCustomer.customerCode,
+        personName: invoice.crmCustomer.personName,
+        companyName: invoice.crmCustomer.companyName,
+        phone: invoice.crmCustomer.phone || invoice.crmCustomer.whatsappRaw,
+        email: invoice.crmCustomer.email,
+      },
+    };
+  },
+
   async recordPayment(
-    { invoiceId, opportunityId, amount, method, reference, attachmentKey, allowOverpayment },
+    {
+      invoiceId,
+      opportunityId,
+      amount,
+      method,
+      paymentMethodMeta,
+      reference,
+      attachmentKey,
+      allowOverpayment,
+    },
     auth,
     req,
   ) {
     const amt = Number(amount);
     if (!(amt > 0) || Number.isNaN(amt)) {
-      throw new AppError('مبلغ باید عدد مثبت باشد', 400, 'VALIDATION');
+      throw new AppError("مبلغ باید عدد مثبت باشد", 400, "VALIDATION");
     }
+    const cleanMeta = assertPaymentMethodMeta(method, paymentMethodMeta || {});
 
     let crmCustomerId;
     let resolvedInvoiceId = invoiceId || null;
@@ -646,8 +1373,10 @@ export const crmService = {
     let agreedPrice = 0;
 
     if (invoiceId) {
-      const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } });
-      if (!invoice) throw new AppError('فاکتور یافت نشد', 404, 'NOT_FOUND');
+      const invoice = await prisma.invoice.findUnique({
+        where: { id: invoiceId },
+      });
+      if (!invoice) throw new AppError("فاکتور یافت نشد", 404, "NOT_FOUND");
       crmCustomerId = invoice.crmCustomerId;
       if (!resolvedOpportunityId && invoice.opportunityId) {
         resolvedOpportunityId = invoice.opportunityId;
@@ -656,11 +1385,11 @@ export const crmService = {
       const opp = await prisma.opportunity.findFirst({
         where: { id: opportunityId, deletedAt: null },
       });
-      if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+      if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
       crmCustomerId = opp.crmCustomerId;
       agreedPrice = Number(opp.agreedPrice || 0);
     } else {
-      throw new AppError('فاکتور یا فرصت الزامی است', 400, 'VALIDATION');
+      throw new AppError("فاکتور یا فرصت الزامی است", 400, "VALIDATION");
     }
 
     if (resolvedOpportunityId) {
@@ -671,9 +1400,9 @@ export const crmService = {
       agreedPrice = available.projectTotal;
       if (available.projectTotal <= 0) {
         throw new AppError(
-          'ابتدا قیمت مجموعی پروژه را ثبت کنید',
+          "ابتدا قیمت مجموعی پروژه را ثبت کنید",
           400,
-          'AGREED_PRICE_REQUIRED',
+          "AGREED_PRICE_REQUIRED",
         );
       }
       assertPaymentWithinRemaining({
@@ -684,18 +1413,19 @@ export const crmService = {
       });
     }
 
+    const year = new Date().getFullYear();
     const priorPaymentCount = await prisma.payment.count({
       where: { crmCustomerId },
     });
     const isFirstPayment = priorPaymentCount === 0;
-
-    const year = new Date().getFullYear();
     const seq = priorPaymentCount + 1;
-    const paymentNumber = reference?.trim()
-      || `PAY-${year}-${String(seq).padStart(5, '0')}`;
+    const paymentNumber =
+      reference?.trim() || `PAY-${year}-${String(seq).padStart(5, "0")}`;
     const paidAt = new Date();
     const autoApprove = shouldAutoApprovePayment(auth);
-    const initialVerification = autoApprove ? 'VERIFIED' : 'PENDING';
+    const initialVerification = autoApprove ? "VERIFIED" : "PENDING";
+
+    let customerConverted = false;
 
     const payment = await prisma.$transaction(async (tx) => {
       const created = await tx.payment.create({
@@ -705,6 +1435,7 @@ export const crmService = {
           amount: amt,
           paidAt,
           method,
+          methodMeta: cleanMeta,
           reference: paymentNumber,
           attachmentKey,
           verification: initialVerification,
@@ -745,18 +1476,20 @@ export const crmService = {
       }
 
       if (autoApprove && resolvedInvoiceId) {
-        const invoice = await tx.invoice.findUnique({ where: { id: resolvedInvoiceId } });
+        const invoice = await tx.invoice.findUnique({
+          where: { id: resolvedInvoiceId },
+        });
         if (invoice) {
           const verifiedSum = await tx.payment.aggregate({
-            where: { invoiceId: resolvedInvoiceId, verification: 'VERIFIED' },
+            where: { invoiceId: resolvedInvoiceId, verification: "VERIFIED" },
             _sum: { amount: true },
           });
           const received = Number(verifiedSum._sum.amount || 0);
           const total = Number(invoice.total);
-          let status = 'ISSUED';
-          if (received <= 0) status = 'ISSUED';
-          else if (received < total) status = 'PARTIALLY_PAID';
-          else status = 'PAID';
+          let status = "ISSUED";
+          if (received <= 0) status = "ISSUED";
+          else if (received < total) status = "PARTIALLY_PAID";
+          else status = "PAID";
           await tx.invoice.update({
             where: { id: resolvedInvoiceId },
             data: { status },
@@ -765,23 +1498,32 @@ export const crmService = {
       }
 
       if (isFirstPayment) {
-        if (resolvedOpportunityId) {
-          await tx.opportunity.updateMany({
-            where: {
-              id: resolvedOpportunityId,
-              deletedAt: null,
-              pipelineStage: { notIn: ['COMPLETED', 'CANCELED'] },
-            },
-            data: { pipelineStage: 'ORDER_CONFIRMED', lostReason: null },
-          });
-        }
-        await tx.crmCustomer.updateMany({
-          where: {
-            id: crmCustomerId,
-            deletedAt: null,
-            pipelineStage: { notIn: ['COMPLETED', 'CANCELED'] },
-          },
-          data: { pipelineStage: 'ORDER_CONFIRMED', lostReason: null },
+        await applyCrmEvent(tx, {
+          customerId: crmCustomerId,
+          opportunityId: resolvedOpportunityId,
+          event: autoApprove
+            ? CRM_EVENTS.PAYMENT_CONFIRMED
+            : CRM_EVENTS.PAYMENT_SUBMITTED,
+          actorId: auth.userId,
+          actorType: "USER",
+          source: "PAYMENT",
+          relatedType: "Payment",
+          relatedId: created.id,
+          title: autoApprove ? "بیعانه تأیید شد" : "پرداخت ثبت شد",
+        });
+      } else {
+        await applyCrmEvent(tx, {
+          customerId: crmCustomerId,
+          opportunityId: resolvedOpportunityId,
+          event: autoApprove
+            ? CRM_EVENTS.PAYMENT_CONFIRMED
+            : CRM_EVENTS.PAYMENT_SUBMITTED,
+          actorId: auth.userId,
+          actorType: "USER",
+          source: "PAYMENT",
+          relatedType: "Payment",
+          relatedId: created.id,
+          notify: autoApprove,
         });
       }
 
@@ -803,13 +1545,23 @@ export const crmService = {
         );
       }
 
+      if (isFirstPayment) {
+        const conversion = await maybeAutoConvertAfterFirstVerifiedPayment(tx, {
+          customerId: crmCustomerId,
+          actorId: auth.userId,
+          paymentId: created.id,
+          trigger: "payment",
+        });
+        customerConverted = conversion.converted === true;
+      }
+
       return { ...created, recordedBy, finance };
     });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'PAYMENT_RECORD',
-      entityType: 'Payment',
+      action: "PAYMENT_RECORD",
+      entityType: "Payment",
       entityId: payment.id,
       after: {
         amount: amt,
@@ -821,6 +1573,7 @@ export const crmService = {
         verification: initialVerification,
         awaitingApproval: !autoApprove,
         isFirstPayment,
+        customerConverted,
         portalInviteUnlocked: isFirstPayment,
         receiptGenerated: true,
         finance: payment.finance,
@@ -833,10 +1586,11 @@ export const crmService = {
       methodLabel: formatPaymentMethod(payment.method),
       paymentNumber,
       isFirstPayment,
+      customerConverted,
       portalInviteUnlocked: isFirstPayment,
       receiptGenerated: true,
       awaitingApproval: !autoApprove,
-      approvalStatus: autoApprove ? 'APPROVED' : 'PENDING_APPROVAL',
+      approvalStatus: autoApprove ? "APPROVED" : "PENDING_APPROVAL",
       finance: payment.finance,
     };
   },
@@ -854,24 +1608,32 @@ export const crmService = {
       where: { id: paymentId },
       include: { invoice: { select: { opportunityId: true } } },
     });
-    if (!existing) throw new AppError('پرداخت یافت نشد', 404, 'NOT_FOUND');
-    if (existing.verification === 'REJECTED') {
-      throw new AppError('پرداخت رد‌شده قابل ویرایش نیست', 400, 'PAYMENT_REJECTED');
+    if (!existing) throw new AppError("پرداخت یافت نشد", 404, "NOT_FOUND");
+    if (existing.verification === "REJECTED") {
+      throw new AppError(
+        "پرداخت رد‌شده قابل ویرایش نیست",
+        400,
+        "PAYMENT_REJECTED",
+      );
     }
 
-    const nextAmount = amount !== undefined ? Number(amount) : Number(existing.amount);
+    const nextAmount =
+      amount !== undefined ? Number(amount) : Number(existing.amount);
     if (!(nextAmount > 0) || Number.isNaN(nextAmount)) {
-      throw new AppError('مبلغ باید عدد مثبت باشد', 400, 'VALIDATION');
+      throw new AppError("مبلغ باید عدد مثبت باشد", 400, "VALIDATION");
     }
 
-    const opportunityId = existing.invoice?.opportunityId
-      || (await prisma.opportunity.findFirst({
-        where: { crmCustomerId: existing.crmCustomerId, deletedAt: null },
-        orderBy: { updatedAt: 'desc' },
-        select: { id: true },
-      }))?.id;
+    const opportunityId =
+      existing.invoice?.opportunityId ||
+      (
+        await prisma.opportunity.findFirst({
+          where: { crmCustomerId: existing.crmCustomerId, deletedAt: null },
+          orderBy: { updatedAt: "desc" },
+          select: { id: true },
+        })
+      )?.id;
 
-    if (opportunityId && existing.verification !== 'REJECTED') {
+    if (opportunityId && existing.verification !== "REJECTED") {
       const available = await getAvailableRemaining(prisma, {
         opportunityId,
         crmCustomerId: existing.crmCustomerId,
@@ -897,7 +1659,9 @@ export const crmService = {
 
       let finance = null;
       if (opportunityId) {
-        finance = (await syncOpportunityFinance(tx, opportunityId, { persist: true })).finance;
+        finance = (
+          await syncOpportunityFinance(tx, opportunityId, { persist: true })
+        ).finance;
       } else {
         await syncCustomerOpportunitiesFinance(tx, existing.crmCustomerId);
       }
@@ -906,8 +1670,8 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'PAYMENT_UPDATE',
-      entityType: 'Payment',
+      action: "PAYMENT_UPDATE",
+      entityType: "Payment",
       entityId: paymentId,
       before: { amount: Number(existing.amount), method: existing.method },
       after: {
@@ -933,7 +1697,7 @@ export const crmService = {
       where: { id: paymentId },
       include: { invoice: { select: { opportunityId: true } } },
     });
-    if (!existing) throw new AppError('پرداخت یافت نشد', 404, 'NOT_FOUND');
+    if (!existing) throw new AppError("پرداخت یافت نشد", 404, "NOT_FOUND");
 
     const opportunityId = existing.invoice?.opportunityId || null;
 
@@ -941,18 +1705,35 @@ export const crmService = {
       await tx.payment.delete({ where: { id: paymentId } });
       let finance = null;
       if (opportunityId) {
-        finance = (await syncOpportunityFinance(tx, opportunityId, { persist: true })).finance;
+        finance = (
+          await syncOpportunityFinance(tx, opportunityId, { persist: true })
+        ).finance;
       } else {
-        const synced = await syncCustomerOpportunitiesFinance(tx, existing.crmCustomerId);
+        const synced = await syncCustomerOpportunitiesFinance(
+          tx,
+          existing.crmCustomerId,
+        );
         finance = synced[0]?.finance || null;
       }
+      await applyCrmEvent(tx, {
+        customerId: existing.crmCustomerId,
+        opportunityId,
+        event: CRM_EVENTS.PAYMENT_REVERSED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "PAYMENT",
+        relatedType: "Payment",
+        relatedId: paymentId,
+        title: "پرداخت حذف / برگشت شد",
+        notify: false,
+      });
       return finance;
     });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'PAYMENT_DELETE',
-      entityType: 'Payment',
+      action: "PAYMENT_DELETE",
+      entityType: "Payment",
       entityId: paymentId,
       before: {
         amount: Number(existing.amount),
@@ -973,27 +1754,29 @@ export const crmService = {
   async rejectPayment(paymentId, { rejectionReason } = {}, auth, req) {
     assertPaymentApprover(auth);
 
-    const reason = String(rejectionReason || '').trim();
+    const reason = String(rejectionReason || "").trim();
     if (reason.length < 3) {
-      throw new AppError('دلیل رد پرداخت الزامی است', 400, 'VALIDATION');
+      throw new AppError("دلیل رد پرداخت الزامی است", 400, "VALIDATION");
     }
 
     const existing = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
         invoice: { select: { opportunityId: true, projectId: true } },
-        crmCustomer: { select: { id: true, personName: true, companyName: true } },
+        crmCustomer: {
+          select: { id: true, personName: true, companyName: true },
+        },
       },
     });
-    if (!existing) throw new AppError('پرداخت یافت نشد', 404, 'NOT_FOUND');
-    if (existing.verification === 'REJECTED') {
-      return { ...existing, finance: null, approvalStatus: 'REJECTED' };
+    if (!existing) throw new AppError("پرداخت یافت نشد", 404, "NOT_FOUND");
+    if (existing.verification === "REJECTED") {
+      return { ...existing, finance: null, approvalStatus: "REJECTED" };
     }
-    if (existing.verification === 'VERIFIED') {
+    if (existing.verification === "VERIFIED") {
       throw new AppError(
-        'پرداخت تأییدشده قابل رد نیست. ابتدا وضعیت مالی را بررسی کنید.',
+        "پرداخت تأییدشده قابل رد نیست. ابتدا وضعیت مالی را بررسی کنید.",
         400,
-        'PAYMENT_ALREADY_APPROVED',
+        "PAYMENT_ALREADY_APPROVED",
       );
     }
 
@@ -1004,7 +1787,7 @@ export const crmService = {
       const p = await tx.payment.update({
         where: { id: paymentId },
         data: {
-          verification: 'REJECTED',
+          verification: "REJECTED",
           rejectedAt,
           rejectedById: auth.userId,
           rejectionReason: reason,
@@ -1016,9 +1799,14 @@ export const crmService = {
       // Pending never entered finance; sync keeps caches consistent.
       let finance = null;
       if (opportunityId) {
-        finance = (await syncOpportunityFinance(tx, opportunityId, { persist: true })).finance;
+        finance = (
+          await syncOpportunityFinance(tx, opportunityId, { persist: true })
+        ).finance;
       } else {
-        const synced = await syncCustomerOpportunitiesFinance(tx, existing.crmCustomerId);
+        const synced = await syncCustomerOpportunitiesFinance(
+          tx,
+          existing.crmCustomerId,
+        );
         finance = synced[0]?.finance || null;
       }
 
@@ -1027,7 +1815,7 @@ export const crmService = {
         await createNotificationOnce(
           {
             userId: existing.recordedById,
-            audience: 'INTERNAL',
+            audience: "INTERNAL",
             ...buildPaymentRejectedNotification({
               paymentId,
               amount: existing.amount,
@@ -1043,16 +1831,30 @@ export const crmService = {
         );
       }
 
+      await applyCrmEvent(tx, {
+        customerId: existing.crmCustomerId,
+        opportunityId,
+        event: CRM_EVENTS.PAYMENT_REJECTED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "PAYMENT",
+        relatedType: "Payment",
+        relatedId: paymentId,
+        note: reason,
+        title: "پرداخت رد شد",
+        notify: false,
+      });
+
       return { payment: p, finance };
     });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'PAYMENT_REJECT',
-      entityType: 'Payment',
+      action: "PAYMENT_REJECT",
+      entityType: "Payment",
       entityId: paymentId,
       after: {
-        verification: 'REJECTED',
+        verification: "REJECTED",
         method: existing.method,
         rejectionReason: reason,
         finance: result.finance,
@@ -1064,7 +1866,7 @@ export const crmService = {
       ...result.payment,
       methodLabel: formatPaymentMethod(result.payment.method),
       finance: result.finance,
-      approvalStatus: 'REJECTED',
+      approvalStatus: "REJECTED",
     };
   },
 
@@ -1073,10 +1875,29 @@ export const crmService = {
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
-        invoice: { select: { id: true, invoiceNumber: true, total: true } },
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            total: true,
+            status: true,
+            videoCount: true,
+            notes: true,
+            issuedAt: true,
+            createdAt: true,
+            opportunityId: true,
+            projectId: true,
+            paymentMethod: true,
+            items: { select: { quantity: true, description: true } },
+            opportunity: {
+              select: { id: true, title: true, agreedTerms: true },
+            },
+          },
+        },
         crmCustomer: {
           select: {
             id: true,
+            customerCode: true,
             personName: true,
             companyName: true,
             phone: true,
@@ -1086,7 +1907,7 @@ export const crmService = {
             address: true,
             opportunities: {
               where: { deletedAt: null },
-              orderBy: { updatedAt: 'desc' },
+              orderBy: { updatedAt: "desc" },
               take: 1,
               select: {
                 id: true,
@@ -1100,7 +1921,7 @@ export const crmService = {
         },
       },
     });
-    if (!payment) throw new AppError('پرداخت یافت نشد', 404, 'NOT_FOUND');
+    if (!payment) throw new AppError("پرداخت یافت نشد", 404, "NOT_FOUND");
 
     const recordedBy = payment.recordedById
       ? await prisma.user.findUnique({
@@ -1109,27 +1930,166 @@ export const crmService = {
         })
       : null;
 
-    const opportunity = payment.crmCustomer.opportunities[0] || null;
-    let projectTotal = opportunity ? Number(opportunity.agreedPrice || 0) : 0;
-    let paidTotal = Number(opportunity?.advancePayment || 0);
-    if (opportunity) {
-      const { finance } = await syncOpportunityFinance(prisma, opportunity.id, {
-        persist: false,
+    const opportunity =
+      payment.invoice?.opportunity ||
+      payment.crmCustomer.opportunities[0] ||
+      null;
+
+    let relatedInvoice = payment.invoice || null;
+    if (!relatedInvoice && opportunity?.id) {
+      relatedInvoice = await prisma.invoice.findFirst({
+        where: {
+          crmCustomerId: payment.crmCustomerId,
+          opportunityId: opportunity.id,
+        },
+        orderBy: [{ issuedAt: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          invoiceNumber: true,
+          total: true,
+          status: true,
+          videoCount: true,
+          notes: true,
+          issuedAt: true,
+          createdAt: true,
+          opportunityId: true,
+          projectId: true,
+          paymentMethod: true,
+          items: { select: { quantity: true, description: true } },
+          opportunity: {
+            select: { id: true, title: true, agreedTerms: true },
+          },
+        },
       });
-      projectTotal = finance.projectTotal;
-      paidTotal = finance.totalPaid;
     }
-    const remaining = Math.max(0, projectTotal - paidTotal);
-    const paymentNumber = payment.reference || `PAY-${payment.id.slice(-8).toUpperCase()}`;
+
+    const projectCount = await prisma.project.count({
+      where: { crmCustomerId: payment.crmCustomerId, deletedAt: null },
+    });
+
+    const videoCount = resolveReceiptVideoCount({
+      invoiceVideoCount: relatedInvoice?.videoCount,
+      invoiceItems: relatedInvoice?.items,
+      invoiceNotes: relatedInvoice?.notes,
+      invoiceDescription: relatedInvoice?.items?.[0]?.description,
+      agreedTerms:
+        relatedInvoice?.opportunity?.agreedTerms || opportunity?.agreedTerms,
+      projectCount,
+    });
+    const methodLabel = resolveReceiptPaymentMethod({
+      method: payment.method,
+      invoiceMethod: relatedInvoice?.paymentMethod,
+    });
+
+    const currentAmount = roundMoney(payment.amount);
+    const isVerified = payment.verification === "VERIFIED";
+
+    let finance = {
+      totalAmount: 0,
+      previouslyPaid: 0,
+      currentPayment: currentAmount,
+      totalPaid: 0,
+      remainingBalance: 0,
+    };
+
+    if (payment.invoice) {
+      const inv = payment.invoice;
+      const total = roundMoney(inv.total);
+      let verifiedPaid = 0;
+      const verifiedAgg = await prisma.payment.aggregate({
+        where: { invoiceId: inv.id, verification: "VERIFIED" },
+        _sum: { amount: true },
+      });
+      verifiedPaid = roundMoney(verifiedAgg._sum.amount || 0);
+      if (inv.opportunityId) {
+        const snap = await syncOpportunityFinance(prisma, inv.opportunityId, {
+          persist: false,
+        });
+        verifiedPaid = roundMoney(snap.finance.totalPaid);
+      }
+      const previouslyPaid = roundMoney(
+        Math.max(0, verifiedPaid - (isVerified ? currentAmount : 0)),
+      );
+      finance = {
+        totalAmount: total,
+        previouslyPaid,
+        currentPayment: currentAmount,
+        totalPaid: verifiedPaid,
+        remainingBalance: roundMoney(Math.max(0, total - verifiedPaid)),
+      };
+    } else if (opportunity) {
+      const { finance: oppFinance } = await syncOpportunityFinance(
+        prisma,
+        opportunity.id,
+        { persist: false },
+      );
+      const total = roundMoney(oppFinance.projectTotal);
+      const verifiedPaid = roundMoney(oppFinance.totalPaid);
+      const previouslyPaid = roundMoney(
+        Math.max(0, verifiedPaid - (isVerified ? currentAmount : 0)),
+      );
+      finance = {
+        totalAmount: total,
+        previouslyPaid,
+        currentPayment: currentAmount,
+        totalPaid: verifiedPaid,
+        remainingBalance: roundMoney(Math.max(0, total - verifiedPaid)),
+      };
+    }
+
+    const remainingForStatus = finance.remainingBalance;
+    let receiptStatus = "PENDING";
+    let receiptStatusLabel = "در انتظار تأیید";
+    if (payment.verification === "REJECTED") {
+      receiptStatus = "REJECTED";
+      receiptStatusLabel = "رد شده";
+    } else if (payment.verification === "VERIFIED") {
+      if (remainingForStatus <= 0) {
+        receiptStatus = "COMPLETED";
+        receiptStatusLabel = "تکمیل‌شده";
+      } else if (finance.totalPaid > 0 && remainingForStatus > 0) {
+        receiptStatus = "PARTIAL";
+        receiptStatusLabel = "پرداخت جزئی";
+      } else {
+        receiptStatus = "SUCCESS";
+        receiptStatusLabel = "پرداخت موفق";
+      }
+    }
+
+    const paymentNumber =
+      payment.reference || `PAY-${payment.id.slice(-8).toUpperCase()}`;
+    const methodMetaRows = formatPaymentMethodMetaRows(
+      payment.method,
+      payment.methodMeta,
+    );
+
+    const INVOICE_STATUS_LABELS = {
+      DRAFT: "پیش‌نویس",
+      ISSUED: "صادر شده",
+      PARTIALLY_PAID: "پرداخت جزئی",
+      PAID: "پرداخت شده",
+      OVERDUE: "سررسید گذشته",
+      CANCELED: "لغو شده",
+    };
+
+    const website = env.webUrl
+      ? String(env.webUrl)
+          .replace(/^https?:\/\//i, "")
+          .replace(/\/$/, "")
+      : null;
 
     return {
-      receiptTitle: 'رسید پرداخت',
+      receiptTitle: "رسید پرداخت",
       company: {
-        name: 'اپیکس',
-        tagline: 'سیستم مدیریت مشتریان و پروژه‌ها',
+        name: "APEX SMART",
+        tagline: "سیستم مدیریت مشتریان و پروژه‌ها",
+        phone: env.contactPhone || null,
+        email: env.contactEmail || null,
+        website,
       },
       customer: {
         id: payment.crmCustomer.id,
+        customerCode: payment.crmCustomer.customerCode,
         personName: payment.crmCustomer.personName,
         companyName: payment.crmCustomer.companyName,
         phone: payment.crmCustomer.phone || payment.crmCustomer.whatsappRaw,
@@ -1139,22 +2099,51 @@ export const crmService = {
       },
       contract: opportunity
         ? {
+            id: opportunity.id,
             title: opportunity.title,
-            agreedPrice: projectTotal,
-            advancePayment: paidTotal,
-            remainingBalance: remaining,
-            agreedTerms: opportunity.agreedTerms,
+            agreedPrice: finance.totalAmount,
+            advancePayment: finance.totalPaid,
+            remainingBalance: finance.remainingBalance,
+            agreedTerms: opportunity.agreedTerms || null,
           }
         : null,
+      invoice: relatedInvoice
+        ? {
+            id: relatedInvoice.id,
+            invoiceNumber: relatedInvoice.invoiceNumber,
+            projectReference:
+              relatedInvoice.opportunity?.title || opportunity?.title || null,
+            videoCount,
+            total: finance.totalAmount,
+            previouslyPaid: finance.previouslyPaid,
+            currentPayment: finance.currentPayment,
+            totalPaid: finance.totalPaid,
+            remaining: finance.remainingBalance,
+            status: relatedInvoice.status,
+            statusLabel:
+              INVOICE_STATUS_LABELS[relatedInvoice.status] ||
+              relatedInvoice.status,
+            issuedAt: relatedInvoice.issuedAt || relatedInvoice.createdAt,
+            notes: relatedInvoice.notes,
+          }
+        : null,
+      videoCount,
+      finance,
       payment: {
         id: payment.id,
         paymentNumber,
-        amount: Number(payment.amount),
+        amount: currentAmount,
         paidAt: payment.paidAt,
         createdAt: payment.createdAt,
         method: payment.method,
-        methodLabel: formatPaymentMethod(payment.method),
+        methodLabel,
+        methodMetaRows,
+        reference: payment.reference,
+        notes: payment.notes,
         verification: payment.verification,
+        receiptStatus,
+        receiptStatusLabel,
+        invoiceId: payment.invoiceId,
         invoiceNumber: payment.invoice?.invoiceNumber || null,
         recordedByName: recordedBy?.fullName || null,
       },
@@ -1179,24 +2168,31 @@ export const crmService = {
       where: { id: paymentId },
       include: {
         invoice: true,
-        crmCustomer: { select: { id: true, personName: true, companyName: true } },
+        crmCustomer: {
+          select: { id: true, personName: true, companyName: true },
+        },
       },
     });
-    if (!payment) throw new AppError('پرداخت یافت نشد', 404, 'NOT_FOUND');
-    if (payment.verification === 'VERIFIED') {
-      return { ...payment, approvalStatus: 'APPROVED' };
+    if (!payment) throw new AppError("پرداخت یافت نشد", 404, "NOT_FOUND");
+    if (payment.verification === "VERIFIED") {
+      return { ...payment, approvalStatus: "APPROVED" };
     }
-    if (payment.verification === 'REJECTED') {
-      throw new AppError('پرداخت رد‌شده قابل تأیید نیست', 400, 'PAYMENT_REJECTED');
+    if (payment.verification === "REJECTED") {
+      throw new AppError(
+        "پرداخت رد‌شده قابل تأیید نیست",
+        400,
+        "PAYMENT_REJECTED",
+      );
     }
 
     const approvedAt = new Date();
+    let customerConverted = false;
 
     const result = await prisma.$transaction(async (tx) => {
       const p = await tx.payment.update({
         where: { id: paymentId },
         data: {
-          verification: 'VERIFIED',
+          verification: "VERIFIED",
           verifiedAt: approvedAt,
           verifiedById: auth.userId,
           rejectedAt: null,
@@ -1207,15 +2203,15 @@ export const crmService = {
 
       if (payment.invoiceId) {
         const verifiedSum = await tx.payment.aggregate({
-          where: { invoiceId: payment.invoiceId, verification: 'VERIFIED' },
+          where: { invoiceId: payment.invoiceId, verification: "VERIFIED" },
           _sum: { amount: true },
         });
         const received = Number(verifiedSum._sum.amount || 0);
         const total = Number(payment.invoice.total);
-        let status = 'ISSUED';
-        if (received <= 0) status = 'ISSUED';
-        else if (received < total) status = 'PARTIALLY_PAID';
-        else status = 'PAID';
+        let status = "ISSUED";
+        if (received <= 0) status = "ISSUED";
+        else if (received < total) status = "PARTIALLY_PAID";
+        else status = "PAID";
 
         await tx.invoice.update({
           where: { id: payment.invoiceId },
@@ -1225,15 +2221,27 @@ export const crmService = {
 
       let finance = null;
       if (payment.invoice?.opportunityId) {
-        finance = (await syncOpportunityFinance(tx, payment.invoice.opportunityId, {
-          persist: true,
-        })).finance;
+        finance = (
+          await syncOpportunityFinance(tx, payment.invoice.opportunityId, {
+            persist: true,
+          })
+        ).finance;
       } else if (payment.invoice?.projectId) {
-        finance = (await syncProjectFinanceFromPayments(tx, payment.invoice.projectId, {
-          persist: true,
-        }))?.finance || null;
+        finance =
+          (
+            await syncProjectFinanceFromPayments(
+              tx,
+              payment.invoice.projectId,
+              {
+                persist: true,
+              },
+            )
+          )?.finance || null;
       } else {
-        const synced = await syncCustomerOpportunitiesFinance(tx, payment.crmCustomerId);
+        const synced = await syncCustomerOpportunitiesFinance(
+          tx,
+          payment.crmCustomerId,
+        );
         finance = synced[0]?.finance || null;
       }
 
@@ -1242,7 +2250,7 @@ export const crmService = {
         await createNotificationOnce(
           {
             userId: payment.recordedById,
-            audience: 'INTERNAL',
+            audience: "INTERNAL",
             ...buildPaymentApprovedNotification({
               paymentId,
               amount: payment.amount,
@@ -1257,27 +2265,78 @@ export const crmService = {
         );
       }
 
+      await applyCrmEvent(tx, {
+        customerId: payment.crmCustomerId,
+        opportunityId: payment.invoice?.opportunityId || null,
+        event: CRM_EVENTS.PAYMENT_CONFIRMED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "PAYMENT",
+        relatedType: "Payment",
+        relatedId: paymentId,
+        title: "بیعانه تأیید شد",
+      });
+
+      const conversion = await maybeAutoConvertAfterFirstVerifiedPayment(tx, {
+        customerId: payment.crmCustomerId,
+        actorId: auth.userId,
+        paymentId,
+        trigger: "verify",
+      });
+      customerConverted = conversion.converted === true;
+
       return { payment: p, finance };
     });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'PAYMENT_VERIFY',
-      entityType: 'Payment',
+      action: "PAYMENT_VERIFY",
+      entityType: "Payment",
       entityId: paymentId,
       after: {
-        verification: 'VERIFIED',
+        verification: "VERIFIED",
         method: payment.method,
         finance: result.finance,
+        customerConverted,
       },
       req,
     });
+
+    let projectAutoCompleted = false;
+    try {
+      const ctx = await resolvePaymentContext(prisma, payment);
+      if (ctx.projectId) {
+        await syncProjectFinanceFromPayments(prisma, ctx.projectId, {
+          persist: true,
+        });
+        const { tryAutoCompleteProject } = await import(
+          "../../services/projectCompletion.js"
+        );
+        const auto = await tryAutoCompleteProject(prisma, ctx.projectId, {
+          timelineType: "PROJECT_COMPLETED",
+          timelineTitle: "تسویه پرداخت و تأیید نهایی — پروژه تکمیل شد",
+          timelineBody:
+            "پرداخت کامل تأیید شد و محصول نهایی قبلاً توسط مشتری تأیید شده بود",
+          notifyProgress: true,
+          actorId: auth.userId,
+        });
+        projectAutoCompleted =
+          auto.completed === true && auto.alreadyCompleted !== true;
+      }
+    } catch (err) {
+      console.error(
+        "[completion] auto-complete after payment verify",
+        err?.message || err,
+      );
+    }
 
     return {
       ...result.payment,
       methodLabel: formatPaymentMethod(result.payment.method),
       finance: result.finance,
-      approvalStatus: 'APPROVED',
+      approvalStatus: "APPROVED",
+      customerConverted,
+      projectAutoCompleted,
     };
   },
 
@@ -1289,16 +2348,29 @@ export const crmService = {
         crmCustomer: { include: { portalAccount: true } },
       },
     });
-    if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+    if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
 
-    const phoneOk = !!(opp.crmCustomer.phone?.trim() || opp.crmCustomer.normalizedWhatsapp);
+    const phoneOk = !!(
+      opp.crmCustomer.phone?.trim() || opp.crmCustomer.normalizedWhatsapp
+    );
 
-    const paymentCount = await prisma.payment.count({
-      where: { crmCustomerId: opp.crmCustomerId },
+    const verifiedCount = await prisma.payment.count({
+      where: { crmCustomerId: opp.crmCustomerId, verification: "VERIFIED" },
     });
-    const hasFirstPayment = paymentCount > 0;
+    const hasVerifiedPayment = verifiedCount > 0;
+    const converted = Boolean(opp.crmCustomer.convertedAt);
+    const stage = canonicalizeStage(opp.crmCustomer.pipelineStage);
+    const depositConfirmed =
+      converted ||
+      [
+        "DEPOSIT_CONFIRMED",
+        "PORTAL_INVITED",
+        "PROJECT_CREATED",
+        "DELIVERED",
+        "REPEAT_CUSTOMER",
+      ].includes(stage);
 
-    const eligible = phoneOk && hasFirstPayment;
+    const eligible = phoneOk && hasVerifiedPayment && converted;
 
     return {
       eligible,
@@ -1307,7 +2379,9 @@ export const crmService = {
       hasExistingPortal: !!opp.crmCustomer.portalAccount,
       gates: {
         hasPhone: phoneOk,
-        hasFirstPayment,
+        hasFirstPayment: hasVerifiedPayment,
+        depositConfirmed,
+        converted,
       },
     };
   },
@@ -1315,18 +2389,17 @@ export const crmService = {
   async createPortalInvite(opportunityId, auth, req) {
     const eligibility = await this.getInviteEligibility(opportunityId);
     if (!eligibility.eligible) {
-      let message = 'دعوت پورتال پس از ثبت اولین پرداخت مشتری فعال می‌شود';
+      let message = "دعوت پورتال پس از تأیید بیعانه و ایجاد مشتری فعال می‌شود";
       if (eligibility.gates?.hasFirstPayment && !eligibility.gates?.hasPhone) {
-        message = 'برای دعوت پورتال، شماره تماس مشتری الزامی است';
+        message = "برای دعوت پورتال، شماره تماس مشتری الزامی است";
       } else if (!eligibility.gates?.hasFirstPayment) {
-        message = 'دعوت پورتال پس از ثبت اولین پرداخت مشتری فعال می‌شود';
+        message = "دعوت پورتال پس از تأیید اولین پرداخت مشتری فعال می‌شود";
+      } else if (!eligibility.gates?.depositConfirmed) {
+        message = "ابتدا بیعانه باید تأیید شود و مشتری ایجاد گردد";
       }
-      throw new AppError(
-        message,
-        403,
-        'INVITE_NOT_ELIGIBLE',
-        { gates: eligibility.gates },
-      );
+      throw new AppError(message, 403, "INVITE_NOT_ELIGIBLE", {
+        gates: eligibility.gates,
+      });
     }
 
     const opp = await prisma.opportunity.findFirst({
@@ -1335,7 +2408,17 @@ export const crmService = {
         crmCustomer: { include: { portalAccount: true } },
       },
     });
-    if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+    if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
+
+    // One customer → one portal account. Never issue a second invite once an account exists.
+    if (opp.crmCustomer.portalAccount) {
+      return {
+        alreadyHasPortal: true,
+        portalAccountId: opp.crmCustomer.portalAccount.id,
+        inviteCreated: false,
+        message: "این مشتری از قبل حساب پورتال دارد؛ دعوت جدید ایجاد نشد",
+      };
+    }
 
     const token = randomToken(24);
     const invite = await prisma.$transaction(async (tx) => {
@@ -1357,7 +2440,19 @@ export const crmService = {
 
       await tx.crmCustomer.update({
         where: { id: opp.crmCustomerId },
-        data: { portalStatus: 'INVITED' },
+        data: { portalStatus: "INVITED" },
+      });
+
+      await applyCrmEvent(tx, {
+        customerId: opp.crmCustomerId,
+        opportunityId: opp.id,
+        event: CRM_EVENTS.PORTAL_INVITED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "PORTAL",
+        relatedType: "PortalInvite",
+        relatedId: inv.id,
+        title: "دعوت پورتال ارسال شد",
       });
 
       return inv;
@@ -1365,29 +2460,39 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'PORTAL_INVITE_CREATE',
-      entityType: 'PortalInvite',
+      action: "PORTAL_INVITE_CREATE",
+      entityType: "PortalInvite",
       entityId: invite.id,
       after: { opportunityId, expiresAt: invite.expiresAt },
       req,
     });
 
     return {
-      ...invite,
+      id: invite.id,
+      crmCustomerId: invite.crmCustomerId,
+      opportunityId: invite.opportunityId,
+      whatsappNumber: invite.whatsappNumber,
+      token: invite.token,
+      expiresAt: invite.expiresAt,
+      createdAt: invite.createdAt,
       registerUrl: `${env.webUrl}/portal/register/${invite.token}`,
     };
   },
 
   async updateOpportunity(opportunityId, data, auth, req) {
-    const opp = await prisma.opportunity.findFirst({ where: { id: opportunityId, deletedAt: null } });
-    if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+    const opp = await prisma.opportunity.findFirst({
+      where: { id: opportunityId, deletedAt: null },
+    });
+    if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
 
     const updated = await prisma.opportunity.update({
       where: { id: opportunityId },
       data: {
         title: data.title ?? undefined,
-        proposedPrice: data.proposedPrice != null ? Number(data.proposedPrice) : undefined,
-        agreedPrice: data.agreedPrice != null ? Number(data.agreedPrice) : undefined,
+        proposedPrice:
+          data.proposedPrice != null ? Number(data.proposedPrice) : undefined,
+        agreedPrice:
+          data.agreedPrice != null ? Number(data.agreedPrice) : undefined,
         agreedTerms: data.agreedTerms ?? undefined,
         serviceId: data.serviceId ?? undefined,
       },
@@ -1395,24 +2500,33 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'OPPORTUNITY_UPDATE',
-      entityType: 'Opportunity',
+      action: "OPPORTUNITY_UPDATE",
+      entityType: "Opportunity",
       entityId: opportunityId,
       before: { agreedPrice: opp.agreedPrice, agreedTerms: opp.agreedTerms },
-      after: { agreedPrice: updated.agreedPrice, agreedTerms: updated.agreedTerms },
+      after: {
+        agreedPrice: updated.agreedPrice,
+        agreedTerms: updated.agreedTerms,
+      },
       req,
     });
     return updated;
   },
 
-  async createClientAsset(customerId, { kind, name, storageKey, mimeType, sizeBytes, meta }, auth, req) {
+  async createClientAsset(
+    customerId,
+    { kind, name, storageKey, mimeType, sizeBytes, meta },
+    auth,
+    req,
+  ) {
     await this.getCustomer(customerId);
-    if (!storageKey || !name) throw new AppError('نام و مسیر فایل الزامی است', 400, 'VALIDATION');
+    if (!storageKey || !name)
+      throw new AppError("نام و مسیر فایل الزامی است", 400, "VALIDATION");
 
     const asset = await prisma.clientAsset.create({
       data: {
         crmCustomerId: customerId,
-        kind: kind || 'OTHER',
+        kind: kind || "OTHER",
         name,
         storageKey,
         mimeType: mimeType || null,
@@ -1423,8 +2537,8 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'CLIENT_ASSET_CREATE',
-      entityType: 'ClientAsset',
+      action: "CLIENT_ASSET_CREATE",
+      entityType: "ClientAsset",
       entityId: asset.id,
       after: { kind: asset.kind, name: asset.name },
       req,
@@ -1436,11 +2550,15 @@ export const crmService = {
     const customer = await this.getCustomer(id);
     const liveProjects = customer.projects || [];
 
-    if (liveProjects.length && auth.roleCode !== 'MANAGER' && auth.roleCode !== 'ADMIN') {
+    if (
+      liveProjects.length &&
+      auth.roleCode !== "MANAGER" &&
+      auth.roleCode !== "ADMIN"
+    ) {
       throw new AppError(
-        'حذف مشتری دارای پروژه فقط توسط مدیر مجاز است',
+        "حذف مشتری دارای پروژه فقط توسط مدیر مجاز است",
         403,
-        'FORBIDDEN',
+        "FORBIDDEN",
       );
     }
 
@@ -1456,7 +2574,9 @@ export const crmService = {
       if (portal) {
         await tx.session.deleteMany({ where: { portalAccountId: portal.id } });
         await tx.otpCode.deleteMany({ where: { portalAccountId: portal.id } });
-        await tx.notification.deleteMany({ where: { portalAccountId: portal.id } });
+        await tx.notification.deleteMany({
+          where: { portalAccountId: portal.id },
+        });
       }
 
       const invites = await tx.portalInvite.findMany({
@@ -1465,7 +2585,9 @@ export const crmService = {
       });
       const inviteIds = invites.map((i) => i.id);
       if (inviteIds.length) {
-        await tx.otpCode.deleteMany({ where: { portalInviteId: { in: inviteIds } } });
+        await tx.otpCode.deleteMany({
+          where: { portalInviteId: { in: inviteIds } },
+        });
         await tx.portalInvite.deleteMany({ where: { id: { in: inviteIds } } });
       }
 
@@ -1476,7 +2598,7 @@ export const crmService = {
             { link: `/crm/${id}` },
             { link: { startsWith: `/crm/${id}?` } },
             { link: { startsWith: `/crm/${id}/` } },
-            { meta: { path: ['customerId'], equals: id } },
+            { meta: { path: ["customerId"], equals: id } },
           ],
         },
       });
@@ -1490,16 +2612,26 @@ export const crmService = {
         },
       });
       const projectIds = projects.map((p) => p.id);
-      const projectInvoiceIds = projects.flatMap((p) => p.invoices.map((inv) => inv.id));
+      const projectInvoiceIds = projects.flatMap((p) =>
+        p.invoices.map((inv) => inv.id),
+      );
 
       if (projectInvoiceIds.length) {
-        await tx.payment.deleteMany({ where: { invoiceId: { in: projectInvoiceIds } } });
-        await tx.invoice.deleteMany({ where: { id: { in: projectInvoiceIds } } });
+        await tx.payment.deleteMany({
+          where: { invoiceId: { in: projectInvoiceIds } },
+        });
+        await tx.invoice.deleteMany({
+          where: { id: { in: projectInvoiceIds } },
+        });
       }
 
       if (projectIds.length) {
-        await tx.expense.deleteMany({ where: { projectId: { in: projectIds } } });
-        await tx.employeePayable.deleteMany({ where: { projectId: { in: projectIds } } });
+        await tx.expense.deleteMany({
+          where: { projectId: { in: projectIds } },
+        });
+        await tx.employeePayable.deleteMany({
+          where: { projectId: { in: projectIds } },
+        });
 
         // Detach opportunities before soft-deleting projects
         for (const project of projects) {
@@ -1528,10 +2660,14 @@ export const crmService = {
 
       if (remainingInvoiceIds.length) {
         paymentsRemoved += (
-          await tx.payment.deleteMany({ where: { invoiceId: { in: remainingInvoiceIds } } })
+          await tx.payment.deleteMany({
+            where: { invoiceId: { in: remainingInvoiceIds } },
+          })
         ).count;
         invoicesRemoved += (
-          await tx.invoice.deleteMany({ where: { id: { in: remainingInvoiceIds } } })
+          await tx.invoice.deleteMany({
+            where: { id: { in: remainingInvoiceIds } },
+          })
         ).count;
       }
       paymentsRemoved += (
@@ -1562,6 +2698,7 @@ export const crmService = {
             deletedAt,
             isActive: false,
             passwordHash: null,
+            passwordCipher: null,
             normalizedWhatsapp: tombstone(portal.normalizedWhatsapp),
           },
         });
@@ -1573,9 +2710,9 @@ export const crmService = {
         where: { id },
         data: {
           deletedAt,
-          portalStatus: 'SUSPENDED',
-          pipelineStage: 'CANCELED',
-          lostReason: 'حذف شده از سیستم',
+          portalStatus: "SUSPENDED",
+          pipelineStage: "LOST_CANCELED",
+          lostReason: "حذف شده از سیستم",
           normalizedWhatsapp: tombstone(customer.normalizedWhatsapp),
           nextFollowUpAt: null,
         },
@@ -1597,8 +2734,8 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'CRM_CUSTOMER_PURGE',
-      entityType: 'CrmCustomer',
+      action: "CRM_CUSTOMER_PURGE",
+      entityType: "CrmCustomer",
       entityId: id,
       before: {
         personName: customer.personName,
@@ -1621,30 +2758,64 @@ export const crmService = {
    * Spec §5.4 — Merge Duplicate: manager/senior sales only; keep projects & timeline on survivor.
    */
   async mergeDuplicates({ survivorId, duplicateId }, auth, req) {
-    if (survivorId === duplicateId) throw new AppError('شناسه‌ها یکسان هستند', 400, 'VALIDATION');
+    if (survivorId === duplicateId)
+      throw new AppError("شناسه‌ها یکسان هستند", 400, "VALIDATION");
     const [survivor, duplicate] = await Promise.all([
-      prisma.crmCustomer.findFirst({ where: { id: survivorId, deletedAt: null } }),
+      prisma.crmCustomer.findFirst({
+        where: { id: survivorId, deletedAt: null },
+      }),
       prisma.crmCustomer.findFirst({
         where: { id: duplicateId, deletedAt: null },
         include: { portalAccount: true },
       }),
     ]);
-    if (!survivor || !duplicate) throw new AppError('مشتری یافت نشد', 404, 'NOT_FOUND');
+    if (!survivor || !duplicate)
+      throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
 
     const survivorPortal = await prisma.portalAccount.findFirst({
       where: { crmCustomerId: survivorId, deletedAt: null },
     });
     if (duplicate.portalAccount && survivorPortal) {
-      throw new AppError('هر دو مشتری حساب پورتال دارند؛ ادغام دستی نیاز است', 409, 'PORTAL_CONFLICT');
+      throw new AppError(
+        "هر دو مشتری حساب پورتال دارند؛ ادغام دستی نیاز است",
+        409,
+        "PORTAL_CONFLICT",
+      );
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.opportunity.updateMany({ where: { crmCustomerId: duplicateId }, data: { crmCustomerId: survivorId } });
-      await tx.clientAsset.updateMany({ where: { crmCustomerId: duplicateId }, data: { crmCustomerId: survivorId } });
-      await tx.project.updateMany({ where: { crmCustomerId: duplicateId }, data: { crmCustomerId: survivorId } });
-      await tx.invoice.updateMany({ where: { crmCustomerId: duplicateId }, data: { crmCustomerId: survivorId } });
-      await tx.payment.updateMany({ where: { crmCustomerId: duplicateId }, data: { crmCustomerId: survivorId } });
-      await tx.portalInvite.updateMany({ where: { crmCustomerId: duplicateId }, data: { crmCustomerId: survivorId } });
+      await tx.opportunity.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
+      await tx.clientAsset.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
+      await tx.project.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
+      await tx.invoice.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
+      await tx.payment.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
+      await tx.portalInvite.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
+      await tx.crmActivity.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
+      await tx.contactMessage.updateMany({
+        where: { crmCustomerId: duplicateId },
+        data: { crmCustomerId: survivorId },
+      });
 
       if (duplicate.portalAccount && !survivorPortal) {
         await tx.portalAccount.update({
@@ -1661,8 +2832,8 @@ export const crmService = {
 
     await writeAudit({
       userId: auth.userId,
-      action: 'CRM_MERGE_DUPLICATE',
-      entityType: 'CrmCustomer',
+      action: "CRM_MERGE_DUPLICATE",
+      entityType: "CrmCustomer",
       entityId: survivorId,
       before: { duplicateId },
       after: { survivorId },
@@ -1673,10 +2844,463 @@ export const crmService = {
   },
 
   checkDuplicate(whatsapp) {
+    const lookupKeys = getWhatsappLookupKeys(whatsapp);
     const normalized = normalizeWhatsapp(whatsapp);
-    return prisma.crmCustomer.findFirst({
-      where: { normalizedWhatsapp: normalized, deletedAt: null },
-      select: { id: true, personName: true, companyName: true },
-    }).then((found) => ({ normalized, exists: !!found, customer: found }));
+    return prisma.crmCustomer
+      .findFirst({
+        where: { normalizedWhatsapp: { in: lookupKeys }, deletedAt: null },
+        select: {
+          id: true,
+          personName: true,
+          companyName: true,
+          customerCode: true,
+        },
+      })
+      .then((found) => ({ normalized, exists: !!found, customer: found }));
+  },
+
+  async getActivity(customerId) {
+    await this.getCustomer(customerId);
+    return { items: await listCrmActivities(prisma, customerId) };
+  },
+
+  async addInteraction(customerId, { type, body }, auth, req) {
+    await this.getCustomer(customerId);
+    const event = type === "NOTE" ? null : CRM_EVENTS.INTERACTION;
+    await prisma.$transaction(async (tx) => {
+      if (type === "NOTE") {
+        await recordCrmActivity(tx, {
+          crmCustomerId: customerId,
+          type: ACTIVITY_TYPES.NOTE,
+          title: "یادداشت",
+          body,
+          actorId: auth.userId,
+          actorType: "USER",
+          source: "CRM",
+        });
+        await tx.crmCustomer.update({
+          where: { id: customerId },
+          data: { lastContactAt: new Date() },
+        });
+        return;
+      }
+      const mappedEvent =
+        type === "INFORMATION_SENT"
+          ? CRM_EVENTS.INFORMATION_SENT
+          : type === "PROPOSAL_SENT" || type === "PRICE_SENT"
+            ? CRM_EVENTS.PROPOSAL_SENT
+            : type === "WAITING_DECISION"
+              ? CRM_EVENTS.WAITING_DECISION
+              : CRM_EVENTS.INTERACTION;
+      await applyCrmEvent(tx, {
+        customerId,
+        event: mappedEvent,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "CRM",
+        interactionType: type,
+        body,
+        note: body,
+        title:
+          type === "INFORMATION_SENT"
+            ? "اطلاعات ارسال شد"
+            : type === "PROPOSAL_SENT" || type === "PRICE_SENT"
+              ? "پیشنهاد / قیمت ارسال شد"
+              : type === "WAITING_DECISION"
+                ? "در انتظار تصمیم"
+                : "تعامل ثبت شد",
+      });
+    });
+    await writeAudit({
+      userId: auth.userId,
+      action: "CRM_INTERACTION",
+      entityType: "CrmCustomer",
+      entityId: customerId,
+      after: { type, event },
+      req,
+    });
+    return this.getCustomer(customerId, { auth });
+  },
+
+  async changeStage(customerId, { stage }, auth, req) {
+    const before = await this.getCustomer(customerId);
+    const current = canonicalizeStage(before.pipelineStage);
+    const next = canonicalizeStage(stage);
+    if (current === next && next !== "REPEAT_CUSTOMER") {
+      return before;
+    }
+    if (!canManuallySetStage(auth, next, current)) {
+      throw new AppError("اجازه تغییر به این وضعیت را ندارید", 403, "FORBIDDEN");
+    }
+
+    if (next === "REPEAT_CUSTOMER") {
+      return this.startRepeatCustomerCycle(customerId, auth, req);
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const customer = await tx.crmCustomer.findFirst({
+        where: { id: customerId, deletedAt: null },
+      });
+      if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
+      const activeOpportunity = await this.ensureOpenOpportunity(tx, customer);
+      return applyCrmEvent(tx, {
+        customerId,
+        opportunityId: activeOpportunity.id,
+        event: next === "LOST_CANCELED" ? CRM_EVENTS.LOST : CRM_EVENTS.MANUAL_STAGE,
+        targetStage: next,
+        force: true,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "MANUAL",
+        title: "تغییر دستی وضعیت",
+      });
+    });
+    if (!result?.changed) {
+      throw new AppError(
+        "این تغییر وضعیت بر اساس قوانین قیف فروش مجاز نیست",
+        403,
+        "INVALID_TRANSITION",
+      );
+    }
+    await writeAudit({
+      userId: auth.userId,
+      action: "CRM_STAGE_CHANGE",
+      entityType: "CrmCustomer",
+      entityId: customerId,
+      after: { stage: next, previousStage: current },
+      req,
+    });
+    return this.getCustomer(customerId, { auth });
+  },
+
+  /**
+   * Activate Repeat Customer: same CrmCustomer + portal, new blank Opportunity.
+   * Never mutates prior opportunities, contracts, payments, or portal accounts.
+   */
+  async startRepeatCustomerCycle(customerId, auth, req) {
+    const customer = await prisma.crmCustomer.findFirst({
+      where: { id: customerId, deletedAt: null },
+      include: { portalAccount: { select: { id: true } } },
+    });
+    if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
+
+    const current = canonicalizeStage(customer.pipelineStage);
+
+    const profile = snapshotCustomerProfile(customer);
+
+    const cycle = await prisma.$transaction(async (tx) => {
+      const { opportunity, created } = await openFreshCycleOpportunity(tx, customer, {
+        pipelineStage: "REPEAT_CUSTOMER",
+        title: `سفارش جدید — ${getCustomerPersonName(customer)}`,
+        alwaysCreate: true,
+      });
+
+      if (current !== "REPEAT_CUSTOMER") {
+        const stageResult = await applyCrmEvent(tx, {
+          customerId,
+          opportunityId: opportunity.id,
+          event: CRM_EVENTS.MANUAL_STAGE,
+          targetStage: "REPEAT_CUSTOMER",
+          force: true,
+          actorId: auth.userId,
+          actorType: "USER",
+          source: "MANUAL",
+          note: "ایجاد پروژه/سفارش جدید برای مشتری موجود",
+          title: "فعال‌سازی مشتری تکراری",
+          relatedType: "Opportunity",
+          relatedId: opportunity.id,
+          meta: {
+            repeatCycle: true,
+            opportunityCreated: created,
+            profile,
+            portalInviteCreated: false,
+          },
+          touchLastContact: true,
+        });
+        if (!stageResult?.changed) {
+          throw new AppError(
+            "فعال‌سازی مشتری تکراری انجام نشد",
+            403,
+            "INVALID_TRANSITION",
+          );
+        }
+      } else {
+        await applyCrmEvent(tx, {
+          customerId,
+          opportunityId: opportunity.id,
+          event: CRM_EVENTS.REPEAT_ORDER,
+          actorId: auth.userId,
+          actorType: "USER",
+          source: "MANUAL",
+          note: "پروژه/سفارش جدید تحت همان مشتری",
+          title: "سفارش جدید برای مشتری تکراری",
+          relatedType: "Opportunity",
+          relatedId: opportunity.id,
+          meta: {
+            repeatCycle: true,
+            opportunityCreated: created,
+            profile,
+            portalInviteCreated: false,
+          },
+          touchLastContact: true,
+        });
+      }
+
+      return { opportunity, created };
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: "CRM_REPEAT_CYCLE_START",
+      entityType: "CrmCustomer",
+      entityId: customerId,
+      after: {
+        previousStage: current,
+        stage: "REPEAT_CUSTOMER",
+        opportunityId: cycle.opportunity.id,
+        opportunityCreated: cycle.created,
+        portalInviteCreated: false,
+        hasPortalAccount: Boolean(customer.portalAccount),
+        profile,
+      },
+      req,
+    });
+
+    const view = await this.getCustomer(customerId, { auth });
+    return {
+      ...view,
+      repeatCycle: {
+        opportunityId: cycle.opportunity.id,
+        opportunityCreated: cycle.created,
+        portalInviteCreated: false,
+        hasPortalAccount: Boolean(customer.portalAccount),
+        profile,
+      },
+    };
+  },
+
+  async convertCustomer(customerId, auth, req) {
+    const result = await this.transferOne(customerId, auth, req);
+    if (result.outcome === "already_transferred") {
+      return result.customer;
+    }
+    if (result.outcome === "transferred") {
+      return result.customer;
+    }
+    throw new AppError(
+      result.message || "انتقال مشتری انجام نشد",
+      result.status || 403,
+      result.code || "CONVERT_NOT_ELIGIBLE",
+    );
+  },
+
+  async transferCustomers(ids, auth, req) {
+    const unique = [
+      ...new Set(
+        (ids || []).map((id) => String(id || "").trim()).filter(Boolean),
+      ),
+    ];
+    if (!unique.length) {
+      throw new AppError("حداقل یک سرنخ را انتخاب کنید", 400, "VALIDATION");
+    }
+
+    const transferred = [];
+    const alreadyTransferred = [];
+    const skipped = [];
+    const failed = [];
+
+    for (const id of unique) {
+      try {
+        const result = await this.transferOne(id, auth, req);
+        const item = {
+          id,
+          personName: result.customer?.personName || result.personName || null,
+          customerCode:
+            result.customer?.customerCode || result.customerCode || null,
+        };
+        if (result.outcome === "transferred") transferred.push(item);
+        else if (result.outcome === "already_transferred")
+          alreadyTransferred.push(item);
+        else if (result.outcome === "skipped") {
+          skipped.push({ ...item, reason: result.message });
+        } else {
+          failed.push({
+            ...item,
+            message: result.message || "انتقال ناموفق بود",
+          });
+        }
+      } catch (err) {
+        failed.push({
+          id,
+          personName: null,
+          customerCode: null,
+          message:
+            err instanceof AppError
+              ? err.message
+              : "انتقال مشتری انجام نشد. لطفاً دوباره تلاش کنید.",
+        });
+      }
+    }
+
+    return {
+      selected: unique.length,
+      transferred,
+      alreadyTransferred,
+      skipped,
+      failed,
+    };
+  },
+
+  async transferOne(customerId, auth, req) {
+    const row = await prisma.crmCustomer.findFirst({
+      where: { id: customerId, deletedAt: null },
+      select: {
+        id: true,
+        personName: true,
+        companyName: true,
+        customerCode: true,
+        convertedAt: true,
+        pipelineStage: true,
+        salesOwnerId: true,
+        normalizedWhatsapp: true,
+        email: true,
+      },
+    });
+    if (!row) {
+      return {
+        outcome: "failed",
+        id: customerId,
+        message: "سرنخ یافت نشد",
+        status: 404,
+        code: "NOT_FOUND",
+      };
+    }
+    if (
+      auth?.roleCode === "SALES" &&
+      row.salesOwnerId &&
+      row.salesOwnerId !== auth.userId
+    ) {
+      return {
+        outcome: "failed",
+        id: customerId,
+        personName: row.personName,
+        customerCode: row.customerCode,
+        message: "اجازه انتقال این سرنخ را ندارید",
+        status: 403,
+        code: "FORBIDDEN",
+      };
+    }
+    if (row.convertedAt) {
+      return {
+        outcome: "already_transferred",
+        customer: await this.getCustomer(customerId, { auth }),
+      };
+    }
+    const stage = canonicalizeStage(row.pipelineStage);
+    if (stage === "DELIVERED") {
+      return {
+        outcome: "skipped",
+        id: customerId,
+        personName: row.personName,
+        customerCode: row.customerCode,
+        message: "این مشتری قبلاً تحویل شده است",
+        status: 403,
+        code: "LEAD_DELIVERED",
+      };
+    }
+    if (isClosedStage(stage)) {
+      return {
+        outcome: "skipped",
+        id: customerId,
+        personName: row.personName,
+        customerCode: row.customerCode,
+        message: "این مشتری لغو شده است",
+        status: 403,
+        code: "LEAD_CLOSED",
+      };
+    }
+
+    const duplicate = await prisma.crmCustomer.findFirst({
+      where: {
+        id: { not: customerId },
+        deletedAt: null,
+        convertedAt: { not: null },
+        OR: [
+          { normalizedWhatsapp: row.normalizedWhatsapp },
+          ...(row.email ? [{ email: row.email }] : []),
+        ],
+      },
+      select: { id: true, customerCode: true, personName: true },
+    });
+    if (duplicate) {
+      return {
+        outcome: "skipped",
+        id: customerId,
+        personName: row.personName,
+        customerCode: row.customerCode,
+        message: `این مشتری قبلاً با شناسه ${duplicate.customerCode || duplicate.id} در مدیریت مشتریان ثبت شده است`,
+        status: 409,
+        code: "DUPLICATE_CUSTOMER",
+      };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await applyCrmEvent(tx, {
+        customerId,
+        event: CRM_EVENTS.CUSTOMER_CONVERTED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "CRM",
+        title: "انتقال به مدیریت مشتریان",
+        note: "مشتری از CRM و فروش به مدیریت مشتریان منتقل شد",
+        notify: false,
+      });
+    });
+
+    const actorName = auth?.user?.fullName || null;
+    await notifyManagersOnce(
+      buildCustomerConvertedNotification({
+        customerId,
+        personName: row.personName,
+        customerCode: row.customerCode,
+        companyName: row.companyName,
+        actorName,
+        transferredAt: new Date(),
+      }),
+    );
+
+    await writeAudit({
+      userId: auth.userId,
+      action: "CRM_CUSTOMER_CONVERT",
+      entityType: "CrmCustomer",
+      entityId: customerId,
+      after: { customerCode: row.customerCode, transferred: true },
+      req,
+    });
+
+    return {
+      outcome: "transferred",
+      customer: await this.getCustomer(customerId, { auth }),
+    };
+  },
+
+  async ingestWhatsApp(body, auth, req) {
+    const result = await ingestWhatsAppMessage(body);
+    await writeAudit({
+      userId: auth?.userId,
+      action: result.created
+        ? "CRM_WHATSAPP_LEAD_CREATE"
+        : "CRM_WHATSAPP_INTERACTION",
+      entityType: "CrmCustomer",
+      entityId: result.customer.id,
+      after: { source: "WHATSAPP", created: result.created },
+      req,
+    });
+    return {
+      created: result.created,
+      duplicate: result.duplicate,
+      customerId: result.customer.id,
+      customerCode: result.customer.customerCode,
+    };
   },
 };

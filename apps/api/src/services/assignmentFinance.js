@@ -2,6 +2,17 @@ import { AppError } from '../utils/response.js';
 import { computeFinanceFields } from './projectContext.js';
 
 /**
+ * True when the team member is on an active FIXED (monthly) salary profile.
+ * Editors/narrators without a profile default to project-share pay.
+ */
+export function teamProfileHasMonthlySalary(profile) {
+  const compensation = profile?.compensationProfile;
+  if (!compensation) return false;
+  if (compensation.isActive === false) return false;
+  return compensation.type === 'FIXED';
+}
+
+/**
  * Parse and validate a manager-entered assignment price (AFN).
  */
 export function parseAssignmentAmount(raw, { fieldLabel = 'مبلغ' } = {}) {
@@ -14,6 +25,14 @@ export function parseAssignmentAmount(raw, { fieldLabel = 'مبلغ' } = {}) {
     throw new AppError(`${fieldLabel} باید عددی نامنفی باشد`, 400, 'INVALID_ASSIGNMENT_AMOUNT');
   }
   return amount;
+}
+
+/**
+ * Resolve project-based assignment amount. Monthly-salary assignees skip cost entirely.
+ */
+export function resolveAssignmentAmount(raw, { fieldLabel = 'مبلغ', hasMonthlySalary = false } = {}) {
+  if (hasMonthlySalary) return null;
+  return parseAssignmentAmount(raw, { fieldLabel });
 }
 
 /**
@@ -49,6 +68,18 @@ export async function upsertLaborPayable(
       status: 'ESTIMATED',
     },
   });
+}
+
+/**
+ * Remove non-paid labor payable when assigning a monthly-salary editor/narrator.
+ */
+export async function clearLaborPayable(tx, { projectId, roleLabel }) {
+  const existing = await tx.employeePayable.findFirst({
+    where: { projectId, roleLabel },
+  });
+  if (!existing) return null;
+  if (existing.status === 'PAID') return existing;
+  return tx.employeePayable.delete({ where: { id: existing.id } });
 }
 
 /**

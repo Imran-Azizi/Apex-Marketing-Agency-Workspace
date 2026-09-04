@@ -10,6 +10,12 @@ export type FinalVideoStatus =
   | "VIEWED_BY_CUSTOMER"
   | "APPROVED_BY_CUSTOMER";
 
+export type FinalVideoDeliveryState =
+  | "PENDING_REVIEW"
+  | "AWAITING_DELIVERY"
+  | "REVISION"
+  | "SENT";
+
 export type FinalVideoItem = {
   id: string;
   name: string;
@@ -18,6 +24,11 @@ export type FinalVideoItem = {
   videoTypeLabel?: string | null;
   status: FinalVideoStatus | string;
   statusLabel?: string | null;
+  deliveryState?: FinalVideoDeliveryState | string | null;
+  deliveryStateLabel?: string | null;
+  isNew?: boolean;
+  awaitingDelivery?: boolean;
+  alreadySent?: boolean;
   version: number;
   mimeType?: string | null;
   sizeBytes?: number | null;
@@ -27,6 +38,8 @@ export type FinalVideoItem = {
   createdAt: string;
   sentToCustomer?: boolean;
   sentAt?: string | null;
+  sentBy?: string | null;
+  sentByName?: string | null;
   allowDownload?: boolean;
   approvedAt?: string | null;
   revisionNotes?: string | null;
@@ -58,6 +71,8 @@ export type FinalProductsPayload = {
     clean: number;
     sent: number;
     pending: number;
+    pendingReview?: number;
+    awaitingDelivery?: number;
   };
 };
 
@@ -76,6 +91,40 @@ export const FINAL_STATUS_LABELS: Record<FinalVideoStatus, string> = {
   VIEWED_BY_CUSTOMER: "مشاهده‌شده توسط مشتری",
   APPROVED_BY_CUSTOMER: "ویدیو تایید شد",
 };
+
+export const DELIVERY_STATE_LABELS: Record<FinalVideoDeliveryState, string> = {
+  PENDING_REVIEW: "ویدیوی جدید — در انتظار بررسی",
+  AWAITING_DELIVERY: "آماده ارسال به مشتری",
+  REVISION: "نیازمند اصلاح",
+  SENT: "ارسال‌شده به مشتری",
+};
+
+export function resolveItemDeliveryState(
+  item: Pick<
+    FinalVideoItem,
+    "deliveryState" | "sentToCustomer" | "status" | "alreadySent" | "awaitingDelivery" | "isNew"
+  >,
+): FinalVideoDeliveryState {
+  if (
+    item.deliveryState === "PENDING_REVIEW" ||
+    item.deliveryState === "AWAITING_DELIVERY" ||
+    item.deliveryState === "REVISION" ||
+    item.deliveryState === "SENT"
+  ) {
+    return item.deliveryState;
+  }
+  if (item.alreadySent || item.sentToCustomer) return "SENT";
+  if (
+    item.status === "SENT_TO_CUSTOMER" ||
+    item.status === "VIEWED_BY_CUSTOMER" ||
+    item.status === "APPROVED_BY_CUSTOMER"
+  ) {
+    return "SENT";
+  }
+  if (item.status === "REVISION_REQUESTED") return "REVISION";
+  if (item.awaitingDelivery || item.status === "APPROVED") return "AWAITING_DELIVERY";
+  return "PENDING_REVIEW";
+}
 
 export const ACCEPTED_VIDEO_TYPES =
   "video/mp4,video/webm,video/quicktime,video/x-matroska,.mp4,.webm,.mov,.mkv";

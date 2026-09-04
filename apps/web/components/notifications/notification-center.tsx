@@ -12,18 +12,21 @@ import {
 } from "@tanstack/react-query";
 import {
   Bell,
+  BriefcaseBusiness,
   Building2,
   CheckCheck,
   CheckCircle2,
   Clapperboard,
   FolderKanban,
   Mail,
+  MessageSquare,
   MessageSquareWarning,
   Mic2,
   Send,
   Trash2,
   UserRound,
   X,
+  Bot,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiDelete, apiGet, apiPost, type ApiEnvelope } from "@/lib/api";
@@ -39,6 +42,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn, formatDateTime } from "@/lib/utils";
+import { openChatDrawer } from "@/lib/chat-launcher";
 import { NotificationListSkeleton } from "@/components/loading/skeletons";
 import { ErrorState } from "@/components/loading/error-state";
 
@@ -52,6 +56,8 @@ export type NotificationMeta = {
   statusLabel: string | null;
   phone: string | null;
   eventKey: string | null;
+  conversationId?: string | null;
+  messageId?: string | null;
 };
 
 export type NotificationItem = {
@@ -141,7 +147,12 @@ async function fetchUnseenCount(): Promise<UnseenCountPayload> {
 }
 
 function NotificationIcon({ type }: { type: string | null }) {
+  if (type === "CHAT_MESSAGE") return <MessageSquare className="h-4 w-4" />;
   if (type === "LEAD_CREATED") return <UserRound className="h-4 w-4" />;
+  if (type === "SALES_ASSISTANT" || type === "SALES_ASSISTANT_DAILY")
+    return <Bot className="h-4 w-4" />;
+  if (type === "BUSINESS_ASSISTANT" || type === "BUSINESS_ASSISTANT_WEEKLY")
+    return <BriefcaseBusiness className="h-4 w-4" />;
   if (type === "CONTACT_MESSAGE") return <Mail className="h-4 w-4" />;
   if (type === "PROJECT_CREATED") return <FolderKanban className="h-4 w-4" />;
   if (type === "CONTENT_SENT_FOR_APPROVAL") return <Send className="h-4 w-4" />;
@@ -422,6 +433,22 @@ export function NotificationCenter({ className }: { className?: string }) {
 
   function handleOpenNotification(item: NotificationItem) {
     handleOpenChange(false);
+
+    if (item.meta.type === "CHAT_MESSAGE" && item.meta.conversationId) {
+      openChatDrawer(item.meta.conversationId);
+      return;
+    }
+
+    if (item.link?.startsWith("/chat")) {
+      try {
+        const url = new URL(item.link, window.location.origin);
+        openChatDrawer(url.searchParams.get("c"));
+      } catch {
+        openChatDrawer(null);
+      }
+      return;
+    }
+
     if (item.link) {
       router.push(item.link);
     }
