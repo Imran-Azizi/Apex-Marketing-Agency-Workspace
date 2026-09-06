@@ -11,11 +11,13 @@ Use 4–6 scenes for ads under 60s. Keep the JSON small and complete — never t
 
 Each scene MUST include:
 - title
-- visual (what is on screen — required, 1–2 sentences)
+- visual (what is on screen — required, 1–2 sentences; match the project product/service/concept exactly)
 - camera (wide / medium / close-up)
 - action
 - duration (e.g. "5s")
-- imagePrompt: detailed ENGLISH description of THIS scene as one 16:9 cinema still. Start with the shot type. Describe subject, action, location, lighting. Unique per scene. Same characters/product/look across scenes. Not a portrait unless the scene is a person. Not a grid.
+- environment (location)
+- lighting
+- imagePrompt: detailed ENGLISH description of THIS scene as one 16:9 cinema still. Start with the shot type. Describe the exact subject, action, location, lighting, mood, and product/service from the brief. Ground every frame in the project (product, service, audience, marketing objective) and the matching narration beat. Unique per scene. Same characters/product/wardrobe/locations/look across scenes so they feel like one video. Not a generic portrait, fashion headshot, or unrelated office mood shot unless the scene text explicitly requires that. Not a grid.
 
 Return ONLY this JSON shape (no duplicate arrays, no markdown):
 {

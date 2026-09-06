@@ -118,12 +118,19 @@ function countByStatus(
   return projects.filter((p) => set.has(p.status)).length;
 }
 
+/** Positive price preference matching backend resolveContractPrice. */
 function financeOf(p: ManagerProject) {
   const f = p.finance;
   if (!f) return null;
   const agreed = num(f.agreedPrice);
   const discount = num(f.discount);
-  const finalPrice = num(f.finalProjectPrice) || Math.max(agreed - discount, 0);
+  const cachedFinal = num(f.finalProjectPrice);
+  const finalPrice =
+    cachedFinal > 0
+      ? cachedFinal
+      : agreed > 0
+        ? Math.max(agreed - discount, 0)
+        : 0;
   const received = num(f.received);
   const narratorCost = num(f.narratorCost);
   const editorCost = num(f.editorCost);
@@ -139,64 +146,6 @@ function financeOf(p: ManagerProject) {
     expenses,
     profit: finalPrice - expenses,
   };
-}
-
-function sumFinance(projects: ManagerProject[]) {
-  let totalRevenue = 0;
-  let received = 0;
-  let outstanding = 0;
-  let expenses = 0;
-  let narratorCost = 0;
-  let editorCost = 0;
-  let profit = 0;
-  let any = false;
-
-  for (const p of projects) {
-    const fin = financeOf(p);
-    if (!fin) continue;
-    if (
-      fin.finalPrice ||
-      fin.received ||
-      fin.expenses ||
-      fin.narratorCost ||
-      fin.editorCost
-    ) {
-      any = true;
-    }
-    totalRevenue += fin.finalPrice;
-    received += fin.received;
-    outstanding += Math.max(fin.balance, 0);
-    expenses += fin.expenses;
-    narratorCost += fin.narratorCost;
-    editorCost += fin.editorCost;
-    profit += fin.profit;
-  }
-
-  return {
-    totalRevenue,
-    received,
-    outstanding,
-    expenses,
-    narratorCost,
-    editorCost,
-    profit,
-    any,
-  };
-}
-
-function revenueInWindow(
-  projects: ManagerProject[],
-  from: Date,
-  to: Date,
-): number {
-  let sum = 0;
-  for (const p of projects) {
-    const fin = financeOf(p);
-    if (!fin) continue;
-    const anchor = p.completedAt || p.createdAt;
-    if (inRange(anchor, from, to)) sum += fin.finalPrice;
-  }
-  return sum;
 }
 
 function assigneeName(p: ManagerProject, role: string): string {
@@ -216,38 +165,51 @@ export function computeManagerMetrics(input: {
   projects: ManagerProject[];
   summary?: DashboardSummary | null;
   range: DateRange;
+  /** Prefer finance API monthly series when present. */
+  financeMonthly?: Array<{
+    key: string;
+    year: number;
+    month: number;
+    revenue: number;
+    received: number;
+  }> | null;
 }): ManagerMetrics {
   const { from, to } = resolveDateRange(input.range);
+  const hasDateFilter = Boolean(from || to);
 
   const allProjects = input.projects;
-  const scoped =
-    from || to
-      ? allProjects.filter(
-          (p) =>
-            inRange(p.createdAt, from, to) || inRange(p.updatedAt, from, to),
-        )
-      : allProjects;
+  const scoped = hasDateFilter
+    ? allProjects.filter(
+        (p) =>
+          inRange(p.createdAt, from, to) ||
+          inRange(p.updatedAt, from, to) ||
+          inRange(p.completedAt, from, to),
+      )
+    : allProjects;
 
   const statusCount = (list: ManagerProject[], status: string) =>
     list.filter((p) => p.status === status).length;
 
-  const total = scoped.length;
-  const active = scoped.filter(
-    (p) => ACTIVE_STATUSES.has(p.status) && p.status !== "ON_HOLD",
-  ).length;
-  const completed = statusCount(scoped, "COMPLETED");
-  const waitingCustomer = countByStatus(scoped, WAITING_CUSTOMER);
-  const waitingApproval = countByStatus(scoped, WAITING_APPROVAL);
+  const serverKpis = !hasDateFilter ? input.summary?.projectKpis : null;
 
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const total = serverKpis?.total ?? scoped.length;
+  const active =
+    serverKpis?.active ??
+    scoped.filter(
+      (p) => ACTIVE_STATUSES.has(p.status) && p.status !== "ON_HOLD",
+    ).length;
+  const completed = serverKpis?.completed ?? statusCount(scoped, "COMPLETED");
+  const waitingCustomer =
+    serverKpis?.waitingCustomer ?? countByStatus(scoped, WAITING_CUSTOMER);
+  const waitingApproval =
+    serverKpis?.waitingApproval ?? countByStatus(scoped, WAITING_APPROVAL);
 
   const projectsKpis: KpiMetric[] = [
     kpi({
       key: "total",
       label: "کل پروژه‌ها",
       value: total,
-      description: "در بازه انتخاب‌شده",
+      description: hasDateFilter ? "در بازه انتخاب‌شده" : "همه پروژه‌های فعال سیستم",
       href: "/projects",
       tone: "brand",
     }),
@@ -283,13 +245,13 @@ export function computeManagerMetrics(input: {
   ];
 
   const statusMap = new Map<string, number>();
-  for (const p of scoped) {
-    statusMap.set(p.status, (statusMap.get(p.status) || 0) + 1);
-  }
-  if (!from && !to && input.summary?.projectStatusCounts?.length) {
-    statusMap.clear();
+  if (!hasDateFilter && input.summary?.projectStatusCounts?.length) {
     for (const row of input.summary.projectStatusCounts) {
       statusMap.set(row.status, row._count);
+    }
+  } else {
+    for (const p of scoped) {
+      statusMap.set(p.status, (statusMap.get(p.status) || 0) + 1);
     }
   }
   const statusChart = Array.from(statusMap.entries())
@@ -300,113 +262,57 @@ export function computeManagerMetrics(input: {
     }))
     .sort((a, b) => b.count - a.count);
 
+  const now = new Date();
   const monthKeys: string[] = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     monthKeys.push(monthKey(d));
   }
 
-  const monthlyProjectGrowth = monthKeys.map((k) => ({
-    month: monthLabel(k),
-    count: allProjects.filter((p) => monthKey(new Date(p.createdAt)) === k)
-      .length,
-  }));
+  let monthlyProjectGrowth: Array<{ month: string; count: number }>;
+  if (input.summary?.monthlyProjectGrowth?.length) {
+    monthlyProjectGrowth = input.summary.monthlyProjectGrowth.map((row) => ({
+      month: monthLabel(row.key),
+      count: row.count,
+    }));
+  } else {
+    monthlyProjectGrowth = monthKeys.map((k) => ({
+      month: monthLabel(k),
+      count: allProjects.filter((p) => monthKey(new Date(p.createdAt)) === k)
+        .length,
+    }));
+  }
 
-  const monthlyRevenue = monthKeys.map((k) => {
-    let revenue = 0;
-    let received = 0;
-    for (const p of allProjects) {
-      const fin = financeOf(p);
-      if (!fin) continue;
-      const anchor = p.completedAt || p.createdAt;
-      if (monthKey(new Date(anchor)) !== k) continue;
-      revenue += fin.finalPrice;
-      received += fin.received;
-    }
-    return { month: monthLabel(k), revenue, received };
-  });
-
-  const currentFin = sumFinance(scoped);
-  const monthlyRevenueSum = revenueInWindow(
-    allProjects,
-    monthStart,
-    endOfDay(now),
-  );
-
-  let hasFinance = currentFin.any || monthlyRevenueSum > 0;
-  if (!hasFinance) {
-    hasFinance = allProjects.some((p) => {
-      const fin = financeOf(p);
-      return !!fin && (fin.finalPrice > 0 || fin.received > 0 || fin.expenses > 0);
+  let monthlyRevenue: Array<{
+    month: string;
+    revenue: number;
+    received: number;
+  }>;
+  if (input.financeMonthly?.length) {
+    monthlyRevenue = input.financeMonthly.map((row) => ({
+      month: monthLabel(row.key),
+      revenue: row.revenue,
+      received: row.received,
+    }));
+  } else {
+    monthlyRevenue = monthKeys.map((k) => {
+      let revenue = 0;
+      let received = 0;
+      for (const p of allProjects) {
+        const fin = financeOf(p);
+        if (!fin) continue;
+        const anchor = p.completedAt || p.createdAt;
+        if (monthKey(new Date(anchor)) !== k) continue;
+        revenue += fin.finalPrice;
+        received += fin.received;
+      }
+      return { month: monthLabel(k), revenue, received };
     });
   }
 
-  const financeCards: KpiMetric[] = [
-    kpi({
-      key: "total_revenue",
-      label: "مجموع درآمد",
-      value: currentFin.totalRevenue,
-      description: "جمع مبلغ توافق‌شده پروژه‌ها",
-      format: "currency",
-      tone: "brand",
-    }),
-    kpi({
-      key: "monthly_revenue",
-      label: "درآمد این ماه",
-      value: monthlyRevenueSum,
-      description: "نسبت به ماه گذشته",
-      format: "currency",
-      tone: "success",
-    }),
-    kpi({
-      key: "received",
-      label: "پرداخت‌های دریافت‌شده",
-      value: currentFin.received,
-      description: "مبالغ وصول‌شده از مشتریان",
-      format: "currency",
-      tone: "info",
-    }),
-    kpi({
-      key: "outstanding",
-      label: "پرداخت‌های باقی‌مانده",
-      value: currentFin.outstanding,
-      description: "مانده قابل وصول",
-      format: "currency",
-      tone: "warning",
-    }),
-    kpi({
-      key: "expenses",
-      label: "هزینه‌ها",
-      value: currentFin.expenses,
-      description: "هزینه ادیت، نریشن و مستقیم",
-      format: "currency",
-      tone: "danger",
-    }),
-    kpi({
-      key: "narrator_cost",
-      label: "مجموع هزینه نریتور",
-      value: currentFin.narratorCost,
-      description: "پرداخت‌های مربوط به نریتورها",
-      format: "currency",
-      tone: "warning",
-    }),
-    kpi({
-      key: "editor_cost",
-      label: "مجموع هزینه ادیتور",
-      value: currentFin.editorCost,
-      description: "پرداخت‌های مربوط به ادیتورها",
-      format: "currency",
-      tone: "info",
-    }),
-    kpi({
-      key: "net_profit",
-      label: "سود خالص",
-      value: currentFin.profit,
-      description: "درآمد منهای هزینه‌های مستقیم",
-      format: "currency",
-      tone: currentFin.profit >= 0 ? "success" : "danger",
-    }),
-  ];
+  const hasFinanceChart = monthlyRevenue.some(
+    (r) => r.revenue > 0 || r.received > 0,
+  );
 
   const recentProjects = [...scoped]
     .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt))
@@ -420,12 +326,16 @@ export function computeManagerMetrics(input: {
     monthlyProjectGrowth,
     monthlyRevenue,
     recentProjects,
-    finance: hasFinance
+    finance: hasFinanceChart
       ? {
           available: true,
-          cards: financeCards,
+          cards: [],
         }
       : null,
+    crmPulse: {
+      leadsToday: input.summary?.leadsToday ?? 0,
+      followUpsDue: input.summary?.followUpsDue ?? 0,
+    },
   };
 }
 

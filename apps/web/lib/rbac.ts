@@ -138,6 +138,7 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
   ],
   FINANCE: [
     { href: "/finance", label: "داشبورد مالی", icon: Wallet },
+    { href: "/finance/projects", label: "پروژه‌ها (نمای مالی)", icon: FolderKanban },
     { href: "/finance/expenses", label: "مصارف شرکت", icon: Receipt },
     { href: "/finance/salaries", label: "معاشات کارمندان", icon: Banknote },
     { href: "/finance/pnl", label: "سود و زیان", icon: TrendingUp },
@@ -267,7 +268,7 @@ const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
   { prefix: "/settings", permission: "settings.view" },
   { prefix: "/crm-sales", permission: "crm.view" },
   { prefix: "/crm", permission: "crm.view" },
-  { prefix: "/finance/projects", permission: "projects.view" },
+  { prefix: "/finance/projects", permission: "finance.view" },
   { prefix: "/finance", permission: "finance.view" },
   { prefix: "/projects", permission: "projects.view" },
   { prefix: "/dashboard", permission: "dashboard.view" },

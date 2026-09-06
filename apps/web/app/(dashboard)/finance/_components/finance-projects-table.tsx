@@ -16,6 +16,8 @@ import { formatMoney, type FinanceProject } from "./types";
 import {
   customerListDisplay,
   PaymentProgressBar,
+  projectLifecycleLabel,
+  projectStatusBadgeVariant,
   settlementBadgeVariant,
   settlementLabel,
 } from "./finance-project-ui";
@@ -38,6 +40,9 @@ export function FinanceProjectsTable({
               نام پروژه
             </TableHead>
             <TableHead className="sticky top-0 z-10 bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+              وضعیت پروژه
+            </TableHead>
+            <TableHead className="sticky top-0 z-10 bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80">
               نام مشتری
             </TableHead>
             <TableHead className="sticky top-0 z-10 bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80">
@@ -52,10 +57,10 @@ export function FinanceProjectsTable({
             <TableHead className="sticky top-0 z-10 bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80">
               مانده
             </TableHead>
-            <TableHead className="sticky top-0 z-10 bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80 min-w-[8.5rem]">
+            <TableHead className="sticky top-0 z-10 min-w-[8.5rem] bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80">
               پیشرفت پرداخت
             </TableHead>
-            <TableHead className="sticky top-0 z-10 bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80 w-[7.5rem]">
+            <TableHead className="sticky top-0 z-10 w-[7.5rem] bg-muted/95 text-xs backdrop-blur supports-[backdrop-filter]:bg-muted/80">
               عملیات
             </TableHead>
           </TableRow>
@@ -64,7 +69,10 @@ export function FinanceProjectsTable({
           {items.map((project) => (
             <TableRow
               key={project.id}
-              className="cursor-pointer"
+              className={cn(
+                "cursor-pointer",
+                project.isComplete && "bg-emerald-500/[0.03]",
+              )}
               onClick={() => onSelect(project)}
             >
               <TableCell className="max-w-[14rem] py-3">
@@ -76,6 +84,14 @@ export function FinanceProjectsTable({
                   className="mt-1 font-normal"
                 >
                   {settlementLabel(project)}
+                </Badge>
+              </TableCell>
+              <TableCell className="py-3">
+                <Badge
+                  variant={projectStatusBadgeVariant(project)}
+                  className="font-normal"
+                >
+                  {projectLifecycleLabel(project)}
                 </Badge>
               </TableCell>
               <TableCell className="max-w-[10rem] py-3">
@@ -119,7 +135,7 @@ export function FinanceProjectsTable({
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className={cn("h-8 gap-1.5 px-2 text-xs font-medium")}
+                  className="h-8 gap-1.5 px-2 text-xs font-medium"
                   onClick={(event) => {
                     event.stopPropagation();
                     onSelect(project);

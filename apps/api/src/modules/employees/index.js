@@ -97,6 +97,19 @@ router.post(
   },
 );
 
+router.post(
+  '/:id/reveal-password',
+  requireCsrf,
+  requirePermission('employees.credentials'),
+  async (req, res, next) => {
+    try {
+      ok(res, await employeesService.revealPassword(req.params.id, req.auth, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.delete('/:id', requireCsrf, requirePermission('employees.delete'), async (req, res, next) => {
   try {
     ok(res, await employeesService.softDelete(req.params.id, req.auth, req));

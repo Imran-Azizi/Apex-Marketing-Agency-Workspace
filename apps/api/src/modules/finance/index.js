@@ -31,7 +31,7 @@ router.get('/dashboard', requirePermission('finance.view'), async (req, res, nex
   }
 });
 
-router.get('/projects', requirePermission('projects.view'), async (req, res, next) => {
+router.get('/projects', requirePermission('finance.view', 'projects.view'), async (req, res, next) => {
   try {
     ok(
       res,

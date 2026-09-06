@@ -29,7 +29,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useHasPermission } from "@/lib/permissions";
 import { EmployeeCvPanel } from "./employee-cv-panel";
+import { EmployeeLoginCredentialsCard } from "./employee-login-credentials";
 import {
   ROLE_BADGE_VARIANTS,
   ROLE_LABELS_FA,
@@ -70,6 +72,7 @@ export function EmployeeProfileView({
   currentUserId,
 }: EmployeeProfileViewProps) {
   const queryClient = useQueryClient();
+  const canViewCredentials = useHasPermission("employees.credentials");
   const fileRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -367,6 +370,15 @@ export function EmployeeProfileView({
         </CardContent>
       </Card>
 
+      {canViewCredentials ? (
+        <EmployeeLoginCredentialsCard
+          key={`${employee.id}-${employee.updatedAt}`}
+          employeeId={employee.id}
+          email={employee.email}
+          hasPasswordCipher={Boolean(employee.hasPasswordCipher)}
+        />
+      ) : null}
+
       <EmployeeCvPanel employee={employee} currentUserId={currentUserId} />
     </div>
   );
@@ -393,6 +405,7 @@ export function EmployeeProfileSkeleton() {
           </div>
         </CardContent>
       </Card>
+      <Skeleton className="h-40 w-full rounded-2xl" />
       <Skeleton className="h-[28rem] w-full rounded-2xl" />
     </div>
   );

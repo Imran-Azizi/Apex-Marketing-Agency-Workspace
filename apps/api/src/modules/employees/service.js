@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { AppError } from "../../utils/response.js";
-import { hashPassword } from "../../utils/passwords.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { createNotificationOnce } from "../../services/notifications.js";
+import { buildPortalPasswordRecord } from "../portal/credentials.js";
+import { decryptCredential } from "../../utils/credentialVault.js";
 
 /** Roles managers can assign when creating/editing employees. */
 export const EMPLOYEE_ROLES = ["SALES", "EDITOR", "NARRATOR", "FINANCE", "PROJECT_MANAGER"];
@@ -31,6 +32,7 @@ const ROLE_TO_TEAM_KIND = {
 const userSelect = {
   id: true,
   email: true,
+  passwordCipher: true,
   fullName: true,
   phone: true,
   profileImage: true,
@@ -117,6 +119,16 @@ function normalizeEmail(email) {
   return String(email).trim().toLowerCase();
 }
 
+/** Never return ciphertext or plaintext passwords in list/get payloads. */
+function toPublicEmployee(user) {
+  if (!user) return user;
+  const { passwordCipher, ...rest } = user;
+  return {
+    ...rest,
+    hasPasswordCipher: Boolean(passwordCipher),
+  };
+}
+
 async function ensureRole(code) {
   const role = await prisma.role.findUnique({ where: { code } });
   if (!role)
@@ -191,7 +203,12 @@ export const employeesService = {
       prisma.user.count({ where }),
     ]);
 
-    return { items, total, page, pageSize };
+    return {
+      items: items.map(toPublicEmployee),
+      total,
+      page,
+      pageSize,
+    };
   },
 
   async getById(id) {
@@ -215,8 +232,9 @@ export const employeesService = {
     });
     if (!user) throw new AppError("کارمند یافت نشد", 404, "NOT_FOUND");
 
+    const publicUser = toPublicEmployee(user);
     return {
-      ...user,
+      ...publicUser,
       permissions: user.role.permissions.map((p) => p.permission.code),
       role: { id: user.role.id, code: user.role.code, name: user.role.name },
     };
@@ -239,7 +257,9 @@ export const employeesService = {
     }
 
     const role = await ensureRole(body.role);
-    const passwordHash = await hashPassword(body.password);
+    const { passwordHash, passwordCipher } = await buildPortalPasswordRecord(
+      body.password,
+    );
 
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
@@ -250,6 +270,7 @@ export const employeesService = {
           profileImage: body.profileImage || null,
           ...normalizeCvPayload(body),
           passwordHash,
+          passwordCipher,
           isActive: body.isActive ?? true,
           roleId: role.id,
         },
@@ -287,7 +308,7 @@ export const employeesService = {
       req,
     });
 
-    return user;
+    return toPublicEmployee(user);
   },
 
   async update(id, body, auth, req) {
@@ -387,7 +408,7 @@ export const employeesService = {
       req,
     });
 
-    return user;
+    return toPublicEmployee(user);
   },
 
   async setActive(id, isActive, auth, req) {
@@ -435,7 +456,7 @@ export const employeesService = {
       req,
     });
 
-    return user;
+    return toPublicEmployee(user);
   },
 
   async resetPassword(id, password, auth, req) {
@@ -444,9 +465,13 @@ export const employeesService = {
     });
     if (!current) throw new AppError("کارمند یافت نشد", 404, "NOT_FOUND");
 
-    const passwordHash = await hashPassword(password);
+    const { passwordHash, passwordCipher } =
+      await buildPortalPasswordRecord(password);
     await prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id }, data: { passwordHash } });
+      await tx.user.update({
+        where: { id },
+        data: { passwordHash, passwordCipher },
+      });
       await tx.session.updateMany({
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -472,6 +497,51 @@ export const employeesService = {
     });
 
     return { ok: true };
+  },
+
+  async revealPassword(id, auth, req) {
+    const current = await prisma.user.findFirst({
+      where: { id, deletedAt: null, role: { code: { in: STAFF_ROLES } } },
+      select: { id: true, email: true, passwordCipher: true },
+    });
+    if (!current) throw new AppError("کارمند یافت نشد", 404, "NOT_FOUND");
+
+    if (!current.passwordCipher) {
+      throw new AppError(
+        "رمز قابل نمایش موجود نیست. ابتدا رمز عبور را بازنشانی کنید.",
+        404,
+        "PASSWORD_NOT_SET",
+      );
+    }
+
+    let password;
+    try {
+      password = decryptCredential(current.passwordCipher);
+    } catch {
+      password = null;
+    }
+    if (!password) {
+      throw new AppError(
+        "رمز ذخیره شده قابل بازیابی نیست. لطفاً رمز عبور را بازنشانی کنید.",
+        409,
+        "PASSWORD_UNAVAILABLE",
+      );
+    }
+
+    await writeAudit({
+      userId: auth.userId,
+      action: "EMPLOYEE_CREDENTIAL_REVEAL",
+      entityType: "User",
+      entityId: id,
+      after: { email: current.email },
+      req,
+    });
+
+    return {
+      employeeId: current.id,
+      email: current.email,
+      password,
+    };
   },
 
   async softDelete(id, auth, req) {

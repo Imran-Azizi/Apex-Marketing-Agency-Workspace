@@ -4,8 +4,8 @@ import { use, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { apiGet } from "@/lib/api";
 import { formatDate, formatCurrency, cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import {
@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CompleteProjectDialog } from "@/components/projects/complete-project-dialog";
 import {
   ProjectInfoTabContent,
   type ProjectInfoTabId,
@@ -48,12 +49,10 @@ import {
   CheckCircle2,
   Clapperboard,
   FolderOpen,
-  Loader2,
   Mic2,
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { toast } from "sonner";
 
 function PanelSkeleton({ className }: { className?: string }) {
   return (
@@ -321,13 +320,13 @@ export default function ProjectDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const queryClient = useQueryClient();
   const [section, setSection] = useState<ProjectDataSectionId>("customer");
   const [tab, setTab] = useState<DetailTab>("brief");
   const [aiPanel, setAiPanel] = useState<"content" | "feedback">("content");
   const [productionWorkspace, setProductionWorkspace] = useState<
     "customer" | "ai" | "narration" | "final" | "poster" | undefined
   >(undefined);
+  const [completeConfirmOpen, setCompleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     const tabParam = searchParams.get("tab");
@@ -386,29 +385,6 @@ export default function ProjectDetailPage({
     queryKey: ["project", id],
     queryFn: () => apiGet<ProjectDetail>(`/projects/${id}`),
     enabled: !blockProjectDetail,
-  });
-
-  const completeProject = useMutation({
-    mutationFn: () =>
-      apiPost<{
-        status: string;
-        completedAt?: string;
-        alreadyCompleted?: boolean;
-      }>(`/delivery/${id}/complete`, {}),
-    onSuccess: (res) => {
-      toast.success(
-        res?.alreadyCompleted
-          ? "پروژه قبلاً تکمیل شده است"
-          : "پروژه با موفقیت به‌عنوان تکمیل‌شده ثبت شد",
-      );
-      queryClient.invalidateQueries({ queryKey: ["project", id] });
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-    },
-    onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : "ثبت تکمیل پروژه ناموفق بود",
-      );
-    },
   });
 
   useEffect(() => {
@@ -564,23 +540,9 @@ export default function ProjectDetailPage({
                   variant="brand"
                   size="sm"
                   className="h-8 gap-1.5"
-                  disabled={completeProject.isPending}
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        "آیا از تکمیل دستی این پروژه مطمئن هستید؟ این وضعیت در پنل مدیر، پورتال مشتری و جزئیات پروژه ذخیره می‌شود.",
-                      )
-                    ) {
-                      return;
-                    }
-                    completeProject.mutate();
-                  }}
+                  onClick={() => setCompleteConfirmOpen(true)}
                 >
-                  {completeProject.isPending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  )}
+                  <CheckCircle2 className="h-3.5 w-3.5" />
                   علامت‌گذاری به‌عنوان تکمیل‌شده
                 </Button>
               ) : null}
@@ -745,6 +707,14 @@ export default function ProjectDetailPage({
           </ProjectSectionShell>
         )}
       </section>
+
+      <CompleteProjectDialog
+        open={completeConfirmOpen}
+        onOpenChange={setCompleteConfirmOpen}
+        projectId={id}
+        projectTitle={data.title}
+        projectCode={data.code}
+      />
     </div>
   );
 }

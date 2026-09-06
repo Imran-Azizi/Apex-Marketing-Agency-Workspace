@@ -33,6 +33,7 @@ test('manager and admin are equivalent full-access grantors', () => {
   assert.equal(isFullAccessRole('ADMIN'), true);
   assert.equal(ALL_PERMISSION_CODES.includes('settings.permissions'), true);
   assert.equal(ALL_PERMISSION_CODES.includes('crm.portal_credentials'), true);
+  assert.equal(ALL_PERMISSION_CODES.includes('employees.credentials'), true);
 
   const managerGrantable = getGrantableCodes({ roleCode: 'MANAGER', permissions: [] });
   const adminGrantable = getGrantableCodes({ roleCode: 'ADMIN', permissions: [] });
@@ -61,6 +62,7 @@ test('sales defaults include CRM write but not projects, finance, or finance app
   assert.equal(permissionSatisfied(codes, 'crm.create', 'SALES'), true);
   assert.equal(permissionSatisfied(codes, 'crm.invite', 'SALES'), true);
   assert.equal(permissionSatisfied(codes, 'crm.portal_credentials', 'SALES'), false);
+  assert.equal(permissionSatisfied(codes, 'employees.credentials', 'SALES'), false);
   assert.equal(permissionSatisfied(codes, 'projects.view', 'SALES'), false);
   assert.equal(permissionSatisfied(codes, 'projects.delete', 'SALES'), false);
   assert.equal(permissionSatisfied(codes, 'finance.view', 'SALES'), false);

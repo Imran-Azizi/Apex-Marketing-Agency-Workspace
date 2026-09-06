@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { AppError } from '../../utils/response.js';
 import { hashPassword, verifyPassword } from '../../utils/passwords.js';
+import { encryptCredential } from '../../utils/credentialVault.js';
 import { hashToken, randomToken, signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/tokens.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { getWhatsappLookupKeys, parseInternationalPhone, WHATSAPP_VALIDATION_MESSAGE } from '../../utils/whatsappNormalize.js';
@@ -34,6 +35,14 @@ function buildTokens({ sub, aud, role, sessionId }) {
   const accessToken = signAccessToken({ sub, aud, role, sid: sessionId });
   const refreshToken = signRefreshToken({ sub, aud, sid: sessionId });
   return { accessToken, refreshToken };
+}
+
+function recoverableCipher(plaintext) {
+  try {
+    return encryptCredential(plaintext) || null;
+  } catch {
+    return null;
+  }
 }
 
 export const authService = {
@@ -69,9 +78,14 @@ export const authService = {
       data: { refreshTokenHash: hashToken(tokens.refreshToken) },
     });
 
+    const loginUpdate = { lastLoginAt: new Date() };
+    if (!user.passwordCipher) {
+      const passwordCipher = recoverableCipher(password);
+      if (passwordCipher) loginUpdate.passwordCipher = passwordCipher;
+    }
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLoginAt: new Date() },
+      data: loginUpdate,
     });
 
     await writeAudit({

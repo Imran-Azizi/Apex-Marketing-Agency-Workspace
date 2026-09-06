@@ -16,10 +16,11 @@ test("recipientWhere isolates internal users from portal accounts", () => {
   );
 });
 
-test("unseenWhere scopes to the recipient and unread rows", () => {
+test("unseenWhere scopes to the recipient and unseen rows", () => {
   const where = unseenWhere({ audience: "INTERNAL", userId: "u1" });
   assert.equal(where.userId, "u1");
-  assert.equal(where.isRead, false);
+  assert.equal(where.seenAt, null);
+  assert.equal(where.isRead, undefined);
   assert.equal(where.createdAt, undefined);
 });
 

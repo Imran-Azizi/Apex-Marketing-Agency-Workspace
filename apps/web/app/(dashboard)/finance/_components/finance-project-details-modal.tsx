@@ -23,6 +23,8 @@ import { formatMoney, type FinanceProject, type FinanceProjectPayment } from "./
 import {
   paymentProgressPct,
   PaymentProgressBar,
+  projectLifecycleLabel,
+  projectStatusBadgeVariant,
   settlementBadgeVariant,
   settlementLabel,
   verificationLabel,
@@ -117,6 +119,12 @@ export function FinanceProjectDetailsModal({
         <DialogHeader className="shrink-0 space-y-3 border-b border-border/50 bg-muted/10 px-6 pb-5 pt-5 text-start">
           <div className="flex flex-wrap items-center gap-2 pe-8">
             <Badge
+              variant={projectStatusBadgeVariant(project)}
+              className="font-medium"
+            >
+              {projectLifecycleLabel(project)}
+            </Badge>
+            <Badge
               variant={settlementBadgeVariant(project.settlementStatus)}
               className="font-medium"
             >
@@ -125,6 +133,11 @@ export function FinanceProjectDetailsModal({
             <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
               {progressPct}٪ پرداخت‌شده
             </span>
+            {project.completedAt ? (
+              <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] text-muted-foreground">
+                تکمیل: {formatDate(project.completedAt)}
+              </span>
+            ) : null}
           </div>
 
           <div className="space-y-1">

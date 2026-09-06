@@ -2,14 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import {
   getCustomTabListClass,
   getCustomTabTriggerClass,
 } from "@/components/shared/tab-styles";
 import {
-  canEditContentVersion,
   canSendVersionToCustomer,
   versionSendBlockReason,
 } from "@/lib/content-version";
@@ -41,12 +40,11 @@ import {
   GitCompare,
   History,
   Loader2,
-  Pencil,
   RefreshCw,
-  Save,
   Send,
   Sparkles,
   Trash2,
+  UploadCloud,
   XCircle,
   MessageSquareWarning,
 } from "lucide-react";
@@ -56,30 +54,13 @@ import {
   NarrationFinalView,
   ScenarioFinalView,
   StoryboardFinalView,
-  resolveStoryboardCollage,
 } from "@/components/projects/ai-content-views";
-import {
-  ContentEditForm,
-  buildNarrationPayload,
-  buildScenarioPayload,
-  buildStoryboardPayload,
-  emptyNarrationForm,
-  emptyScenarioForm,
-  emptyStoryboardScenes,
-  loadNarrationForm,
-  loadScenarioForm,
-  loadStoryboardScenes,
-  validateContentEditForm,
-  type EditContentTab,
-  type NarrationFormState,
-  type ScenarioFormState,
-  type StoryboardSceneFormState,
-} from "@/components/projects/content-edit-form";
 import {
   CustomerFeedbackPanel,
   type ApprovalTimelineItem,
   type CustomerFeedbackItem,
 } from "@/components/projects/customer-feedback-panel";
+import { ContentManualUploadDialog } from "@/components/projects/content-manual-upload-dialog";
 
 type StepStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
 
@@ -266,6 +247,20 @@ function ContentBlocks({
       ? (value as Record<string, unknown>)
       : obj;
 
+  if (raw.preserveExact === true) {
+    if (
+      Array.isArray(raw.uploadedImages) ||
+      Array.isArray(raw.storyboard) ||
+      Array.isArray(raw.scenes)
+    ) {
+      return <StoryboardFinalView value={value} dir={dir} />;
+    }
+    if (typeof raw.script === "string") {
+      return <NarrationFinalView value={value} dir={dir} />;
+    }
+    return <ScenarioFinalView value={value} dir={dir} />;
+  }
+
   if (typeof raw.script === "string" || typeof obj.script === "string") {
     return <NarrationFinalView value={value} dir={dir} />;
   }
@@ -355,26 +350,11 @@ export function ProjectAiAssistant({
   const [compareLeft, setCompareLeft] = useState("");
   const [compareRight, setCompareRight] = useState("");
   const [compareOpen, setCompareOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
+  const [manualUploadOpen, setManualUploadOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ContentVersion | null>(null);
   const [sendConfirmOpen, setSendConfirmOpen] = useState(false);
-  const [editScenarioForm, setEditScenarioForm] =
-    useState<ScenarioFormState>(emptyScenarioForm);
-  const [editNarrationForm, setEditNarrationForm] =
-    useState<NarrationFormState>(emptyNarrationForm);
-  const [editStoryboardScenes, setEditStoryboardScenes] = useState<
-    StoryboardSceneFormState[]
-  >(emptyStoryboardScenes);
-  const [editOriginalScenario, setEditOriginalScenario] = useState<unknown>(null);
-  const [editOriginalNarration, setEditOriginalNarration] =
-    useState<unknown>(null);
-  const [editOriginalStoryboard, setEditOriginalStoryboard] =
-    useState<unknown>(null);
-  const [editContentTab, setEditContentTab] =
-    useState<EditContentTab>("scenario");
   const [generationPrompt, setGenerationPrompt] = useState("");
   const [generatePromptOpen, setGeneratePromptOpen] = useState(false);
-  const [editPrompt, setEditPrompt] = useState("");
   const [contentTab, setContentTab] = useState<
     "scenario" | "narration" | "storyboard"
   >("scenario");
@@ -473,92 +453,6 @@ export function ProjectAiAssistant({
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
   });
 
-  const loadEditFormsFromVersion = (version: ContentVersion) => {
-    setEditOriginalScenario(version.scenario ?? null);
-    setEditOriginalNarration(version.narration ?? null);
-    setEditOriginalStoryboard(version.storyboard ?? null);
-    setEditScenarioForm(loadScenarioForm(version.scenario));
-    setEditNarrationForm(loadNarrationForm(version.narration));
-    setEditStoryboardScenes(loadStoryboardScenes(version.storyboard));
-    setEditContentTab("scenario");
-  };
-
-  const saveMut = useMutation({
-    mutationFn: () => {
-      if (!selected) throw new Error("نسخه‌ای انتخاب نشده");
-      const validationError = validateContentEditForm({
-        scenario: editScenarioForm,
-        narration: editNarrationForm,
-        scenes: editStoryboardScenes,
-      });
-      if (validationError) throw new Error(validationError);
-
-      const prompt = normalizePrompt(editPrompt);
-      return apiPatch(`/ai/${projectId}/versions/${selected.id}`, {
-        scenario: buildScenarioPayload(editScenarioForm, editOriginalScenario),
-        narration: buildNarrationPayload(
-          editNarrationForm,
-          editOriginalNarration,
-        ),
-        storyboard: buildStoryboardPayload(
-          editStoryboardScenes.filter((s) => s.visualDescription.trim()),
-          editOriginalStoryboard,
-        ),
-        changeNotes: prompt
-          ? `ویرایش دستی با دستور: ${prompt.slice(0, 120)}`
-          : "ویرایش دستی مدیر",
-        editPrompt: prompt,
-      });
-    },
-    onSuccess: () => {
-      toast.success("ذخیره شد");
-      setEditOpen(false);
-      setEditPrompt("");
-      invalidateAll();
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
-  });
-
-  const aiEditMut = useMutation({
-    mutationFn: () => {
-      if (!selected) throw new Error("نسخه‌ای انتخاب نشده");
-      const prompt = normalizePrompt(editPrompt);
-      if (!prompt) throw new Error("دستورات ویرایش را وارد کنید");
-      return apiPost<{ version?: ContentVersion; async?: boolean }>(
-        `/ai/${projectId}/regenerate`,
-        {
-          changeNotes: `ویرایش با هوش مصنوعی: ${prompt.slice(0, 120)}`,
-          userPrompt: prompt,
-          baseVersionId: selected.id,
-          sync: true,
-        },
-      );
-    },
-    onSuccess: (data) => {
-      if (data?.version) {
-        setSelectedVersionId(data.version.id);
-        loadEditFormsFromVersion(data.version);
-        setEditOriginalScenario(data.version.scenario ?? null);
-        setEditOriginalNarration(data.version.narration ?? null);
-        setEditOriginalStoryboard(data.version.storyboard ?? null);
-        toast.success(
-          "نتیجه هوش مصنوعی در فرم بارگذاری شد. پس از بررسی، ذخیره کنید.",
-        );
-        invalidateAll();
-        return;
-      }
-      toast.success(
-        data?.async
-          ? "ویرایش با هوش مصنوعی شروع شد"
-          : "نسخه ویرایش‌شده تولید شد",
-      );
-      setEditOpen(false);
-      setEditPrompt("");
-      invalidateAll();
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "خطا در ویرایش AI"),
-  });
-
   const deleteMut = useMutation({
     mutationFn: (versionId: string) =>
       apiDelete(`/ai/${projectId}/versions/${versionId}`),
@@ -606,7 +500,6 @@ export function ProjectAiAssistant({
   const isBusy =
     generateMut.isPending ||
     regenerateMut.isPending ||
-    aiEditMut.isPending ||
     overviewQ.data?.processingStatus === "RUNNING" ||
     overviewQ.data?.processingStatus === "PENDING";
 
@@ -676,8 +569,6 @@ export function ProjectAiAssistant({
     );
   }, [steps]);
 
-  const canEdit = !!selected && canEditContentVersion(selected);
-
   const sendBlockReason = selected ? versionSendBlockReason(selected) : null;
   const canSendForApproval = !!selected && canSendVersionToCustomer(selected);
 
@@ -713,8 +604,8 @@ export function ProjectAiAssistant({
             </Badge>
           </div>
           <p className="max-w-xl text-sm leading-6 text-muted-foreground">
-            تولید حرفه‌ای سناریو، نریشن و استوری‌بورد بر اساس بریف پروژه — در سه
-            مرحله پشت‌سرهم
+            تولید با هوش مصنوعی یا آپلود سناریو، نریشن و استوری‌بورد از منابع
+            خارجی — در سه بخش قابل مدیریت
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -757,6 +648,16 @@ export function ProjectAiAssistant({
               )}
             </button>
           </div>
+          <Button
+            variant="outline"
+            size="lg"
+            className="h-11 shrink-0 gap-2 px-4"
+            disabled={isBusy}
+            onClick={() => setManualUploadOpen(true)}
+          >
+            <UploadCloud className="h-4 w-4" />
+            آپلود محتوا
+          </Button>
           <Button
             variant="brand"
             size="lg"
@@ -927,8 +828,11 @@ export function ProjectAiAssistant({
           <div className="flex-1 overflow-y-auto p-2">
             {versions.length === 0 ? (
               <div className="flex flex-col items-center gap-2 px-3 py-12 text-center">
-                <Sparkles className="h-7 w-7 text-muted-foreground/35" />
+                <UploadCloud className="h-7 w-7 text-muted-foreground/35" />
                 <p className="text-sm text-muted-foreground">هنوز محتوایی نیست</p>
+                <p className="text-[11px] leading-5 text-muted-foreground">
+                  تولید با AI یا آپلود از فایل
+                </p>
               </div>
             ) : (
               <ul className="space-y-1">
@@ -1042,20 +946,31 @@ export function ProjectAiAssistant({
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
                 <Sparkles className="h-6 w-6" />
               </div>
-              <p className="text-base font-medium">آماده تولید محتوا</p>
+              <p className="text-base font-medium">آماده تولید یا ورود محتوا</p>
               <p className="max-w-sm text-sm leading-6 text-muted-foreground">
-                روی «تولید محتوا» بزنید، دستورات دلخواه را وارد کنید، سپس تولید
-                سناریو، نریشن و استوری‌بورد را شروع کنید.
+                محتوا را با هوش مصنوعی تولید کنید، یا سناریو، نریشن و
+                استوری‌بورد را از فایل‌های خارجی مستقیماً آپلود کنید.
               </p>
-              <Button
-                variant="brand"
-                className="mt-1 gap-2"
-                disabled={isBusy}
-                onClick={() => setGeneratePromptOpen(true)}
-              >
-                <Sparkles className="h-4 w-4" />
-                شروع تولید
-              </Button>
+              <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  disabled={isBusy}
+                  onClick={() => setManualUploadOpen(true)}
+                >
+                  <UploadCloud className="h-4 w-4" />
+                  آپلود از فایل
+                </Button>
+                <Button
+                  variant="brand"
+                  className="gap-2"
+                  disabled={isBusy}
+                  onClick={() => setGeneratePromptOpen(true)}
+                >
+                  <Sparkles className="h-4 w-4" />
+                  شروع تولید
+                </Button>
+              </div>
             </div>
           ) : (
             <>
@@ -1071,20 +986,6 @@ export function ProjectAiAssistant({
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={!canEdit}
-                    onClick={() => {
-                      loadEditFormsFromVersion(selected);
-                      setEditPrompt("");
-                      setEditOpen(true);
-                    }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    ویرایش
-                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -1405,118 +1306,6 @@ export function ProjectAiAssistant({
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={editOpen}
-        onOpenChange={(open) => {
-          if (saveMut.isPending || aiEditMut.isPending) return;
-          setEditOpen(open);
-          if (!open) setEditPrompt("");
-        }}
-      >
-        <DialogContent className="flex max-h-[92vh] w-[calc(100%-1.5rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
-          <div className="border-b border-border/60 bg-gradient-to-l from-brand/[0.07] via-transparent to-transparent px-5 pb-4 pt-5 sm:px-6">
-            <DialogHeader className="pe-6 text-start">
-              <DialogTitle className="text-base sm:text-lg">
-                ویرایش محتوا
-              </DialogTitle>
-            </DialogHeader>
-          </div>
-
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 sm:px-6">
-            <div className="space-y-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-3.5 sm:p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Label
-                  htmlFor="ai-edit-prompt"
-                  className="text-sm font-semibold"
-                >
-                  دستورات ویرایش با هوش مصنوعی
-                </Label>
-                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                  {editPrompt.length.toLocaleString("fa-AF", {
-                    numberingSystem: "latn",
-                  })}
-                  /
-                  {USER_PROMPT_MAX.toLocaleString("fa-AF", {
-                    numberingSystem: "latn",
-                  })}
-                </span>
-              </div>
-              <Textarea
-                id="ai-edit-prompt"
-                value={editPrompt}
-                onChange={(e) =>
-                  setEditPrompt(e.target.value.slice(0, USER_PROMPT_MAX))
-                }
-                disabled={saveMut.isPending || aiEditMut.isPending || isBusy}
-                rows={3}
-                maxLength={USER_PROMPT_MAX}
-                placeholder="مثال: هوک قوی‌تر شود، CTA واضح‌تر، لحن صمیمی‌تر، صحنه ۳ کوتاه‌تر…"
-                className="min-h-[88px] resize-y bg-background"
-              />
-              <Button
-                variant="brand"
-                className="w-full gap-2 sm:w-auto"
-                disabled={
-                  !normalizePrompt(editPrompt) ||
-                  aiEditMut.isPending ||
-                  saveMut.isPending ||
-                  isBusy ||
-                  !selected
-                }
-                onClick={() => aiEditMut.mutate()}
-              >
-                {aiEditMut.isPending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4" />
-                )}
-                {aiEditMut.isPending
-                  ? "در حال بازنویسی…"
-                  : "اعمال دستورات با هوش مصنوعی"}
-              </Button>
-            </div>
-
-            <ContentEditForm
-              tab={editContentTab}
-              onTabChange={setEditContentTab}
-              scenario={editScenarioForm}
-              onScenarioChange={setEditScenarioForm}
-              narration={editNarrationForm}
-              onNarrationChange={setEditNarrationForm}
-              scenes={editStoryboardScenes}
-              onScenesChange={setEditStoryboardScenes}
-              collageImageUrl={
-                resolveStoryboardCollage(editOriginalStoryboard).src
-              }
-              disabled={saveMut.isPending || aiEditMut.isPending}
-            />
-          </div>
-
-          <DialogFooter className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-4 sm:px-6">
-            <Button
-              variant="outline"
-              disabled={saveMut.isPending || aiEditMut.isPending}
-              onClick={() => setEditOpen(false)}
-            >
-              انصراف
-            </Button>
-            <Button
-              variant="brand"
-              className="gap-2"
-              disabled={saveMut.isPending || aiEditMut.isPending}
-              onClick={() => saveMut.mutate()}
-            >
-              {saveMut.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              ذخیره پیش‌نویس
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
@@ -1567,6 +1356,17 @@ export function ProjectAiAssistant({
           )}
         </DialogContent>
       </Dialog>
+
+      <ContentManualUploadDialog
+        open={manualUploadOpen}
+        onOpenChange={setManualUploadOpen}
+        projectId={projectId}
+        disabled={isBusy}
+        onCreated={(version) => {
+          setSelectedVersionId(version.id);
+          invalidateAll();
+        }}
+      />
     </div>
   );
 }

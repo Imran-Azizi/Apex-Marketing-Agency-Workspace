@@ -43,7 +43,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, PlusCircle, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   DELIVERY_STATUS_FILTER_OPTIONS,
@@ -211,6 +211,11 @@ export default function ProjectsPage() {
   const canDeleteProject = hasPermission(
     me?.permissions,
     "projects.delete",
+    me?.role,
+  );
+  const canCreateProject = hasPermission(
+    me?.permissions,
+    "projects.create",
     me?.role,
   );
   const canViewProjects = hasPermission(
@@ -381,6 +386,20 @@ export default function ProjectsPage() {
         inline
         title="پروژه‌ها"
         subtitle="لیست پروژه‌های فعال و تکمیل‌شده"
+        actions={
+          canCreateProject ? (
+            <Button
+              type="button"
+              variant="brand"
+              size="default"
+              className="rounded-xl shadow-md shadow-brand/20"
+              onClick={() => router.push("/projects/new")}
+            >
+              <PlusCircle className="h-4 w-4" />
+              ایجاد پروژه جدید
+            </Button>
+          ) : null
+        }
       />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -608,7 +627,23 @@ export default function ProjectsPage() {
         )}
 
         {showEmptyCatalog && (
-          <EmptyState title="پروژه‌ای ثبت نشده است" />
+          <EmptyState
+            title="پروژه‌ای ثبت نشده است"
+            description="اولین پروژه را برای یکی از مشتریان موجود ایجاد کنید."
+            action={
+              canCreateProject ? (
+                <Button
+                  type="button"
+                  variant="brand"
+                  className="rounded-xl"
+                  onClick={() => router.push("/projects/new")}
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  ایجاد پروژه جدید
+                </Button>
+              ) : undefined
+            }
+          />
         )}
 
         {showEmptyFiltered && (

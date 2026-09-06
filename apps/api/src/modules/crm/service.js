@@ -24,6 +24,10 @@ import {
 } from "./constants.js";
 import { buildPaymentReceiptHtml } from "./paymentReceiptHtml.js";
 import {
+  buildInvoiceDocumentHtml,
+  invoiceStatusLabel,
+} from "./invoiceDocumentHtml.js";
+import {
   allocateCustomerCode,
   normalizeCustomerCodeQuery,
 } from "./customerCode.js";
@@ -485,7 +489,15 @@ export const crmService = {
         invoices: {
           where: {
             status: { not: "CANCELED" },
-            OR: [{ projectId: null }, { project: { deletedAt: null } }],
+            AND: [
+              { OR: [{ projectId: null }, { project: { deletedAt: null } }] },
+              {
+                OR: [
+                  { opportunityId: { not: null } },
+                  { projectId: { not: null } },
+                ],
+              },
+            ],
           },
           orderBy: { createdAt: "desc" },
           take: 20,
@@ -497,7 +509,20 @@ export const crmService = {
               {
                 invoice: {
                   status: { not: "CANCELED" },
-                  OR: [{ projectId: null }, { project: { deletedAt: null } }],
+                  AND: [
+                    {
+                      OR: [
+                        { projectId: null },
+                        { project: { deletedAt: null } },
+                      ],
+                    },
+                    {
+                      OR: [
+                        { opportunityId: { not: null } },
+                        { projectId: { not: null } },
+                      ],
+                    },
+                  ],
                 },
               },
             ],
@@ -563,6 +588,23 @@ export const crmService = {
       : null;
     const portalCredentials = serializePortalCredentials(customer, extras.auth);
 
+    const extrasCounts = await prisma.crmCustomer.findFirst({
+      where: { id },
+      select: {
+        _count: {
+          select: {
+            invoices: true,
+            payments: true,
+          },
+        },
+        payments: {
+          where: { verification: "VERIFIED" },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+
     return withCrmView(
       {
         ...customer,
@@ -575,9 +617,9 @@ export const crmService = {
       extras.auth,
       {
         hasProject: customer.projects.length > 0,
-        hasInvoice: customer.invoices.length > 0,
-        hasPayment: payments.length > 0,
-        hasVerifiedPayment: payments.some((p) => p.verification === "VERIFIED"),
+        hasInvoice: Boolean(extrasCounts?._count?.invoices),
+        hasPayment: Boolean(extrasCounts?._count?.payments),
+        hasVerifiedPayment: Boolean(extrasCounts?.payments?.length),
       },
     );
   },
@@ -1058,6 +1100,7 @@ export const crmService = {
       where: { id: customerId, deletedAt: null },
     });
     if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
+    assertSalesCustomerAccess(customer, auth);
     if (isClosedStage(customer.pipelineStage)) {
       throw new AppError(
         "برای سرنخ لغوشده نمی‌توان فاکتور صادر کرد",
@@ -1084,62 +1127,102 @@ export const crmService = {
     assertPaymentMethodMeta(body.paymentMethod, body.paymentMethodMeta);
 
     const videoCount = Number(body.videoCount);
-    const opportunity = await prisma.$transaction(async (tx) => {
-      const opp = await this.ensureOpenOpportunity(tx, customer);
-      if (!opp.contractLocked) {
-        await tx.opportunity.update({
-          where: { id: opp.id },
-          data: {
-            agreedPrice:
-              opp.agreedPrice != null && Number(opp.agreedPrice) > 0
-                ? opp.agreedPrice
-                : total,
-            agreedTerms:
-              opp.agreedTerms?.trim() ||
-              body.notes?.trim() ||
-              `فاکتور CRM — ${videoCount} ویدیو`,
-          },
-        });
-      } else if (
-        opp.agreedPrice == null ||
-        Number(opp.agreedPrice) <= 0 ||
-        !opp.agreedTerms?.trim()
-      ) {
-        await tx.opportunity.update({
-          where: { id: opp.id },
-          data: {
-            agreedPrice:
-              opp.agreedPrice != null && Number(opp.agreedPrice) > 0
-                ? opp.agreedPrice
-                : total,
-            agreedTerms:
-              opp.agreedTerms?.trim() || `فاکتور CRM — ${videoCount} ویدیو`,
-          },
-        });
-      }
-      return opp;
+    const qty = videoCount > 0 ? videoCount : 1;
+    const unit = qty > 0 ? roundMoney(total / qty) : total;
+    const items =
+      Array.isArray(body.items) && body.items.length
+        ? body.items.map((item) => {
+            const quantity = roundMoney(item.quantity || 1);
+            const unitPrice = roundMoney(item.unitPrice);
+            return {
+              description: item.description,
+              quantity,
+              unitPrice,
+              amount: roundMoney(quantity * unitPrice),
+            };
+          })
+        : [
+            {
+              description: body.description || `تولید ${qty} ویدیو`,
+              quantity: qty,
+              unitPrice: unit,
+              amount: total,
+            },
+          ];
+    const itemsTotal = roundMoney(
+      items.reduce((sum, item) => sum + Number(item.amount), 0),
+    );
+    const invoiceTotal = itemsTotal > 0 ? itemsTotal : total;
+    const paymentMethod = body.paymentMethod || null;
+    const paymentMethodMeta = paymentMethod
+      ? sanitizePaymentMethodMeta(paymentMethod, body.paymentMethodMeta)
+      : undefined;
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      const count = await tx.invoice.count();
+      const invoiceNumber = `INV-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
+
+      const inv = await tx.invoice.create({
+        data: {
+          invoiceNumber,
+          crmCustomerId: customer.id,
+          opportunityId: null,
+          projectId: null,
+          status: "ISSUED",
+          issuedAt: new Date(),
+          dueAt: body.dueAt ? new Date(body.dueAt) : null,
+          subtotal: invoiceTotal,
+          total: invoiceTotal,
+          notes: body.notes || null,
+          videoCount: toPositiveInt(body.videoCount) || toPositiveInt(qty) || null,
+          paymentMethod,
+          paymentMethodMeta,
+          items: { create: items },
+        },
+        include: { items: true },
+      });
+
+      await applyCrmEvent(tx, {
+        customerId: customer.id,
+        opportunityId: null,
+        event: CRM_EVENTS.INVOICE_CREATED,
+        actorId: auth.userId,
+        actorType: "USER",
+        source: "INVOICE",
+        relatedType: "Invoice",
+        relatedId: inv.id,
+        title: "فاکتور ایجاد شد",
+        note: `شماره فاکتور ${invoiceNumber}`,
+        meta: {
+          invoiceNumber,
+          total: invoiceTotal,
+          origin: "CRM_SALES",
+        },
+      });
+
+      return inv;
     });
 
-    const invoice = await this.createInvoice(
-      opportunity.id,
-      {
-        ...body,
-        amount: total,
-        totalAmount: total,
-        videoCount,
-        description: body.description || `تولید ${videoCount} ویدیو`,
+    await writeAudit({
+      userId: auth.userId,
+      action: "INVOICE_CREATE",
+      entityType: "Invoice",
+      entityId: invoice.id,
+      after: {
+        total: invoiceTotal,
+        opportunityId: null,
+        origin: "CRM_SALES",
+        invoiceNumber: invoice.invoiceNumber,
+        crmCustomerId: customer.id,
       },
-      auth,
       req,
-    );
+    });
 
-    let customerConverted = false;
     let paymentId = null;
     if (paidAmount > 0) {
       const paymentResult = await this.recordPayment(
         {
           invoiceId: invoice.id,
-          opportunityId: opportunity.id,
           amount: paidAmount,
           method: body.paymentMethod,
           paymentMethodMeta: body.paymentMethodMeta,
@@ -1148,7 +1231,6 @@ export const crmService = {
         auth,
         req,
       );
-      customerConverted = paymentResult.customerConverted === true;
       paymentId = paymentResult.id || null;
     }
 
@@ -1156,14 +1238,83 @@ export const crmService = {
       where: { id: customerId, deletedAt: null },
       select: { convertedAt: true },
     });
-    customerConverted = Boolean(latest?.convertedAt);
 
     const view = await this.getInvoiceView(invoice.id);
     return {
       ...view,
       customerId,
-      customerConverted,
+      customerConverted: Boolean(latest?.convertedAt),
       paymentId,
+    };
+  },
+
+  async listCustomerInvoices(customerId, auth) {
+    const customer = await prisma.crmCustomer.findFirst({
+      where: { id: customerId, deletedAt: null },
+      select: {
+        id: true,
+        customerCode: true,
+        personName: true,
+        companyName: true,
+        salesOwnerId: true,
+      },
+    });
+    if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
+    assertSalesCustomerAccess(customer, auth);
+
+    const invoices = await prisma.invoice.findMany({
+      where: {
+        crmCustomerId: customerId,
+        opportunityId: null,
+        projectId: null,
+        status: { not: "CANCELED" },
+      },
+      orderBy: [{ issuedAt: "desc" }, { createdAt: "desc" }],
+      include: { items: true },
+    });
+
+    const invoiceIds = invoices.map((inv) => inv.id);
+    const paidByInvoice = new Map();
+    if (invoiceIds.length) {
+      const grouped = await prisma.payment.groupBy({
+        by: ["invoiceId"],
+        where: {
+          invoiceId: { in: invoiceIds },
+          verification: "VERIFIED",
+        },
+        _sum: { amount: true },
+      });
+      for (const row of grouped) {
+        if (!row.invoiceId) continue;
+        paidByInvoice.set(row.invoiceId, roundMoney(row._sum.amount || 0));
+      }
+    }
+
+    const customerSummary = {
+      id: customer.id,
+      customerCode: customer.customerCode,
+      personName: customer.personName,
+      companyName: customer.companyName,
+    };
+
+    return {
+      customer: customerSummary,
+      items: invoices.map((inv) => {
+        const total = roundMoney(inv.total);
+        const paidAmount = paidByInvoice.get(inv.id) || 0;
+        return {
+          ...inv,
+          paymentMethodLabel: formatPaymentMethod(inv.paymentMethod),
+          paymentMethodMetaRows: formatPaymentMethodMetaRows(
+            inv.paymentMethod,
+            inv.paymentMethodMeta,
+          ),
+          paidAmount,
+          remainingAmount: roundMoney(Math.max(0, total - paidAmount)),
+          isCrmInvoice: true,
+          customer: customerSummary,
+        };
+      }),
     };
   },
 
@@ -1330,21 +1481,61 @@ export const crmService = {
     }
     const total = roundMoney(invoice.total);
     const remainingAmount = roundMoney(Math.max(0, total - paidAmount));
+    const isCrmInvoice = !invoice.opportunityId && !invoice.projectId;
+    const latestPayment = await prisma.payment.findFirst({
+      where: { invoiceId: invoice.id },
+      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+      select: { id: true, recordedById: true },
+    });
+    let recordedByName = null;
+    if (latestPayment?.recordedById) {
+      const recorder = await prisma.user.findUnique({
+        where: { id: latestPayment.recordedById },
+        select: { fullName: true },
+      });
+      recordedByName = recorder?.fullName || null;
+    }
+
+    const website = env.webUrl
+      ? String(env.webUrl)
+          .replace(/^https?:\/\//i, "")
+          .replace(/\/$/, "")
+      : null;
 
     return {
       ...invoice,
       paymentMethodLabel: formatPaymentMethod(invoice.paymentMethod),
+      paymentMethodMetaRows: formatPaymentMethodMetaRows(
+        invoice.paymentMethod,
+        invoice.paymentMethodMeta,
+      ),
       paidAmount,
       remainingAmount,
+      isCrmInvoice,
+      paymentId: latestPayment?.id || null,
+      recordedByName,
+      statusLabel: invoiceStatusLabel(invoice.status),
+      company: {
+        name: "APEX SMART MARKETING",
+        phone: env.contactPhone || null,
+        email: env.contactEmail || null,
+        website,
+      },
       customer: {
         id: invoice.crmCustomer.id,
         customerCode: invoice.crmCustomer.customerCode,
         personName: invoice.crmCustomer.personName,
         companyName: invoice.crmCustomer.companyName,
         phone: invoice.crmCustomer.phone || invoice.crmCustomer.whatsappRaw,
+        whatsappRaw: invoice.crmCustomer.whatsappRaw,
         email: invoice.crmCustomer.email,
       },
     };
+  },
+
+  async getInvoiceDocumentHtml(invoiceId) {
+    const invoice = await this.getInvoiceView(invoiceId);
+    return buildInvoiceDocumentHtml(invoice);
   },
 
   async recordPayment(
@@ -1930,10 +2121,9 @@ export const crmService = {
         })
       : null;
 
-    const opportunity =
-      payment.invoice?.opportunity ||
-      payment.crmCustomer.opportunities[0] ||
-      null;
+    const opportunity = payment.invoice
+      ? payment.invoice.opportunity || null
+      : payment.crmCustomer.opportunities[0] || null;
 
     let relatedInvoice = payment.invoice || null;
     if (!relatedInvoice && opportunity?.id) {
@@ -2519,7 +2709,7 @@ export const crmService = {
     auth,
     req,
   ) {
-    await this.getCustomer(customerId);
+    await this.getCustomer(customerId, { auth });
     if (!storageKey || !name)
       throw new AppError("نام و مسیر فایل الزامی است", 400, "VALIDATION");
 
@@ -2543,7 +2733,47 @@ export const crmService = {
       after: { kind: asset.kind, name: asset.name },
       req,
     });
-    return asset;
+
+    const { serializePortalAsset } = await import("../portal/helpers.js");
+    return serializePortalAsset(asset);
+  },
+
+  async listClientAssets(customerId, auth) {
+    await this.getCustomer(customerId, { auth });
+    const { serializePortalAsset } = await import("../portal/helpers.js");
+    const rows = await prisma.clientAsset.findMany({
+      where: { crmCustomerId: customerId, deletedAt: null },
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map((row) => serializePortalAsset(row)).filter(Boolean);
+  },
+
+  async softDeleteClientAsset(customerId, assetId, auth, req) {
+    await this.getCustomer(customerId, { auth });
+    const asset = await prisma.clientAsset.findFirst({
+      where: {
+        id: assetId,
+        crmCustomerId: customerId,
+        deletedAt: null,
+      },
+    });
+    if (!asset) throw new AppError("فایل یافت نشد", 404, "NOT_FOUND");
+
+    const updated = await prisma.clientAsset.update({
+      where: { id: assetId },
+      data: { deletedAt: new Date() },
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: "CLIENT_ASSET_DELETE",
+      entityType: "ClientAsset",
+      entityId: asset.id,
+      before: { kind: asset.kind, name: asset.name },
+      req,
+    });
+
+    return updated;
   },
 
   async softDeleteCustomer(id, auth, req) {

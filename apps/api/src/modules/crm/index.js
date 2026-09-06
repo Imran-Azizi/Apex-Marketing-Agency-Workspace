@@ -258,6 +258,21 @@ router.post(
   },
 );
 
+router.get(
+  "/customers/:id/invoices",
+  requirePermission("crm.view", "finance.view"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await crmService.listCustomerInvoices(req.params.id, req.auth),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.post(
   "/customers/:id/invoices",
   requireCsrf,
@@ -384,6 +399,24 @@ router.get(
   async (req, res, next) => {
     try {
       ok(res, await crmService.getInvoiceView(req.params.id));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
+  "/invoices/:id/document.html",
+  requirePermission("crm.view", "finance.view"),
+  async (req, res, next) => {
+    try {
+      const html = await crmService.getInvoiceDocumentHtml(req.params.id);
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        'inline; filename="apex-invoice.html"',
+      );
+      res.send(html);
     } catch (e) {
       next(e);
     }
@@ -521,10 +554,25 @@ router.post(
   },
 );
 
+router.get(
+  "/customers/:id/assets",
+  requirePermission("crm.view", "projects.create"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await crmService.listClientAssets(req.params.id, req.auth),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.post(
   "/customers/:id/assets",
   requireCsrf,
-  requirePermission("crm.edit"),
+  requirePermission("crm.edit", "projects.create"),
   async (req, res, next) => {
     try {
       created(
@@ -532,6 +580,27 @@ router.post(
         await crmService.createClientAsset(
           req.params.id,
           req.body,
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  "/customers/:id/assets/:assetId",
+  requireCsrf,
+  requirePermission("crm.edit", "projects.create"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await crmService.softDeleteClientAsset(
+          req.params.id,
+          req.params.assetId,
           req.auth,
           req,
         ),

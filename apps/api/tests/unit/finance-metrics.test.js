@@ -19,6 +19,7 @@ import {
 } from '../../src/modules/finance/service.js';
 import {
   projectFinanceMetrics,
+  resolveContractPrice,
   resolvePaymentProjectId,
 } from '../../src/modules/finance/kpis.js';
 
@@ -208,6 +209,48 @@ test('projectFinanceMetrics uses verified payments not cache', () => {
   assert.equal(m.balance, 7000);
   assert.equal(m.directCosts, 3500);
   assert.equal(m.profit, 6500);
+});
+
+test('projectFinanceMetrics falls through zero finalProjectPrice to opportunity', () => {
+  const project = {
+    finance: {
+      finalProjectPrice: 0,
+      agreedPrice: 0,
+      narratorCost: 0,
+      editorCost: 0,
+      otherDirectCosts: 0,
+    },
+    opportunity: { agreedPrice: 25000, currency: 'AFN' },
+  };
+  const m = projectFinanceMetrics(project, [
+    { amount: 5000, verification: 'VERIFIED' },
+  ]);
+  assert.equal(m.finalProjectPrice, 25000);
+  assert.equal(m.received, 5000);
+  assert.equal(m.balance, 20000);
+});
+
+test('projectFinanceMetrics prefers positive finance.agreedPrice over zero final', () => {
+  const project = {
+    finance: {
+      finalProjectPrice: 0,
+      agreedPrice: 18000,
+    },
+    opportunity: { agreedPrice: 99999 },
+  };
+  const m = projectFinanceMetrics(project, []);
+  assert.equal(m.finalProjectPrice, 18000);
+});
+
+test('resolveContractPrice ignores null/NaN and defaults to 0', () => {
+  assert.equal(resolveContractPrice({ finance: null, opportunity: null }), 0);
+  assert.equal(
+    resolveContractPrice({
+      finance: { finalProjectPrice: 'oops', agreedPrice: null },
+      opportunity: { agreedPrice: undefined },
+    }),
+    0,
+  );
 });
 
 test('deriveSettlementStatus maps payment progress to remaining states', () => {

@@ -101,17 +101,16 @@ router.post(
   },
 );
 
-router.patch(
-  '/:projectId/versions/:versionId',
+router.post(
+  '/:projectId/versions/manual',
   requireCsrf,
   requirePermission('content.edit'),
   async (req, res, next) => {
     try {
-      ok(
+      created(
         res,
-        await aiService.updateVersionContent(
+        await aiService.createManualVersion(
           req.params.projectId,
-          req.params.versionId,
           req.body || {},
           req.auth,
           req,

@@ -489,11 +489,13 @@ export const financeService = {
         projectProfit: kpis.projectProfit,
         companyExpenses: kpis.companyExpenses,
         netCompanyProfit: kpis.netCompanyProfit,
+        scopedProjectCount: kpis.scopedProjectCount ?? 0,
         employeeSalaries: {
           payable: salariesPayable,
           paid: salariesPaid,
         },
       },
+      monthly: kpis.monthly || [],
       reconciliation: {
         projectFinanceReceivedCache: kpis.received,
         projectFinalPriceTotal: kpis.totalFinalPrice,

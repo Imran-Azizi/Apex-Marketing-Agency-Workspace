@@ -22,6 +22,7 @@ import {
 import { ModalLoader } from "@/components/loading/section-loader";
 import { ErrorState } from "@/components/loading/error-state";
 import { ApexMark } from "@/components/brand/apex-mark";
+import { BillDocumentFooter } from "@/components/brand/bill-document-footer";
 import type { PaymentReceipt } from "./payment-types";
 
 function formatReceiptAmount(amount: number) {
@@ -176,6 +177,9 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
       ? receipt.payment.methodLabel
       : paymentMethodLabel(receipt.payment.method);
   const recorder = receipt.payment.recordedByName?.trim() || "—";
+  const metaRows = (receipt.payment.methodMetaRows || []).filter(
+    (row) => row?.label && row?.value,
+  );
 
   const rows: Array<{
     label: string;
@@ -201,6 +205,11 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
       emphasize: true,
     },
     { label: "روش پرداخت", value: method },
+    ...metaRows.map((row) => ({
+      label: row.label,
+      value: row.value,
+      ltr: Boolean(row.ltr),
+    })),
     { label: "ثبت‌کننده", value: recorder },
     {
       label: "مبلغ باقی‌مانده",
@@ -232,11 +241,11 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
         </div>
       </header>
 
-      <div className="px-5 pb-5">
+      <div className="px-5 pb-3">
         <div className="overflow-hidden rounded-xl border border-slate-200/90">
           {rows.map((row, index) => (
             <div
-              key={row.label}
+              key={`${row.label}-${index}`}
               className={cn(
                 "flex items-center justify-between gap-3 px-3.5 py-3",
                 index < rows.length - 1 &&
@@ -262,6 +271,12 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
           ))}
         </div>
       </div>
+
+      <BillDocumentFooter
+        phone={receipt.company?.phone}
+        email={receipt.company?.email}
+        website={receipt.company?.website}
+      />
     </article>
   );
 }

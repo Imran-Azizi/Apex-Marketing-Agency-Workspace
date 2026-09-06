@@ -6,6 +6,8 @@ import {
   getRoleSeedPermissions,
   ROLE_DEFAULT_PERMISSIONS,
 } from '../src/services/permissions/catalog.js';
+import { encryptCredential } from '../src/utils/credentialVault.js';
+import { verifyPassword } from '../src/utils/passwords.js';
 
 /**
  * Railway public proxies can drop the first TCP attempt from local networks.
@@ -57,6 +59,33 @@ async function connectWithRetry(attempts = 6) {
 
 const PERMISSIONS = getAllSeedPermissionCodes();
 
+async function loginSecrets(plain) {
+  const passwordHash = await bcrypt.hash(plain, 12);
+  let passwordCipher = null;
+  try {
+    passwordCipher = encryptCredential(plain);
+  } catch {
+    passwordCipher = null;
+  }
+  return { passwordHash, passwordCipher };
+}
+
+async function attachCipherIfDefaultPassword(user, plain) {
+  if (!user || user.passwordCipher) return;
+  try {
+    const matches = await verifyPassword(plain, user.passwordHash);
+    if (!matches) return;
+    const passwordCipher = encryptCredential(plain);
+    if (!passwordCipher) return;
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordCipher },
+    });
+  } catch {
+    /* keep login working if recoverable storage is unavailable */
+  }
+}
+
 const ROLE_PERMS = Object.fromEntries(
   Object.keys(ROLE_DEFAULT_PERMISSIONS).map((code) => [
     code,
@@ -103,24 +132,38 @@ async function main() {
   }
 
   const password = process.env.DEFAULT_MANAGER_PASSWORD || 'ApexManager!2026';
-  const hash = await bcrypt.hash(password, 12);
+  const managerSecrets = await loginSecrets(password);
+  const salesPassword = 'ApexSales!2026';
+  const financePassword = 'ApexFinance!2026';
+  const editorPassword = 'ApexEditor!2026';
+  const narratorPassword = 'ApexNarrator!2026';
+  const salesSecrets = await loginSecrets(salesPassword);
+  const financeSecrets = await loginSecrets(financePassword);
+  const editorSecrets = await loginSecrets(editorPassword);
+  const narratorSecrets = await loginSecrets(narratorPassword);
 
   const manager = await prisma.user.upsert({
     where: { email: process.env.DEFAULT_MANAGER_EMAIL || 'manager@apex.af' },
     create: {
       email: process.env.DEFAULT_MANAGER_EMAIL || 'manager@apex.af',
-      passwordHash: hash,
+      passwordHash: managerSecrets.passwordHash,
+      passwordCipher: managerSecrets.passwordCipher,
       fullName: 'مدیر اپیکس',
       roleId: roleIds.MANAGER,
     },
-    update: { passwordHash: hash, roleId: roleIds.MANAGER },
+    update: {
+      passwordHash: managerSecrets.passwordHash,
+      passwordCipher: managerSecrets.passwordCipher,
+      roleId: roleIds.MANAGER,
+    },
   });
 
   const sales = await prisma.user.upsert({
     where: { email: 'sales@apex.af' },
     create: {
       email: 'sales@apex.af',
-      passwordHash: await bcrypt.hash('ApexSales!2026', 12),
+      passwordHash: salesSecrets.passwordHash,
+      passwordCipher: salesSecrets.passwordCipher,
       fullName: 'کارشناس فروش',
       roleId: roleIds.SALES,
     },
@@ -131,7 +174,8 @@ async function main() {
     where: { email: 'finance@apex.af' },
     create: {
       email: 'finance@apex.af',
-      passwordHash: await bcrypt.hash('ApexFinance!2026', 12),
+      passwordHash: financeSecrets.passwordHash,
+      passwordCipher: financeSecrets.passwordCipher,
       fullName: 'مالی اپیکس',
       roleId: roleIds.FINANCE,
     },
@@ -142,7 +186,8 @@ async function main() {
     where: { email: 'editor@apex.af' },
     create: {
       email: 'editor@apex.af',
-      passwordHash: await bcrypt.hash('ApexEditor!2026', 12),
+      passwordHash: editorSecrets.passwordHash,
+      passwordCipher: editorSecrets.passwordCipher,
       fullName: 'ادیتور نمونه',
       roleId: roleIds.EDITOR,
     },
@@ -153,12 +198,18 @@ async function main() {
     where: { email: 'narrator@apex.af' },
     create: {
       email: 'narrator@apex.af',
-      passwordHash: await bcrypt.hash('ApexNarrator!2026', 12),
+      passwordHash: narratorSecrets.passwordHash,
+      passwordCipher: narratorSecrets.passwordCipher,
       fullName: 'نریتور نمونه',
       roleId: roleIds.NARRATOR,
     },
     update: {},
   });
+
+  await attachCipherIfDefaultPassword(sales, salesPassword);
+  await attachCipherIfDefaultPassword(finance, financePassword);
+  await attachCipherIfDefaultPassword(editorUser, editorPassword);
+  await attachCipherIfDefaultPassword(narratorUser, narratorPassword);
 
   await prisma.teamProfile.upsert({
     where: { userId: manager.id },

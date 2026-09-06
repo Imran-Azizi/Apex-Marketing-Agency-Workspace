@@ -1010,11 +1010,11 @@ export function parseViewedBefore(value) {
 }
 
 /**
- * Recipient-scoped filter for unseen (isRead = false) notifications.
+ * Recipient-scoped filter for unseen (seenAt is null) notifications.
  * When `viewedBefore` is set, notifications created after that instant stay unseen.
  */
 export function unseenWhere(auth, viewedBefore = null) {
-  const where = { ...recipientWhere(auth), isRead: false };
+  const where = { ...recipientWhere(auth), seenAt: null };
   const cutoff =
     viewedBefore instanceof Date ? parseViewedBefore(viewedBefore.toISOString()) : parseViewedBefore(viewedBefore);
   if (cutoff) where.createdAt = { lte: cutoff };

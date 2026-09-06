@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -32,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { CrmCurrencyField } from "@/app/(dashboard)/crm/_components/crm-ui";
 import { crmSalesText } from "./copy";
-import type { CrmCustomer } from "./types";
+import type { CrmCustomer, CrmInvoice } from "./types";
 
 type InvoiceMethod = "HESAB_PAY" | "CASH" | "BANK_TRANSFER";
 type FieldKey =
@@ -59,6 +58,7 @@ interface InvoiceCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   customer: CrmCustomer | null;
+  onCreated?: (payload: { invoice: CrmInvoice; customer: CrmCustomer }) => void;
 }
 
 function parseMoney(value: string): number {
@@ -148,8 +148,8 @@ export function InvoiceCreateDialog({
   open,
   onOpenChange,
   customer,
+  onCreated,
 }: InvoiceCreateDialogProps) {
-  const router = useRouter();
   const queryClient = useQueryClient();
   const [videoCount, setVideoCount] = useState("1");
   const [totalAmount, setTotalAmount] = useState("");
@@ -244,13 +244,7 @@ export function InvoiceCreateDialog({
         throw new InvoiceValidationError(first || crmSalesText("invoiceCreateFailed"));
       }
 
-      return apiPost<{
-        id: string;
-        invoiceNumber?: string;
-        customerConverted?: boolean;
-        customerId?: string;
-        paymentId?: string | null;
-      }>(
+      return apiPost<CrmInvoice>(
         `/crm/customers/${customer.id}/invoices`,
         {
           videoCount: videos,
@@ -268,18 +262,17 @@ export function InvoiceCreateDialog({
         queryClient.invalidateQueries({ queryKey: ["crm-customers"] }),
         queryClient.invalidateQueries({ queryKey: ["crm-dashboard"] }),
         queryClient.invalidateQueries({ queryKey: ["crm-customer", customer?.id] }),
+        queryClient.invalidateQueries({
+          queryKey: ["crm-customer-invoices", customer?.id],
+        }),
       ]);
-      onOpenChange(false);
-
-      const customerId = invoice?.customerId || customer?.id;
-      if (!customerId) return;
-
-      const params = new URLSearchParams();
-      params.set("tab", "history");
-      if (invoice?.paymentId) {
-        params.set("receipt", invoice.paymentId);
+      if (invoice?.id) {
+        queryClient.setQueryData(["crm-invoice", invoice.id], invoice);
       }
-      router.push(`/crm/${customerId}?${params.toString()}`);
+      if (customer) {
+        onCreated?.({ invoice, customer });
+      }
+      onOpenChange(false);
     },
     onError: (err) => {
       if (err instanceof InvoiceValidationError) return;

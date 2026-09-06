@@ -2,6 +2,11 @@ import {
   formatReceiptVideoCount,
   resolveReceiptPaymentMethod,
 } from './receiptDisplay.js';
+import {
+  BILL_BRAND_CSS,
+  buildBillBrandHeaderHtml,
+  buildBillFooterHtml,
+} from './billBranding.js';
 
 /**
  * Shared receipt display helpers (view formatting only — does not change stored values).
@@ -84,6 +89,9 @@ export function buildPaymentReceiptHtml(receipt) {
     invoiceMethod: receipt.invoice?.paymentMethod,
   });
   const recorder = (receipt.payment.recordedByName || '').trim() || '—';
+  const metaRows = Array.isArray(receipt.payment.methodMetaRows)
+    ? receipt.payment.methodMetaRows.filter((row) => row?.label && row?.value)
+    : [];
 
   const rows = [
     { label: 'شماره رسید', value: paymentNo, ltr: true },
@@ -103,6 +111,11 @@ export function buildPaymentReceiptHtml(receipt) {
       emphasize: true,
     },
     { label: 'روش پرداخت', value: methodText },
+    ...metaRows.map((row) => ({
+      label: String(row.label),
+      value: String(row.value),
+      ltr: Boolean(row.ltr),
+    })),
     { label: 'ثبت‌کننده', value: recorder },
     {
       label: 'مبلغ باقی‌مانده',
@@ -172,27 +185,13 @@ export function buildPaymentReceiptHtml(receipt) {
       padding: 20px 18px 14px;
       text-align: center;
     }
-    .brand-mark {
-      width: 40px;
-      height: 40px;
-      margin: 0 auto 6px;
-      border-radius: 10px;
-      border: 1px solid rgba(30,58,95,.2);
-      background: rgba(30,58,95,.06);
-      color: var(--title-bg);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      font-weight: 900;
-      letter-spacing: 0.04em;
-    }
     .brand-sub {
       font-size: 8.5px;
       font-weight: 700;
       letter-spacing: 0.14em;
       color: #94a3b8;
     }
+    ${BILL_BRAND_CSS}
     .title-badge {
       display: inline-flex;
       margin-top: 14px;
@@ -203,7 +202,7 @@ export function buildPaymentReceiptHtml(receipt) {
       font-size: 13px;
       font-weight: 800;
     }
-    .body { padding: 8px 14px 18px; }
+    .body { padding: 8px 14px 10px; }
     .card {
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -268,14 +267,11 @@ export function buildPaymentReceiptHtml(receipt) {
 <body>
   <div class="page">
     <article class="receipt-sheet" data-payment-id="${esc(receipt.payment.id || '')}">
-      <header class="header">
-        <div class="brand-mark" aria-hidden="true">AP</div>
-        <div class="brand-sub">APEX SMART MARKETING</div>
-        <div class="title-badge">رسید پرداخت</div>
-      </header>
+      ${buildBillBrandHeaderHtml({ titleBadge: 'رسید پرداخت' })}
       <div class="body">
         <div class="card">${rowsHtml}</div>
       </div>
+      ${buildBillFooterHtml(receipt.company || {})}
     </article>
   </div>
   <script>

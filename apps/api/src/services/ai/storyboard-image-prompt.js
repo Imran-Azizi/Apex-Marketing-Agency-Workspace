@@ -1,6 +1,6 @@
 /**
  * Builds scene-first, project-aware prompts for storyboard still-image generation.
- * Scene action / shot type lead the prompt so image models cannot ignore them.
+ * Exact scene description leads; brand/scenario/narration ground the frame.
  */
 
 import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
@@ -14,7 +14,22 @@ const QUALITY_SUFFIX =
 const COLLAGE_QUALITY_SUFFIX =
   'Photoreal commercial frames inside a professional cinematic storyboard sheet, matching color grade, lens language, wardrobe, and lighting across every panel, clean equal gutters, dark slate mount, no messy photo dump, no overlapping panels, no watermark, no unreadable in-world text.';
 
+/**
+ * Persian → English domain hints.
+ * IMPORTANT: do not map bare "انرژی" to energy-drink — that breaks electric-energy projects.
+ */
 const FA_EN_HINTS = [
+  [/انرژی الکتریکی|برق شهری|شبکه برق|الکتریکی|electrical energy|electric energy/gi, 'electric energy electrical power grid'],
+  [/انرژی خورشیدی|پنل خورشیدی|خورشیدی|solar panel|solar energy/gi, 'solar energy solar panels'],
+  [/انرژی تجدیدپذیر|تجدیدپذیر|renewable/gi, 'renewable energy'],
+  [/هوشمند سافت|نرم[\s\-‌]?افزار|سافت[\s\-‌]?ویر|software|saas/gi, 'smart software digital product'],
+  [/هوشمند|smart system|iot/gi, 'smart intelligent technology'],
+  [/برق|power line|transformer|کابل برق/gi, 'electricity power lines electrical infrastructure'],
+  [/مصرف برق|قبض برق|هزینه انرژی|energy bill/gi, 'electricity consumption energy bill'],
+  [/خانه هوشمند|smart home/gi, 'smart home living space'],
+  [/کارخانه|فابریکه|industrial plant/gi, 'factory industrial plant'],
+  [/محصول دیجیتال|اپلیکیشن|اپ|dashboard|داشبورد/gi, 'digital product app dashboard interface'],
+  [/نوشابه|نوشیدنی انرژی[\s\-‌]?زا|energy drink/gi, 'energy drink product can'],
   [/سرک|جاده|راه/g, 'road'],
   [/خراب|تخریب|چاله|ویران/g, 'damaged potholed broken'],
   [/ترافیک|ترافیکی/g, 'traffic congestion'],
@@ -24,17 +39,25 @@ const FA_EN_HINTS = [
   [/مسطح|صاف|آسفالت/g, 'smooth newly paved asphalt'],
   [/تماس|شماره تماس|تلفن/g, 'phone number contact call-to-action'],
   [/لوگو|نشان/g, 'company logo'],
-  [/کارخانه|فابریکه/g, 'factory'],
-  [/محصول|نوشیدنی/g, 'product'],
-  [/دفتر|محل کار/g, 'office workplace'],
+  [/محصول(?!\s*دیجیتال)|نوشیدنی(?!\s*انرژی)/g, 'product'],
+  [/دفتر کار|محل کار|اداره/g, 'office workplace'],
   [/ورزش|تحرک/g, 'exercise activity'],
   [/خستگی/g, 'fatigue tired worker'],
-  [/نظرات|مشتری/g, 'customer interview testimonial'],
+  [/نظرات|مشتری|مصاحبه/g, 'customer interview testimonial'],
   [/ماشین آلات|رولر|غلتک/g, 'heavy construction machinery steamroller paver'],
-  [/دعوت به اقدام|اقدام/g, 'call to action company branding'],
-  [/نوشابه|انرژی|energy drink/gi, 'energy drink product can'],
+  [/دعوت به اقدام|اقدام به تماس/g, 'call to action company branding'],
   [/برند|brand/gi, 'brand identity'],
+  [/خانواده|پدر|مادر|فرزند/g, 'family at home'],
+  [/مهندس|تکنسین|متخصص/g, 'engineer technician specialist'],
+  [/نمایشگر|مانیتور|صفحه نمایش|صفحه/g, 'display screen monitor'],
+  [/شهر|خیابان|محله/g, 'city street neighborhood'],
+  [/(?:^|[^\u0600-\u06FF])شب(?:[^\u0600-\u06FF]|$)|تاریک|نورپردازی|شبانه/g, 'night lighting atmosphere'],
+  [/روز|آفتاب|صبح|نور طبیعی/g, 'daytime sunlight'],
 ];
+
+/** Generic portrait / unrelated traps that must not dominate commercial scenes. */
+const GENERIC_TRAP_RE =
+  /\bfashion portrait\b|\bheadshot\b|\bglamour\b|\bmodel posing\b|\bcinematic portrait of a (?:woman|man|person)\b|\bdark moody (?:office )?portrait\b/i;
 
 function toAscii(text) {
   return str(text)
@@ -44,10 +67,31 @@ function toAscii(text) {
     .trim();
 }
 
+/** Translate Persian commercial copy into English keywords + keep existing Latin text. */
+export function localizeVisualText(text) {
+  const src = str(text);
+  if (!src) return '';
+  const hints = persianHints(src);
+  const ascii = toAscii(src);
+  if (hints && ascii) return `${hints}. ${ascii}`.trim();
+  if (hints) return hints;
+  return ascii;
+}
+
 function expandConcreteSubject(hints, blob, brand = {}) {
   const product = toAscii(brand.productName || brand.productDescription);
-  const h = `${hints} ${blob} ${product}`.toLowerCase();
+  const service = toAscii(brand.service);
+  const h = `${hints} ${blob} ${product} ${service}`.toLowerCase();
 
+  if (/electric energy|electrical power|electricity power|power grid/.test(h)) {
+    return `electric energy / smart power visuals for ${product || service || 'the electric energy brand'}, infrastructure, meters, or clean power technology matching THIS scene`;
+  }
+  if (/solar energy|solar panel/.test(h)) {
+    return `solar energy installation and panels for ${product || 'the solar brand'}, matching THIS scene`;
+  }
+  if (/smart software|digital product|app dashboard|smart intelligent/.test(h)) {
+    return `smart software / digital energy product experience for ${product || 'the software brand'}, UI or real-world usage matching THIS scene`;
+  }
   if (/pothole|damaged|broken/.test(h) && /road/.test(h)) {
     return 'a badly damaged city asphalt road full of potholes and cracks, cars crawling slowly through traffic, documentary commercial frame';
   }
@@ -60,14 +104,11 @@ function expandConcreteSubject(hints, blob, brand = {}) {
   if (/call to action|logo|branding|contact/.test(h) && /road|construction|civil/.test(h)) {
     return 'a premium civil-engineering company exterior or branded roadside sign at dusk, cinematic commercial still, no fake readable text';
   }
-  if (/energy drink|beverage|drink can|product can/.test(h) || (/product/.test(h) && product)) {
-    return `hero product shot of ${product || 'the branded product'} in a premium advertising setting that matches this scene`;
+  if (/energy drink|beverage|drink can|product can/.test(h)) {
+    return `hero product shot of ${product || 'the branded energy drink'} in a premium advertising setting that matches this scene`;
   }
-  if (/factory/.test(h)) {
+  if (/factory|industrial plant/.test(h)) {
     return 'a clean industrial factory floor with real equipment and workers, premium corporate film still';
-  }
-  if (/office|workplace|fatigue/.test(h)) {
-    return 'a realistic office workplace matching the scene action, premium commercial still';
   }
   if (/road/.test(h) && /construction|civil/.test(h)) {
     return 'civil road construction on an urban street, engineering vehicles and fresh asphalt, cinematic commercial photography';
@@ -75,8 +116,10 @@ function expandConcreteSubject(hints, blob, brand = {}) {
 
   const ascii = toAscii(blob);
   if (product && ascii) return `${product}, ${ascii}`;
+  if (service && ascii) return `${service}, ${ascii}`;
   if (hints && ascii) return `${hints}, ${ascii}`;
   if (product) return product;
+  if (service) return service;
   if (hints) return hints;
   if (ascii) return ascii;
   return '';
@@ -85,6 +128,7 @@ function expandConcreteSubject(hints, blob, brand = {}) {
 export function buildProductionBible(brand = {}, scenario = {}, styleGuide = '') {
   const identity = [
     toAscii(brand.productName),
+    toAscii(brand.service),
     toAscii(brand.customerName),
     toAscii(brand.projectTitle),
     toAscii(scenario.concept),
@@ -93,11 +137,11 @@ export function buildProductionBible(brand = {}, scenario = {}, styleGuide = '')
     toAscii(styleGuide),
   ]
     .filter(Boolean)
-    .slice(0, 5);
+    .slice(0, 6);
   if (!identity.length) {
-    return 'Same premium commercial production across frames: consistent color grade, lens, and lighting.';
+    return 'Same premium commercial production across frames: consistent color grade, lens, wardrobe, locations, and lighting.';
   }
-  return `Same premium commercial production throughout: ${identity.join('; ')}. Consistent color grade, lens language, and lighting.`;
+  return `Same premium commercial production throughout: ${identity.join('; ')}. Consistent characters, product look, locations language, color grade, lens, and lighting across related scenes.`;
 }
 
 function str(v) {
@@ -131,7 +175,8 @@ function briefFeatures(brief) {
 }
 
 function isWrapperPrompt(text) {
-  return /Ultra-sharp professional|Avoid: blurry|Storyboard frame \d+ of|Photorealistic 16:9 cinematic production still|Premium commercial cinematography still|WIDE ESTABLISHING SHOT|Same premium commercial production/i.test(
+  // Detect prompts we already composed — not legitimate LLM shot leads like "Wide establishing shot of…"
+  return /Ultra-sharp professional|Avoid: blurry|Storyboard frame \d+ of|Photorealistic 16:9 cinematic production still|Premium commercial cinematography still|Same premium commercial production throughout|ONE full-frame 16:9 cinema still|MUST SHOW:|MUST NOT SHOW:|REGENERATION: previous output/i.test(
     str(text),
   );
 }
@@ -141,6 +186,7 @@ function persianHints(text) {
   if (!src) return '';
   const hits = [];
   for (const [re, en] of FA_EN_HINTS) {
+    re.lastIndex = 0;
     if (re.test(src)) hits.push(en);
   }
   return [...new Set(hits)].join(', ');
@@ -166,7 +212,7 @@ export function resolveShotType(scene = {}) {
     return {
       key: 'close-up',
       instruction:
-        'CLOSE-UP: fill the frame with the exact subject of this scene (the object, product, sign, road detail, or person named below). Tight framing on that subject only.',
+        'CLOSE-UP: fill the frame with the exact subject of this scene (the object, product, sign, interface, or person named below). Tight framing on that subject only.',
     };
   }
 
@@ -198,7 +244,7 @@ export function resolveShotType(scene = {}) {
 }
 
 function sceneMentionsPerson(scene, extra = '') {
-  return /person|man|woman|worker|driver|character|people|crowd|مرد|زن|کارگر|راننده|شخص|افراد|چهره/i.test(
+  return /person|man|woman|worker|driver|character|people|crowd|engineer|technician|customer|family|مرد|زن|کارگر|راننده|شخص|افراد|چهره|مهندس|تکنسین|مشتری|خانواده/i.test(
     [
       scene.title,
       scene.visualDescription,
@@ -319,21 +365,119 @@ function scenarioBeatForScene(scenarioCtx, sceneIndex) {
 function originalLlmPrompt(scene) {
   const raw = str(scene.imagePrompt || scene.image_prompt);
   if (!raw || isWrapperPrompt(raw)) return '';
-  return clip(raw, 500);
+  return clip(raw, 520);
 }
 
-export function validateImagePrompt(prompt, scene = {}) {
+/** Collect grounding tokens from project + scene for validation. */
+export function collectGroundingTokens({
+  scene = {},
+  projectContext = {},
+  scenarioContext = {},
+  narrationContext = '',
+} = {}) {
+  const brand = projectContext || {};
+  const scenario = scenarioContext || {};
+  const parts = [
+    brand.productName,
+    brand.productDescription,
+    brand.projectTitle,
+    brand.service,
+    brand.mainMessage,
+    brand.audience,
+    scenario.concept,
+    scenario.hook,
+    scenario.problem,
+    scenario.solution,
+    scene.title,
+    scene.visualDescription || scene.visual || scene.description,
+    scene.characterActions || scene.action,
+    scene.environment,
+    scene.lighting,
+    scene.visualDirection,
+    narrationContext,
+  ]
+    .map((v) => localizeVisualText(v) || toAscii(v))
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  const stop = new Set([
+    'the',
+    'and',
+    'with',
+    'from',
+    'this',
+    'that',
+    'into',
+    'onto',
+    'over',
+    'under',
+    'scene',
+    'shot',
+    'camera',
+    'frame',
+    'video',
+    'commercial',
+    'cinematic',
+    'premium',
+    'still',
+    'image',
+    'show',
+    'must',
+    'only',
+  ]);
+
+  const tokens = parts
+    .replace(/[^a-z0-9\s\-]/g, ' ')
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 4 && !stop.has(t));
+
+  return [...new Set(tokens)].slice(0, 24);
+}
+
+export function validateImagePrompt(prompt, scene = {}, context = {}) {
   const text = str(prompt);
   if (text.length < 36) {
-    return { ok: false, error: 'پرامپت تصویر برای این صحنه کافی نیست' };
+    return { ok: false, error: 'پرامپت تصویر برای این صحنه کافی نیست', grounded: false };
   }
+
   const visual = str(
     scene.visualDescription || scene.visual || scene.title || scene.environment,
   );
   if (!visual && text.length < 80) {
-    return { ok: false, error: 'جزئیات صحنه برای تولید تصویر کافی نیست' };
+    return { ok: false, error: 'جزئیات صحنه برای تولید تصویر کافی نیست', grounded: false };
   }
-  return { ok: true };
+
+  if (GENERIC_TRAP_RE.test(text) && !sceneMentionsPerson(scene)) {
+    return {
+      ok: false,
+      error: 'پرامپت به پرترهٔ عمومی منحرف شده و با صحنه هم‌خوان نیست',
+      grounded: false,
+    };
+  }
+
+  const tokens = collectGroundingTokens({
+    scene,
+    projectContext: context.projectContext,
+    scenarioContext: context.scenarioContext,
+    narrationContext: context.narrationContext,
+  });
+  if (tokens.length >= 3) {
+    const lower = text.toLowerCase();
+    const hits = tokens.filter((t) => lower.includes(t)).length;
+    const ratio = hits / Math.min(tokens.length, 8);
+    if (hits < 2 && ratio < 0.25) {
+      return {
+        ok: false,
+        error: 'پرامپت تصویر به محتوای پروژه و صحنه متصل نیست',
+        grounded: false,
+      };
+    }
+    return { ok: true, grounded: hits >= 2, groundingHits: hits };
+  }
+
+  return { ok: true, grounded: true };
 }
 
 export function validateCollagePrompt(prompt, sceneCount = 1) {
@@ -370,9 +514,11 @@ function compactPanelLine(scene, ctx, sceneIndex, totalScenes) {
   const brand = ctx.projectContext || {};
   const sceneNo = Number(scene.sceneNumber ?? scene.scene_number ?? sceneIndex + 1);
   const shot = resolveShotType(scene);
-  const visual = str(scene.visualDescription || scene.visual || scene.description);
-  const action = str(scene.characterActions || scene.action || scene.motion);
-  const environment = str(scene.environment);
+  const visual = localizeVisualText(
+    scene.visualDescription || scene.visual || scene.description,
+  );
+  const action = localizeVisualText(scene.characterActions || scene.action || scene.motion);
+  const environment = localizeVisualText(scene.environment);
   const blob = [
     scene.title,
     visual,
@@ -380,25 +526,26 @@ function compactPanelLine(scene, ctx, sceneIndex, totalScenes) {
     environment,
     brand.productName,
     brand.projectTitle,
+    brand.service,
   ]
     .filter(Boolean)
     .join(' ');
   const hints = persianHints(blob);
   const subject =
     expandConcreteSubject(hints, blob, brand) ||
-    toAscii(visual) ||
-    toAscii(environment) ||
-    toAscii(action) ||
+    visual ||
+    environment ||
+    action ||
     toAscii(scene.title) ||
     `the exact subject of scene ${sceneNo}`;
-  const lighting = toAscii(scene.lighting || scene.visualDirection);
-  const narrationHint = toAscii(
+  const lighting = localizeVisualText(scene.lighting || scene.visualDirection);
+  const narrationHint = localizeVisualText(
     extractSceneNarrationHint(ctx.narration, sceneIndex, totalScenes),
   );
   return [
     `Panel ${sceneNo} (${shot.key}): ${clip(subject, 160)}`,
-    toAscii(environment) ? `location ${clip(toAscii(environment), 70)}` : null,
-    toAscii(action) ? `action ${clip(toAscii(action), 80)}` : null,
+    environment ? `location ${clip(environment, 70)}` : null,
+    action ? `action ${clip(action, 80)}` : null,
     lighting ? `light ${clip(lighting, 60)}` : null,
     narrationHint ? `beat ${clip(narrationHint, 60)}` : null,
   ]
@@ -443,6 +590,7 @@ export function buildCollageImagePrompt(
     toAscii(brand.productName)
       ? `Brand/product: ${toAscii(brand.productName)}.`
       : null,
+    toAscii(brand.service) ? `Service: ${toAscii(brand.service)}.` : null,
     toAscii(brand.projectTitle)
       ? `Project: ${clip(toAscii(brand.projectTitle), 80)}.`
       : null,
@@ -459,6 +607,123 @@ export function buildCollageImagePrompt(
   return clip(toAscii(prompt) || prompt, 1800);
 }
 
+function resolveSceneSubject(scene, { brand, scenario, narrationContext, beat, llmPrompt }) {
+  const visualFa = str(scene.visualDescription || scene.visual || scene.description);
+  const actionFa = str(scene.characterActions || scene.action || scene.motion);
+  const environmentFa = str(scene.environment);
+  const visualEn = localizeVisualText(visualFa);
+  const actionEn = localizeVisualText(actionFa);
+  const environmentEn = localizeVisualText(environmentFa);
+  const llmEn = toAscii(llmPrompt);
+
+  const blob = [
+    scene.title,
+    visualFa,
+    actionFa,
+    environmentFa,
+    beat,
+    brand.projectTitle,
+    brand.productName,
+    brand.productDescription,
+    brand.service,
+    scenario.concept,
+    narrationContext,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const hints = persianHints(blob);
+  const domainHint = expandConcreteSubject(hints, blob, brand);
+
+  // Prefer exact scene description (LLM English prompt or localized visual) over templates.
+  if (llmEn && llmEn.length >= 40 && !GENERIC_TRAP_RE.test(llmEn)) {
+    return {
+      subject: llmEn,
+      visualEn,
+      actionEn,
+      environmentEn,
+      hints,
+      domainHint,
+      source: 'llm',
+    };
+  }
+
+  if (visualEn && visualEn.length >= 12) {
+    return {
+      subject: domainHint ? `${visualEn} (${domainHint})` : visualEn,
+      visualEn,
+      actionEn,
+      environmentEn,
+      hints,
+      domainHint,
+      source: 'visual',
+    };
+  }
+
+  if (domainHint) {
+    return {
+      subject: domainHint,
+      visualEn,
+      actionEn,
+      environmentEn,
+      hints,
+      domainHint,
+      source: 'domain',
+    };
+  }
+
+  const fallback =
+    environmentEn ||
+    actionEn ||
+    toAscii(brand.productName) ||
+    toAscii(brand.service) ||
+    toAscii(brand.projectTitle) ||
+    'the exact subject of this commercial storyboard scene';
+
+  return {
+    subject: fallback,
+    visualEn,
+    actionEn,
+    environmentEn,
+    hints,
+    domainHint,
+    source: 'fallback',
+  };
+}
+
+function buildMustShowMustNot({
+  scene,
+  brand,
+  scenario,
+  subject,
+  allowPerson,
+  shot,
+}) {
+  const mustShow = [
+    toAscii(brand.productName),
+    toAscii(brand.service),
+    localizeVisualText(scene.visualDescription || scene.visual || scene.description),
+    localizeVisualText(scene.characterActions || scene.action),
+    localizeVisualText(scene.environment),
+  ]
+    .filter(Boolean)
+    .slice(0, 4);
+
+  const mustNot = [
+    'no unrelated story',
+    'no generic dark office portrait unless this scene requires it',
+    'no fashion headshot',
+    'no sci-fi/anime',
+    'no multi-panel grid or other scenes',
+    !allowPerson ? 'no random face filling the frame' : null,
+    shot.key === 'wide' ? 'no close-up face crop' : null,
+    /electric|solar|power|software|smart/i.test(`${subject} ${brand.productName} ${brand.service}`)
+      ? 'no beverage can, unrelated construction, or fashion shoot'
+      : null,
+  ].filter(Boolean);
+
+  return { mustShow, mustNot };
+}
+
 /**
  * English-only visual prompt. Image models ignore Persian and then fall back
  * to a generic cinematic portrait — so never send non-ASCII scene text.
@@ -473,46 +738,28 @@ export function buildSceneImagePrompt(
     narrationContext,
     sceneIndex = 0,
     totalScenes = 1,
+    reinforce = false,
   } = {},
 ) {
   const brand = projectContext || {};
   const scenario = scenarioContext || {};
   const shot = resolveShotType(scene);
-  const visual = str(scene.visualDescription || scene.visual || scene.description);
-  const action = str(scene.characterActions || scene.action || scene.motion);
-  const environment = str(scene.environment);
-  const lighting = toAscii(scene.lighting) || toAscii(scene.visualDirection);
-  const mood = toAscii(scene.visualDirection);
-  const camera = toAscii(scene.camera || scene.cameraAngle);
-  const beat = scenarioBeatForScene(scenario, sceneIndex);
-  const llmPrompt = toAscii(originalLlmPrompt(scene));
+  const lighting = localizeVisualText(scene.lighting) || localizeVisualText(scene.visualDirection);
+  const mood = localizeVisualText(scene.visualDirection);
+  const camera = localizeVisualText(scene.camera || scene.cameraAngle);
+  const beat = localizeVisualText(scenarioBeatForScene(scenario, sceneIndex));
+  const llmPrompt = originalLlmPrompt(scene);
   const sceneNo = Number(scene.sceneNumber ?? scene.scene_number ?? sceneIndex + 1);
+  const narrationEn = localizeVisualText(narrationContext);
 
-  const blob = [
-    scene.title,
-    visual,
-    action,
-    environment,
-    beat,
-    brand.projectTitle,
-    brand.productName,
-    brand.productDescription,
-    scenario.concept,
+  const resolved = resolveSceneSubject(scene, {
+    brand,
+    scenario,
     narrationContext,
-    customPrompt,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  const hints = persianHints(blob);
-  const subject =
-    expandConcreteSubject(hints, blob, brand) ||
-    llmPrompt ||
-    toAscii(visual) ||
-    toAscii(environment) ||
-    toAscii(action) ||
-    toAscii(brand.productName) ||
-    toAscii(brand.projectTitle) ||
-    'the exact subject of this commercial storyboard scene';
+    beat,
+    llmPrompt,
+  });
+  const { subject, visualEn, actionEn, environmentEn } = resolved;
 
   const shotLead =
     shot.key === 'wide'
@@ -524,34 +771,126 @@ export function buildSceneImagePrompt(
           : 'Photoreal 16:9 commercial still of';
 
   const allowPerson =
-    shot.key === 'close-up' && sceneMentionsPerson(scene, `${hints} ${subject}`);
+    sceneMentionsPerson(scene, `${resolved.hints} ${subject}`) &&
+    (shot.key === 'close-up' || shot.key === 'medium' || /interview|testimonial|customer|family/i.test(subject));
 
   const bible = buildProductionBible(brand, scenario, styleGuide);
+  const { mustShow, mustNot } = buildMustShowMustNot({
+    scene,
+    brand,
+    scenario,
+    subject,
+    allowPerson,
+    shot,
+  });
 
+  // Brand + scene constraints stay early so clip() cannot drop them.
   const prompt = [
     `${shotLead} ${subject}.`,
+    shot.instruction,
+    visualEn ? `Exact scene description (priority): ${clip(visualEn, 140)}.` : null,
+    toAscii(brand.projectTitle) ? `Project: ${clip(toAscii(brand.projectTitle), 70)}.` : null,
+    toAscii(brand.productName) ? `Brand/product: ${toAscii(brand.productName)}.` : null,
+    toAscii(brand.service) ? `Service: ${clip(toAscii(brand.service), 60)}.` : null,
+    toAscii(brand.audience) ? `Target audience: ${clip(toAscii(brand.audience), 60)}.` : null,
+    toAscii(brand.mainMessage)
+      ? `Marketing objective: ${clip(toAscii(brand.mainMessage), 80)}.`
+      : null,
+    toAscii(scenario.concept) ? `Campaign concept: ${clip(toAscii(scenario.concept), 80)}.` : null,
+    reinforce
+      ? 'REGENERATION: previous output was unrelated. Obey the exact scene description and brand/product above with zero creative substitution.'
+      : null,
+    mustShow.length ? `MUST SHOW: ${clip(mustShow.join('; '), 160)}.` : null,
+    `MUST NOT SHOW: ${mustNot.join('; ')}.`,
     camera ? `Camera: ${camera}.` : null,
     lighting ? `Light: ${lighting}.` : mood ? `Mood: ${mood}.` : null,
-    toAscii(environment) ? `Location: ${toAscii(environment)}.` : null,
-    toAscii(action) ? `Action: ${toAscii(action)}.` : null,
-    toAscii(narrationContext)
-      ? `Narration beat: ${clip(toAscii(narrationContext), 120)}.`
-      : null,
-    toAscii(brand.productName) ? `Brand/product: ${toAscii(brand.productName)}.` : null,
-    toAscii(brand.mainMessage) ? `Campaign message: ${clip(toAscii(brand.mainMessage), 90)}.` : null,
+    environmentEn ? `Location: ${clip(environmentEn, 80)}.` : null,
+    actionEn ? `Action: ${clip(actionEn, 80)}.` : null,
+    narrationEn ? `Narration beat: ${clip(narrationEn, 80)}.` : null,
+    beat ? `Scenario beat: ${clip(beat, 70)}.` : null,
     bible,
-    `Unique storyboard frame ${sceneNo} of ${totalScenes}.`,
-    'ONE full-frame 16:9 cinema still of THIS scene only. Do not draw a grid, comic page, storyboard sheet, filmstrip, or any other scene.',
+    `Unique storyboard frame ${sceneNo} of ${totalScenes} — same cast, product, and look as related scenes.`,
+    'ONE full-frame 16:9 cinema still of THIS scene only.',
     allowPerson
-      ? 'Person must match the role in this scene, realistic documentary, not a fashion model.'
-      : 'No portrait, no woman close-up, no sci-fi character, no random face. Show the location and action of THIS scene only.',
-    str(customPrompt) ? `Revision: ${clip(toAscii(customPrompt) || customPrompt, 160)}.` : null,
+      ? 'Any person must match the role in this scene, realistic documentary casting, not a fashion model.'
+      : 'No portrait, no random face. Show the location and action of THIS scene only.',
+    str(customPrompt) ? `Revision: ${clip(toAscii(customPrompt) || customPrompt, 120)}.` : null,
     QUALITY_SUFFIX,
   ]
     .filter(Boolean)
     .join(' ');
 
-  return clip(toAscii(prompt) || prompt, 900);
+  return clip(toAscii(prompt) || prompt, reinforce ? 1250 : 1150);
+}
+
+/** Stricter prompt used when the first still fails relevance checks. */
+export function buildReinforcedSceneImagePrompt(scene, options = {}) {
+  return buildSceneImagePrompt(scene, { ...options, reinforce: true });
+}
+
+/**
+ * Text-only relevance score for a generated still description / prompt pair.
+ * Used when vision scoring is unavailable.
+ */
+export function scorePromptRelevance(prompt, scene = {}, context = {}) {
+  const check = validateImagePrompt(prompt, scene, context);
+  const tokens = collectGroundingTokens({
+    scene,
+    projectContext: context.projectContext,
+    scenarioContext: context.scenarioContext,
+    narrationContext: context.narrationContext,
+  });
+  const lower = str(prompt).toLowerCase();
+  const brand = context.projectContext || {};
+  const brandHit = [brand.productName, brand.service, brand.projectTitle]
+    .map((v) => toAscii(v).toLowerCase())
+    .filter((v) => v.length >= 4)
+    .some((v) => lower.includes(v));
+
+  if (!tokens.length) {
+    return {
+      relevant: check.ok !== false || brandHit,
+      score: brandHit ? 0.7 : 0.55,
+      reason: brandHit ? 'brand grounded' : 'no tokens',
+    };
+  }
+
+  const hits = tokens.filter((t) => lower.includes(t)).length;
+  const score = Math.min(1, (hits + (brandHit ? 2 : 0)) / Math.min(6, tokens.length));
+  const relevant =
+    brandHit ||
+    hits >= 2 ||
+    score >= 0.34 ||
+    (check.ok && check.grounded !== false);
+
+  return {
+    relevant,
+    score,
+    reason: !relevant
+      ? check.error || 'weak grounding'
+      : brandHit
+        ? 'brand grounded'
+        : hits >= 2
+          ? 'grounded'
+          : 'acceptable',
+    hits,
+  };
+}
+
+/** Build a short English scene summary for vision relevance checks. */
+export function buildSceneRelevanceSummary(scene, context = {}) {
+  const brand = context.projectContext || {};
+  const parts = [
+    toAscii(brand.projectTitle),
+    toAscii(brand.productName),
+    toAscii(brand.service),
+    localizeVisualText(scene.title),
+    localizeVisualText(scene.visualDescription || scene.visual || scene.description),
+    localizeVisualText(scene.characterActions || scene.action),
+    localizeVisualText(scene.environment),
+    localizeVisualText(context.narrationContext),
+  ].filter(Boolean);
+  return clip(parts.join('. '), 400);
 }
 
 /** Stable per-scene seed for distinct generations. */

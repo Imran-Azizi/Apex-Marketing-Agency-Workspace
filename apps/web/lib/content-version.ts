@@ -31,27 +31,13 @@ export function canSendVersionToCustomer(version: ContentVersionLike | null | un
   return true;
 }
 
-export function canEditContentVersion(version: ContentVersionLike | null | undefined) {
-  if (!version) return false;
-  if (version.status === "APPROVED") return false;
-  if (
-    version.status === "PENDING_CUSTOMER_APPROVAL" &&
-    version.publishedToClient
-  ) {
-    return false;
-  }
-  if (version.status === "REVISION_REQUESTED" && version.isLocked) return false;
-  if (version.isLocked && version.publishedToClient) return false;
-  return true;
-}
-
 export function versionSendBlockReason(
   version: ContentVersionLike | null | undefined,
 ): string | null {
   if (!version) return "نسخه‌ای انتخاب نشده است.";
   if (!versionHasContent(version)) return "این نسخه محتوای قابل ارسال ندارد.";
   if (version.status === "APPROVED" && version.isLocked) {
-    return "این نسخه قبلاً توسط مشتری تأیید شده است.";
+    return "این نسخه قبلاً تأیید شده است و نیازی به ارسال برای مشتری ندارد.";
   }
   if (
     version.status === "PENDING_CUSTOMER_APPROVAL" &&

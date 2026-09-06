@@ -160,6 +160,10 @@ type ClientAssetsUploaderProps = {
   onRefresh: () => void;
   /** Notifies parent when uploads start/finish/fail so submit can be gated. */
   onUploadStateChange?: (state: AssetUploadState) => void;
+  /** API path for creating assets. Defaults to portal. */
+  createPath?: string;
+  /** API path builder for deleting an asset. Defaults to portal. */
+  deletePath?: (id: string) => string;
 };
 
 function kindIcon(kind: string, mime?: string | null) {
@@ -419,6 +423,8 @@ export function ClientAssetsUploader({
   onSelectedChange,
   onRefresh,
   onUploadStateChange,
+  createPath = "/portal/assets",
+  deletePath = (id: string) => `/portal/assets/${id}`,
 }: ClientAssetsUploaderProps) {
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [localPreviews, setLocalPreviews] = useState<Record<string, string>>(
@@ -504,7 +510,7 @@ export function ClientAssetsUploader({
     sizeBytes?: number;
     meta?: Record<string, unknown>;
   }) {
-    const created = await apiPost<ClientAssetItem>("/portal/assets", payload);
+    const created = await apiPost<ClientAssetItem>(createPath, payload);
     onSelectedChange((prev) => Array.from(new Set([...prev, created.id])));
     onRefresh();
     return created;
@@ -635,7 +641,7 @@ export function ClientAssetsUploader({
   async function removeAsset(id: string) {
     setRemovingId(id);
     try {
-      await apiDelete(`/portal/assets/${id}`);
+      await apiDelete(deletePath(id));
       onSelectedChange((prev) => prev.filter((x) => x !== id));
       onRefresh();
       toast.success("فایل حذف شد");

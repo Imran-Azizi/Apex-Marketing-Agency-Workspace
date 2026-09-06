@@ -48,6 +48,7 @@ export const ROLE_BADGE_VARIANTS: Record<
 export interface Employee {
   id: string;
   email: string;
+  hasPasswordCipher?: boolean;
   fullName: string;
   phone: string | null;
   profileImage: string | null;

@@ -66,6 +66,9 @@ export function ResetPasswordDialog({
     onSuccess: () => {
       toast.success("رمز عبور بازنشانی شد و نشست‌های فعال لغو گردید");
       queryClient.invalidateQueries({ queryKey: ["employees"] });
+      if (employee?.id) {
+        queryClient.invalidateQueries({ queryKey: ["employee", employee.id] });
+      }
       onOpenChange(false);
     },
     onError: (err) => {

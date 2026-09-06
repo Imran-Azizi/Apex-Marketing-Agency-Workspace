@@ -83,6 +83,7 @@ export default function EmployeesPage() {
   const canEdit = useHasPermission("employees.edit");
   const canDisable = useHasPermission("employees.disable");
   const canDelete = useHasPermission("employees.delete");
+  const canViewCredentials = useHasPermission("employees.credentials");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [role, setRole] = useState(ALL);
@@ -230,6 +231,7 @@ export default function EmployeesPage() {
         canEdit={canEdit}
         canDisable={canDisable}
         canDelete={canDelete}
+        canViewCredentials={canViewCredentials}
         onToggleStatus={(emp) => {
           setStatusTarget(emp);
           setStatusOpen(true);

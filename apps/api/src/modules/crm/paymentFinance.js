@@ -240,10 +240,15 @@ export async function syncProjectFinanceFromPayments(db, projectId, { persist = 
     },
     _sum: { amount: true },
   });
-  const finance = computeFinanceSnapshot(
-    project.finance.agreedPrice ?? project.finance.finalProjectPrice,
-    agg._sum.amount || 0,
-  );
+  const cachedPrice = Number(project.finance.agreedPrice);
+  const finalPrice = Number(project.finance.finalProjectPrice);
+  const contractPrice =
+    Number.isFinite(cachedPrice) && cachedPrice > 0
+      ? cachedPrice
+      : Number.isFinite(finalPrice) && finalPrice > 0
+        ? finalPrice
+        : 0;
+  const finance = computeFinanceSnapshot(contractPrice, agg._sum.amount || 0);
 
   const projectFinance = persist
     ? await persistProjectFinanceCache(db, projectId, finance)

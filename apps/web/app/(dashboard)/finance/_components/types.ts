@@ -37,8 +37,17 @@ export type FinanceDashboard = {
     projectProfit: number;
     companyExpenses: number;
     netCompanyProfit: number;
+    scopedProjectCount?: number;
     employeeSalaries: { payable: number; paid: number };
   };
+  /** Last 6 months contract revenue + verified receipts (from finance KPI engine). */
+  monthly?: Array<{
+    key: string;
+    year: number;
+    month: number;
+    revenue: number;
+    received: number;
+  }>;
   employeeBreakdown: Array<{
     teamProfileId: string;
     displayName: string;

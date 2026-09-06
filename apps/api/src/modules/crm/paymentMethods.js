@@ -61,11 +61,15 @@ export function sanitizePaymentMethodMeta(method, meta = {}) {
     if (name) next.responsibleName = name;
     return next;
   }
-  if (code === 'BANK_TRANSFER' || code === 'HAWALA') {
+  if (code === 'BANK_TRANSFER') {
     const next = {};
     const card = trimText(src.bankCardNumber);
-    const info = trimText(src.bankInfo);
     if (card) next.bankCardNumber = card;
+    return next;
+  }
+  if (code === 'HAWALA') {
+    const next = {};
+    const info = trimText(src.bankInfo);
     if (info) next.bankInfo = info;
     return next;
   }
@@ -86,7 +90,7 @@ export function assertPaymentMethodMeta(method, meta = {}) {
       throw new AppError('شماره تماس مسئول دفتر الزامی است', 400, 'VALIDATION');
     }
   }
-  if (code === 'BANK_TRANSFER' && !clean.bankCardNumber && !clean.bankInfo) {
+  if (code === 'BANK_TRANSFER' && !clean.bankCardNumber) {
     throw new AppError('شماره کارت بانکی الزامی است', 400, 'VALIDATION');
   }
   return clean;
@@ -98,16 +102,25 @@ export function formatPaymentMethodMetaRows(method, meta = {}) {
   const clean = sanitizePaymentMethodMeta(code, meta);
   const rows = [];
   if (code === 'HESAB_PAY' && clean.hesabPayAccount) {
-    rows.push({ label: 'شماره حساب پی', value: clean.hesabPayAccount });
+    rows.push({ label: 'شماره حساب پی', value: clean.hesabPayAccount, ltr: true });
   }
   if (code === 'CASH') {
-    if (clean.officeAddress) rows.push({ label: 'آدرس دفتر', value: clean.officeAddress });
-    if (clean.responsibleName) rows.push({ label: 'مسئول دریافت', value: clean.responsibleName });
-    if (clean.responsiblePhone) rows.push({ label: 'تلفن مسئول دفتر', value: clean.responsiblePhone });
+    if (clean.officeAddress) {
+      rows.push({ label: 'آدرس دفتر', value: clean.officeAddress });
+    }
+    if (clean.responsiblePhone) {
+      rows.push({
+        label: 'شماره تماس مسئول دفتر',
+        value: clean.responsiblePhone,
+        ltr: true,
+      });
+    }
   }
-  if (code === 'HAWALA' || code === 'BANK_TRANSFER') {
-    if (clean.bankCardNumber) rows.push({ label: 'شماره کارت بانکی', value: clean.bankCardNumber });
-    if (clean.bankInfo) rows.push({ label: 'اطلاعات حواله / بانک', value: clean.bankInfo });
+  if (code === 'HAWALA' && clean.bankInfo) {
+    rows.push({ label: 'جزئیات حواله', value: clean.bankInfo });
+  }
+  if (code === 'BANK_TRANSFER' && clean.bankCardNumber) {
+    rows.push({ label: 'شماره کارت بانکی', value: clean.bankCardNumber, ltr: true });
   }
   return rows;
 }

@@ -8,6 +8,8 @@ import { storage } from "../../services/storage.js";
 import {
   isCleanFinalStorageKey,
   parseUploadContext,
+  UPLOAD_PURPOSE,
+  validateContentImportFile,
 } from "../../services/storage/media-manager.js";
 import { prisma } from "../../db/prisma.js";
 import { normalizeDigitsDeep } from "../../utils/toEnglishDigits.js";
@@ -349,6 +351,12 @@ router.post(
       if (!req.file)
         throw new AppError("فایل الزامی است", 400, "FILE_REQUIRED");
       const uploadContext = parseUploadContext(req.body || {}, req.auth || {});
+      if (uploadContext.purpose === UPLOAD_PURPOSE.CONTENT_IMPORT) {
+        const check = validateContentImportFile(req.file);
+        if (!check.ok) {
+          throw new AppError(check.message, 400, "FILE_TYPE_NOT_ALLOWED");
+        }
+      }
       const saved = await storage.saveBuffer(req.file.buffer, {
         filename: req.file.originalname,
         folder: uploadContext.folder,

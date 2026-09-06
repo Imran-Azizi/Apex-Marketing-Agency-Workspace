@@ -18,6 +18,68 @@ export interface CrmAllowedActions {
   assign: boolean;
 }
 
+export type CrmInvoiceStatus =
+  | "DRAFT"
+  | "ISSUED"
+  | "PARTIALLY_PAID"
+  | "PAID"
+  | "OVERDUE"
+  | "CANCELED";
+
+export interface CrmInvoiceCustomer {
+  id: string;
+  customerCode?: string | null;
+  personName?: string | null;
+  companyName?: string | null;
+  phone?: string | null;
+  whatsappRaw?: string | null;
+  email?: string | null;
+}
+
+export interface CrmInvoiceItem {
+  id?: string;
+  description: string;
+  quantity: string | number;
+  unitPrice: string | number;
+  amount: string | number;
+}
+
+export interface CrmInvoice {
+  id: string;
+  invoiceNumber: string;
+  status: CrmInvoiceStatus | string;
+  total: string | number;
+  subtotal?: string | number;
+  paidAmount?: number;
+  remainingAmount?: number;
+  videoCount?: number | null;
+  notes?: string | null;
+  issuedAt?: string | null;
+  createdAt?: string;
+  paymentMethod?: string | null;
+  paymentMethodLabel?: string | null;
+  paymentMethodMeta?: Record<string, string> | null;
+  paymentMethodMetaRows?: Array<{ label: string; value: string; ltr?: boolean }>;
+  isCrmInvoice?: boolean;
+  paymentId?: string | null;
+  recordedByName?: string | null;
+  statusLabel?: string | null;
+  customerId?: string;
+  items?: CrmInvoiceItem[];
+  customer?: CrmInvoiceCustomer;
+  company?: {
+    name?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    website?: string | null;
+  };
+}
+
+export interface CrmInvoiceListResponse {
+  customer: CrmInvoiceCustomer;
+  items: CrmInvoice[];
+}
+
 export interface CrmCustomer {
   id: string;
   customerCode?: string;

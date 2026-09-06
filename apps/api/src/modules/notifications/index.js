@@ -18,7 +18,7 @@ router.use(requireAuth);
 
 function serializeNotification(n, auth) {
   const meta = n.meta && typeof n.meta === 'object' ? n.meta : {};
-  const isUnseen = !n.isRead;
+  const isUnseen = !n.seenAt;
 
   if (auth?.roleCode === 'NARRATOR') {
     if (!NARRATION_NOTIFICATION_TYPES.includes(meta.type)) {
@@ -27,6 +27,7 @@ function serializeNotification(n, auth) {
     return {
       ...serializeNarratorNotification(n),
       isUnseen,
+      seenAt: n.seenAt ?? null,
       link: meta.projectId ? `/narrator/tasks/${meta.projectId}` : null,
       meta: {
         type: meta.type || null,
@@ -49,6 +50,7 @@ function serializeNotification(n, auth) {
     link: n.link,
     isRead: n.isRead,
     isUnseen,
+    seenAt: n.seenAt ?? null,
     createdAt: n.createdAt,
     readAt: n.readAt,
     meta: {
@@ -128,9 +130,22 @@ router.get('/unread-count', sendUnseenCount);
 router.patch('/:id/read', requireCsrf, async (req, res, next) => {
   try {
     const where = { id: req.params.id, ...recipientWhere(req.auth) };
+    const now = new Date();
     const result = await prisma.notification.updateMany({
       where,
-      data: { isRead: true, readAt: new Date() },
+      data: { isRead: true, readAt: now, seenAt: now },
+    });
+    ok(res, { updated: result.count });
+  } catch (e) { next(e); }
+});
+
+router.post('/seen', requireCsrf, async (req, res, next) => {
+  try {
+    const viewedBefore = parseViewedBefore(req.body?.viewedBefore) || new Date();
+    const now = new Date();
+    const result = await prisma.notification.updateMany({
+      where: unseenWhere(req.auth, viewedBefore),
+      data: { seenAt: now },
     });
     ok(res, { updated: result.count });
   } catch (e) { next(e); }
@@ -139,9 +154,14 @@ router.patch('/:id/read', requireCsrf, async (req, res, next) => {
 router.post('/read-all', requireCsrf, async (req, res, next) => {
   try {
     const viewedBefore = parseViewedBefore(req.body?.viewedBefore);
+    const now = new Date();
     const result = await prisma.notification.updateMany({
-      where: unseenWhere(req.auth, viewedBefore),
-      data: { isRead: true, readAt: new Date() },
+      where: viewedBefore
+        ? unseenWhere(req.auth, viewedBefore)
+        : { ...recipientWhere(req.auth), OR: [{ isRead: false }, { seenAt: null }] },
+      data: viewedBefore
+        ? { seenAt: now }
+        : { isRead: true, readAt: now, seenAt: now },
     });
     ok(res, { updated: result.count });
   } catch (e) { next(e); }

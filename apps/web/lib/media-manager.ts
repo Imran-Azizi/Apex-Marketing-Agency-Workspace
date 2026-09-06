@@ -8,6 +8,7 @@ export const UPLOAD_PURPOSE = {
   PRODUCTION_FINAL: "production-final",
   PRODUCTION_POSTER: "production-poster",
   NARRATION_AUDIO: "narration-audio",
+  CONTENT_IMPORT: "content-import",
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
   SERVICE_IMAGE: "service-image",

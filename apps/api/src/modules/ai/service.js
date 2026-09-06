@@ -23,9 +23,9 @@ import {
 } from '../../services/notifications.js';
 import {
   canManagerDeleteVersion,
-  canManagerEditVersion,
   canManagerSendToCustomer,
 } from '../../services/contentVersionRules.js';
+import { narrationService } from '../narration/service.js';
 
 export const AGENT_DEFINITIONS = [
   {
@@ -809,75 +809,245 @@ export const aiService = {
     };
   },
 
-  async updateVersionContent(projectId, versionId, { scenario, narration, storyboard, extras, changeNotes, editPrompt }, auth, req) {
-    const version = await prisma.contentVersion.findFirst({
-      where: { id: versionId, projectId },
+  async createManualVersion(
+    projectId,
+    { scenario, narration, storyboard, extras, sourceFiles } = {},
+    auth,
+    req,
+  ) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
     });
-    if (!version) throw new AppError('نسخه یافت نشد', 404, 'NOT_FOUND');
-    if (!canManagerEditVersion(version)) {
-      throw new AppError('نسخه در انتظار تأیید مشتری یا تأییدشده قابل ویرایش مستقیم نیست؛ بازتولید یا نسخه جدید بسازید', 400, 'LOCKED');
+    if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+
+    const hasScenario = scenario != null;
+    const hasNarration = narration != null;
+    const hasStoryboard = storyboard != null;
+    if (!hasScenario && !hasNarration && !hasStoryboard) {
+      throw new AppError(
+        'حداقل یکی از بخش‌های سناریو، نریشن یا استوری‌بورد لازم است',
+        400,
+        'VALIDATION',
+      );
     }
 
-    const nextScenario =
-      scenario !== undefined
-        ? normalizeScenarioOutput(scenario, projectId)
-        : version.scenario;
-    const nextNarration =
-      narration !== undefined
-        ? normalizeNarrationOutput(narration, projectId)
-        : version.narration;
-    const nextStoryboard =
-      storyboard !== undefined
-        ? normalizeStoryboardOutput(storyboard, projectId)
-        : version.storyboard;
+    const isExactManual = (value) =>
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      value.preserveExact === true &&
+      typeof value.manualRaw === 'string';
 
-    const normalizedEditPrompt = normalizeUserPrompt(editPrompt);
-    const nextChangeNotes =
-      changeNotes ||
-      (normalizedEditPrompt ? `ویرایش با دستور: ${normalizedEditPrompt.slice(0, 180)}` : null) ||
-      version.changeNotes;
+    const preserveExactPayload = (value, projectId, label) => {
+      const raw = value.manualRaw;
+      // Allow empty raw for image-only storyboard (manualRaw === '')
+      if (label !== 'استوری‌بورد' && (!raw || !String(raw).trim())) {
+        throw new AppError(`محتوای ${label} خالی است`, 400, 'VALIDATION');
+      }
+      if (
+        label === 'استوری‌بورد' &&
+        !String(raw || '').trim() &&
+        !(Array.isArray(value.uploadedImages) && value.uploadedImages.length) &&
+        !(Array.isArray(value.storyboard) && value.storyboard.length) &&
+        !(Array.isArray(value.scenes) && value.scenes.length)
+      ) {
+        throw new AppError('محتوای استوری‌بورد خالی است', 400, 'VALIDATION');
+      }
+      return {
+        ...value,
+        projectId: value.projectId || projectId,
+        preserveExact: true,
+        manualRaw: typeof raw === 'string' ? raw : '',
+      };
+    };
 
-    const prevExtras =
-      version.extras && typeof version.extras === 'object' && !Array.isArray(version.extras)
-        ? version.extras
-        : {};
-    const nextExtras =
-      extras !== undefined
-        ? extras
-        : normalizedEditPrompt
-          ? { ...prevExtras, lastEditPrompt: normalizedEditPrompt }
-          : version.extras;
+    const normalizeOrThrow = (fn, value, label) => {
+      try {
+        return fn(value, projectId);
+      } catch (err) {
+        throw new AppError(
+          `محتوای ${label} نامعتبر است`,
+          400,
+          'VALIDATION',
+          { cause: err?.message || null },
+        );
+      }
+    };
 
-    const updated = await prisma.contentVersion.update({
-      where: { id: versionId },
-      data: {
-        scenario: nextScenario,
-        narration: nextNarration,
-        storyboard: nextStoryboard,
-        extras: nextExtras,
-        status: 'UNDER_REVIEW',
-        changeNotes: nextChangeNotes,
-      },
+    const nextScenario = hasScenario
+      ? isExactManual(scenario)
+        ? preserveExactPayload(scenario, projectId, 'سناریو')
+        : normalizeOrThrow(normalizeScenarioOutput, scenario, 'سناریو')
+      : null;
+    const nextNarration = hasNarration
+      ? isExactManual(narration)
+        ? preserveExactPayload(narration, projectId, 'نریشن')
+        : normalizeOrThrow(normalizeNarrationOutput, narration, 'نریشن')
+      : null;
+    const nextStoryboard = hasStoryboard
+      ? isExactManual(storyboard)
+        ? preserveExactPayload(storyboard, projectId, 'استوری‌بورد')
+        : normalizeOrThrow(normalizeStoryboardOutput, storyboard, 'استوری‌بورد')
+      : null;
+
+    const last = await prisma.contentVersion.findFirst({
+      where: { projectId, kind: 'BUNDLE' },
+      orderBy: { versionNumber: 'desc' },
+    });
+    const versionNumber = (last?.versionNumber || 0) + 1;
+
+    const fileMeta = Array.isArray(sourceFiles)
+      ? sourceFiles
+          .filter((f) => f && typeof f === 'object')
+          .map((f) => ({
+            section: typeof f.section === 'string' ? f.section : null,
+            name: typeof f.name === 'string' ? f.name : null,
+            mimeType: typeof f.mimeType === 'string' ? f.mimeType : null,
+            sizeBytes: Number(f.sizeBytes) || null,
+            storageKey: typeof f.storageKey === 'string' ? f.storageKey : null,
+            url: typeof f.url === 'string' ? f.url : null,
+            inputMethod:
+              f.inputMethod === 'text' ||
+              f.inputMethod === 'file' ||
+              f.inputMethod === 'image'
+                ? f.inputMethod
+                : null,
+          }))
+      : [];
+
+    const baseExtras =
+      extras && typeof extras === 'object' && !Array.isArray(extras) ? extras : {};
+
+    const usedText = fileMeta.some((f) => f.inputMethod === 'text');
+    const usedImage = fileMeta.some((f) => f.inputMethod === 'image');
+    const usedFile = fileMeta.some(
+      (f) => f.inputMethod === 'file' || (f.inputMethod == null && f.name),
+    );
+    const changeNotes = [
+      usedText ? 'متن' : null,
+      usedFile ? 'فایل' : null,
+      usedImage ? 'تصویر' : null,
+    ]
+      .filter(Boolean)
+      .join(' و ');
+    const changeNotesLabel = changeNotes
+      ? `ورود دستی محتوا از ${changeNotes} — تأیید خودکار`
+      : 'ورود دستی محتوا — تأیید خودکار';
+
+    const approvedAt = new Date();
+
+    const version = await prisma.$transaction(async (tx) => {
+      // Supersede any active customer-pending versions — manual entry is the new source of truth.
+      await tx.contentVersion.updateMany({
+        where: {
+          projectId,
+          kind: 'BUNDLE',
+          status: 'PENDING_CUSTOMER_APPROVAL',
+          publishedToClient: true,
+        },
+        data: { publishedToClient: false, status: 'SUPERSEDED' },
+      });
+
+      const created = await tx.contentVersion.create({
+        data: {
+          projectId,
+          kind: 'BUNDLE',
+          versionNumber,
+          scenario: nextScenario,
+          narration: nextNarration,
+          storyboard: nextStoryboard,
+          extras: {
+            ...baseExtras,
+            source: 'manual_upload',
+            autoApproved: true,
+            sourceFiles: fileMeta,
+          },
+          status: 'APPROVED',
+          isLocked: true,
+          publishedToClient: true,
+          publishedAt: approvedAt,
+          approvedById: auth.userId,
+          createdById: auth.userId,
+          changeNotes: changeNotesLabel,
+        },
+      });
+
+      await tx.approval.create({
+        data: {
+          projectId,
+          contentVersionId: created.id,
+          type: 'MANAGER_CONTENT',
+          decision: 'APPROVED',
+          comment:
+            'تأیید خودکار پس از ورود دستی سناریو / نریشن / استوری‌بورد — بدون نیاز به تأیید مشتری',
+          actorType: 'MANAGER',
+          actorId: auth.userId,
+        },
+      });
+
+      await tx.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'NARRATION_RECORDING',
+          customerFacingStatus: 'IN_PRODUCTION',
+        },
+      });
+
+      await narrationService.ensureTaskForProject(projectId, {
+        tx,
+        contentVersionId: created.id,
+        assignedById: auth.userId,
+      });
+
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId,
+          type: 'CONTENT_MANUAL_AUTO_APPROVED',
+          title: 'تأیید خودکار محتوای دستی',
+          body: `نسخه ${versionNumber} پس از ورود دستی تأیید شد و آماده مراحل بعدی است`,
+          actorId: auth.userId,
+        },
+      });
+
+      await rebuildProjectContext(projectId, tx);
+      return created;
     });
 
     await writeAudit({
       userId: auth.userId,
-      action: 'AI_CONTENT_EDIT',
+      action: 'AI_CONTENT_MANUAL_UPLOAD',
       entityType: 'ContentVersion',
-      entityId: versionId,
+      entityId: version.id,
+      after: {
+        versionNumber,
+        projectId,
+        source: 'manual_upload',
+        status: 'APPROVED',
+        autoApproved: true,
+      },
       req,
     });
 
     await logActivity(projectId, {
       userId: auth.userId,
-      action: 'AI_CONTENT_EDIT',
+      action: 'CONTENT_MANUAL_UPLOAD',
       entityType: 'ContentVersion',
-      entityId: versionId,
-      message: normalizedEditPrompt ? 'ویرایش محتوا با دستورات مدیر' : 'ویرایش دستی مدیر',
-      meta: { editPrompt: normalizedEditPrompt },
+      entityId: version.id,
+      message: `نسخه ${versionNumber} با ورود دستی ایجاد و به‌صورت خودکار تأیید شد`,
+      meta: {
+        versionNumber,
+        autoApproved: true,
+        sections: {
+          scenario: Boolean(nextScenario),
+          narration: Boolean(nextNarration),
+          storyboard: Boolean(nextStoryboard),
+        },
+        fileCount: fileMeta.length,
+      },
     });
 
-    return updated;
+    return version;
   },
 
   async deleteVersion(projectId, versionId, auth, req) {
@@ -945,7 +1115,7 @@ export const aiService = {
     if (!version) throw new AppError('نسخه یافت نشد', 404, 'NOT_FOUND');
     if (!canManagerSendToCustomer(version)) {
       if (version.status === 'APPROVED' && version.isLocked) {
-        throw new AppError('این نسخه قبلاً توسط مشتری تأیید شده است', 400, 'ALREADY_APPROVED');
+        throw new AppError('این نسخه قبلاً تأیید شده است', 400, 'ALREADY_APPROVED');
       }
       if (version.status === 'PENDING_CUSTOMER_APPROVAL' && version.publishedToClient) {
         throw new AppError('این نسخه هم‌اکنون در انتظار تأیید مشتری است', 400, 'ALREADY_PENDING');

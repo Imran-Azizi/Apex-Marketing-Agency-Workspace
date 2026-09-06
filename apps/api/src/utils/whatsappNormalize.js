@@ -151,3 +151,84 @@ export function whatsappDigitsForLink(input) {
     return null;
   }
 }
+
+/**
+ * Update CRM (+ linked portal account) WhatsApp from a brief/form value.
+ * No-op when empty or unchanged. Throws on uniqueness conflicts.
+ */
+export async function syncCustomerWhatsappFromBrief(tx, customer, whatsappInput) {
+  const raw = String(whatsappInput || '').trim();
+  if (!raw) return customer;
+
+  const parsed = parseInternationalPhone(raw);
+  if (whatsappNumbersMatch(parsed.digits, customer.normalizedWhatsapp)) {
+    return customer;
+  }
+
+  const clashKeys = getWhatsappLookupKeys(raw);
+  const clash = await tx.crmCustomer.findFirst({
+    where: {
+      normalizedWhatsapp: { in: clashKeys },
+      deletedAt: null,
+      id: { not: customer.id },
+    },
+    select: { id: true, customerCode: true },
+  });
+  if (clash) {
+    throw new AppError(
+      'این شماره واتساپ متعلق به مشتری دیگری است',
+      409,
+      'DUPLICATE_WHATSAPP',
+      { customerId: clash.id, customerCode: clash.customerCode },
+    );
+  }
+
+  if (customer.portalAccount?.id) {
+    const portalClash = await tx.portalAccount.findFirst({
+      where: {
+        normalizedWhatsapp: { in: clashKeys },
+        deletedAt: null,
+        id: { not: customer.portalAccount.id },
+      },
+      select: { id: true },
+    });
+    if (portalClash) {
+      throw new AppError(
+        'این شماره واتساپ برای حساب پورتال دیگری ثبت شده است',
+        409,
+        'DUPLICATE_PORTAL_WHATSAPP',
+      );
+    }
+  }
+
+  const history = Array.isArray(customer.previousWhatsapp)
+    ? customer.previousWhatsapp
+    : [];
+
+  const updated = await tx.crmCustomer.update({
+    where: { id: customer.id },
+    data: {
+      whatsappRaw: parsed.e164,
+      normalizedWhatsapp: parsed.digits,
+      phoneCountryIso: parsed.country,
+      previousWhatsapp: [
+        ...history,
+        {
+          digits: customer.normalizedWhatsapp,
+          raw: customer.whatsappRaw,
+          changedAt: new Date().toISOString(),
+        },
+      ],
+    },
+    include: { portalAccount: true },
+  });
+
+  if (updated.portalAccount?.id) {
+    await tx.portalAccount.update({
+      where: { id: updated.portalAccount.id },
+      data: { normalizedWhatsapp: parsed.digits },
+    });
+  }
+
+  return updated;
+}

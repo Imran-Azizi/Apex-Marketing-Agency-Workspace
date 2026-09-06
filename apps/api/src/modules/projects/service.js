@@ -5,9 +5,61 @@ import { aiProvider } from '../../services/aiProvider.js';
 import { rebuildProjectContext, mapProjectStatusToCustomer, computeFinanceFields } from '../../services/projectContext.js';
 import { syncProjectFinanceFromPayments } from '../crm/paymentFinance.js';
 import {
+  syncCustomerWhatsappFromBrief,
+} from '../../utils/whatsappNormalize.js';
+import {
   attachProjectProgress,
   attachProjectProgressMany,
 } from '../../services/projectProgress.js';
+import {
+  buildProjectFinanceSnapshot,
+  createProjectGraph,
+  resolveAgreedPrice,
+  resolveOpportunityForProjectCreate,
+} from './createProjectCore.js';
+import { z } from 'zod';
+
+const createProjectSchema = z.object({
+  crmCustomerId: z.string().min(1),
+  opportunityId: z.string().optional().nullable(),
+  title: z.string().trim().min(2).max(200),
+  serviceId: z.string().optional().nullable(),
+  formatId: z.string().optional().nullable(),
+  customAspectRatio: z
+    .string()
+    .trim()
+    .regex(/^\d{1,3}:\d{1,3}$/)
+    .optional()
+    .nullable(),
+  durationSec: z.coerce.number().int().positive().optional().nullable(),
+  language: z.string().trim().max(16).optional().nullable(),
+  tone: z.string().trim().max(80).optional().nullable(),
+  platforms: z.array(z.string()).optional(),
+  notes: z.string().trim().max(4000).optional().nullable(),
+  mainMessage: z.string().trim().max(1000).optional().nullable(),
+  productName: z.string().trim().max(200).optional().nullable(),
+  productDescription: z.string().trim().max(4000).optional().nullable(),
+  features: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
+  audience: z.string().trim().max(400).optional().nullable(),
+  goal: z.string().trim().max(400).optional().nullable(),
+  cta: z.string().trim().max(200).optional().nullable(),
+  agreedPrice: z.coerce.number().nonnegative().optional().nullable(),
+  personName: z.string().trim().min(1).max(200).optional().nullable(),
+  jobTitle: z.string().trim().min(1).max(200).optional().nullable(),
+  companyName: z.string().trim().min(1).max(200).optional().nullable(),
+  phone: z.string().trim().min(5).max(40).optional().nullable(),
+  whatsapp: z.string().trim().min(5).max(40).optional().nullable(),
+  address: z.string().trim().min(1).max(500).optional().nullable(),
+  email: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().email().optional().nullable(),
+  ),
+  website: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.string().trim().max(500).optional().nullable(),
+  ),
+  clientAssetIds: z.array(z.string()).optional(),
+});
 
 function canAccessProject(project, auth) {
   if (auth.roleCode === 'MANAGER' || auth.roleCode === 'ADMIN' || auth.roleCode === 'FINANCE' || auth.roleCode === 'SALES') return true;
@@ -549,17 +601,287 @@ export const projectService = {
   },
 
   async dashboard(auth) {
-    const counts = await prisma.project.groupBy({
-      by: ['status'],
-      where: { deletedAt: null },
-      _count: true,
+    const ACTIVE = new Set([
+      'NEW_MANAGER_REVIEW',
+      'CONTENT_GENERATION',
+      'INTERNAL_CONTENT_REVIEW',
+      'WAITING_CLIENT_CONTENT_APPROVAL',
+      'CONTENT_REVISION',
+      'NARRATION_RECORDING',
+      'PRODUCTION_EDITING',
+      'MANAGER_FINAL_REVIEW',
+      'FINAL_REVISION',
+      'WAITING_CLIENT_FINAL_APPROVAL',
+      'WAITING_PAYMENT',
+      'READY_TO_DOWNLOAD',
+    ]);
+    const WAITING_CUSTOMER = new Set([
+      'WAITING_CLIENT_CONTENT_APPROVAL',
+      'WAITING_CLIENT_FINAL_APPROVAL',
+    ]);
+    const WAITING_APPROVAL = new Set([
+      'NEW_MANAGER_REVIEW',
+      'INTERNAL_CONTENT_REVIEW',
+      'MANAGER_FINAL_REVIEW',
+    ]);
+
+    const [counts, leadsToday, followUps, createdRows] = await Promise.all([
+      prisma.project.groupBy({
+        by: ['status'],
+        where: { deletedAt: null },
+        _count: true,
+      }),
+      prisma.crmCustomer.count({
+        where: {
+          createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+          deletedAt: null,
+        },
+      }),
+      prisma.crmCustomer.count({
+        where: { nextFollowUpAt: { lte: new Date() }, deletedAt: null },
+      }),
+      prisma.project.findMany({
+        where: {
+          deletedAt: null,
+          createdAt: {
+            gte: new Date(new Date().getFullYear(), new Date().getMonth() - 5, 1),
+          },
+        },
+        select: { createdAt: true },
+      }),
+    ]);
+
+    let total = 0;
+    let active = 0;
+    let completed = 0;
+    let waitingCustomer = 0;
+    let waitingApproval = 0;
+    let onHold = 0;
+    let canceled = 0;
+
+    for (const row of counts) {
+      const n = row._count;
+      total += n;
+      if (ACTIVE.has(row.status)) active += n;
+      if (row.status === 'COMPLETED') completed += n;
+      if (WAITING_CUSTOMER.has(row.status)) waitingCustomer += n;
+      if (WAITING_APPROVAL.has(row.status)) waitingApproval += n;
+      if (row.status === 'ON_HOLD') onHold += n;
+      if (row.status === 'CANCELED') canceled += n;
+    }
+
+    const monthKeys = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      monthKeys.push(
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      );
+    }
+    const growthMap = new Map(monthKeys.map((k) => [k, 0]));
+    for (const p of createdRows) {
+      const d = new Date(p.createdAt);
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (growthMap.has(k)) growthMap.set(k, growthMap.get(k) + 1);
+    }
+    const monthlyProjectGrowth = monthKeys.map((key) => {
+      const [y, m] = key.split('-').map(Number);
+      return { key, year: y, month: m, count: growthMap.get(key) || 0 };
     });
-    const leadsToday = await prisma.crmCustomer.count({
-      where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) }, deletedAt: null },
+
+    return {
+      projectStatusCounts: counts,
+      leadsToday,
+      followUpsDue: followUps,
+      projectKpis: {
+        total,
+        active,
+        completed,
+        waitingCustomer,
+        waitingApproval,
+        onHold,
+        canceled,
+      },
+      monthlyProjectGrowth,
+    };
+  },
+
+  /**
+   * Options for the manager "create project" dialog (customer search + catalogs).
+   */
+  async createOptions(auth, query = {}) {
+    assertCanListProjects(auth);
+    const q = String(query.q || '').trim();
+    const customerWhere = { deletedAt: null };
+    if (q) {
+      customerWhere.OR = [
+        { personName: { contains: q, mode: 'insensitive' } },
+        { companyName: { contains: q, mode: 'insensitive' } },
+        { phone: { contains: q, mode: 'insensitive' } },
+        { customerCode: { contains: q, mode: 'insensitive' } },
+        { whatsappRaw: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const [customers, services, formats] = await Promise.all([
+      prisma.crmCustomer.findMany({
+        where: customerWhere,
+        orderBy: [{ updatedAt: 'desc' }, { personName: 'asc' }],
+        take: 100,
+        select: {
+          id: true,
+          customerCode: true,
+          personName: true,
+          companyName: true,
+          jobTitle: true,
+          phone: true,
+          whatsappRaw: true,
+          normalizedWhatsapp: true,
+          email: true,
+          city: true,
+          address: true,
+          pipelineStage: true,
+        },
+      }),
+      prisma.service.findMany({
+        where: { deletedAt: null, isPublished: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+        select: { id: true, name: true, revisionCount: true },
+      }),
+      prisma.format.findMany({
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, ratio: true },
+      }),
+    ]);
+
+    return { customers, services, formats };
+  },
+
+  /**
+   * Manager/staff create project for an existing CRM customer.
+   * Uses the same createProjectGraph as portal submitBrief so Manager + Finance
+   * dashboards see identical project/finance relationships.
+   */
+  async createForCustomer(body, auth, req) {
+    assertCanListProjects(auth);
+    const parsed = createProjectSchema.safeParse(body || {});
+    if (!parsed.success) {
+      throw new AppError('اطلاعات پروژه ناقص یا نامعتبر است', 400, 'VALIDATION');
+    }
+    const input = parsed.data;
+    const title = input.title.trim();
+    const crmCustomerId = input.crmCustomerId;
+
+    const customer = await prisma.crmCustomer.findFirst({
+      where: { id: crmCustomerId, deletedAt: null },
+      include: { portalAccount: true },
     });
-    const followUps = await prisma.crmCustomer.count({
-      where: { nextFollowUpAt: { lte: new Date() }, deletedAt: null },
+    if (!customer) throw new AppError('مشتری یافت نشد', 404, 'NOT_FOUND');
+
+    let service = null;
+    if (input.serviceId) {
+      service = await prisma.service.findFirst({
+        where: { id: input.serviceId, deletedAt: null },
+      });
+      if (!service) throw new AppError('سرویس یافت نشد', 404, 'NOT_FOUND');
+    }
+
+    if (input.formatId) {
+      const format = await prisma.format.findUnique({ where: { id: input.formatId } });
+      if (!format) throw new AppError('فرمت یافت نشد', 404, 'NOT_FOUND');
+    }
+
+    const manager =
+      (auth.roleCode === 'MANAGER' || auth.roleCode === 'ADMIN'
+        ? await prisma.user.findFirst({
+            where: { id: auth.userId, isActive: true, deletedAt: null },
+          })
+        : null) ||
+      (await prisma.user.findFirst({
+        where: { role: { code: 'MANAGER' }, isActive: true, deletedAt: null },
+      }));
+    if (!manager) {
+      throw new AppError('مدیر سیستم تعریف نشده', 500, 'NO_MANAGER');
+    }
+
+    const priorProjects = await prisma.project.count({
+      where: { crmCustomerId, deletedAt: null },
     });
-    return { projectStatusCounts: counts, leadsToday, followUpsDue: followUps };
+
+    const { project, opportunityId, agreedPrice } = await prisma.$transaction(
+      async (tx) => {
+        const customerWithWhatsapp = await syncCustomerWhatsappFromBrief(
+          tx,
+          customer,
+          input.whatsapp,
+        );
+
+        const { opportunity } = await resolveOpportunityForProjectCreate(
+          tx,
+          customerWithWhatsapp,
+          {
+            opportunityId: input.opportunityId || null,
+            title,
+            pipelineStage: priorProjects > 0 ? 'REPEAT_CUSTOMER' : 'ORDER_CONFIRMED',
+            // Prefer attaching to a CRM-priced open cycle when available;
+            // only force a brand-new blank cycle when neither id nor attachable opp exists.
+            alwaysCreateFresh: false,
+          },
+        );
+
+        const agreed = resolveAgreedPrice(opportunity, input.agreedPrice);
+        const financeSnap = await buildProjectFinanceSnapshot(tx, {
+          crmCustomerId,
+          opportunityId: opportunity.id,
+          agreedPrice: agreed,
+        });
+
+        // Fresh cycles with no CRM price require an agreed price so finance KPIs stay consistent.
+        const isFreshBlank =
+          !opportunity.agreedPrice &&
+          !opportunity.proposedPrice &&
+          !opportunity.contractLocked;
+        if (isFreshBlank && agreed <= 0) {
+          throw new AppError(
+            'مبلغ توافق‌شده برای پروژه الزامی است',
+            400,
+            'VALIDATION',
+          );
+        }
+
+        return createProjectGraph(tx, {
+          opportunity,
+          customer: customerWithWhatsapp,
+          manager,
+          brief: { ...input, title },
+          source: 'INTERNAL',
+          actorId: auth.userId,
+          portalAccountId: customerWithWhatsapp.portalAccount?.id || null,
+          service,
+          agreedPrice: agreed,
+          financeSnap,
+          timelineBody: 'پروژه توسط مدیر برای مشتری موجود ایجاد شد',
+          notifyPortal: Boolean(customerWithWhatsapp.portalAccount?.id),
+        });
+      },
+    );
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_CREATE',
+      entityType: 'Project',
+      entityId: project.id,
+      after: {
+        code: project.code,
+        title: project.title,
+        crmCustomerId,
+        opportunityId,
+        agreedPrice,
+        source: 'INTERNAL',
+      },
+      req,
+    });
+
+    return this.get(project.id, auth);
   },
 };

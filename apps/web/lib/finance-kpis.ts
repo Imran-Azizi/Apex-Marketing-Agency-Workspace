@@ -27,67 +27,104 @@ export function managerFinanceCardsFromKpis(
     kpi({
       key: "total_revenue",
       label: "مجموع درآمد",
-      value: kpis.totalFinalPrice,
-      description: "جمع مبلغ توافق‌شده پروژه‌ها",
+      value: Number(kpis.totalFinalPrice) || 0,
+      description: "جمع مبلغ توافق‌شده قراردادها",
       format: "currency",
       tone: "brand",
+      href: "/finance/projects",
     }),
     kpi({
       key: "received",
       label: "پرداخت‌های دریافت‌شده",
-      value: kpis.received,
-      description: "پرداخت‌های Verified در بازه",
+      value: Number(kpis.received) || 0,
+      description: "فقط پرداخت‌های تأییدشده (Verified)",
       format: "currency",
       tone: "info",
+      href: "/finance",
     }),
     kpi({
       key: "outstanding",
-      label: "پرداخت‌های باقی‌مانده",
-      value: kpis.receivable,
-      description: "مانده قابل وصول",
+      label: "مانده قابل وصول",
+      value: Number(kpis.receivable) || 0,
+      description: "قرارداد منهای دریافتی تأییدشده",
       format: "currency",
       tone: "warning",
+      href: "/finance/projects",
     }),
     kpi({
       key: "expenses",
-      label: "هزینه‌ها",
-      value: kpis.directProjectCosts,
-      description: "هزینه ادیت، نریشن و مستقیم",
+      label: "هزینه‌های مستقیم",
+      value: Number(kpis.directProjectCosts) || 0,
+      description: "نریتور + ادیتور + هزینه‌های جانبی",
       format: "currency",
       tone: "danger",
+      href: "/finance/expenses",
+    }),
+    kpi({
+      key: "company_expenses",
+      label: "مصارف شرکت",
+      value: Number(kpis.companyExpenses) || 0,
+      description: "هزینه‌های عمومی شرکت",
+      format: "currency",
+      tone: "danger",
+      href: "/finance/expenses",
     }),
     kpi({
       key: "narrator_cost",
-      label: "مجموع هزینه نریتور",
-      value: kpis.narratorCost,
-      description: "پرداخت‌های مربوط به نریتورها",
+      label: "هزینه نریتور",
+      value: Number(kpis.narratorCost) || 0,
+      description: "جمع هزینه نریشن پروژه‌ها",
       format: "currency",
       tone: "warning",
     }),
     kpi({
       key: "editor_cost",
-      label: "مجموع هزینه ادیتور",
-      value: kpis.editorCost,
-      description: "پرداخت‌های مربوط به ادیتورها",
+      label: "هزینه ادیتور",
+      value: Number(kpis.editorCost) || 0,
+      description: "جمع هزینه ادیت پروژه‌ها",
       format: "currency",
       tone: "info",
     }),
     kpi({
-      key: "net_profit",
+      key: "project_profit",
       label: "سود پروژه",
-      value: kpis.projectProfit,
-      description: "قیمت پروژه منهای هزینه‌های مستقیم",
+      value: Number(kpis.projectProfit) || 0,
+      description: "درآمد قرارداد منهای هزینه‌های مستقیم",
       format: "currency",
       tone: kpis.projectProfit >= 0 ? "success" : "danger",
+      href: "/finance/pnl",
+    }),
+    kpi({
+      key: "net_company_profit",
+      label: "سود خالص شرکت",
+      value: Number(kpis.netCompanyProfit) || 0,
+      description: "سود پروژه منهای مصارف شرکت",
+      format: "currency",
+      tone: kpis.netCompanyProfit >= 0 ? "success" : "danger",
+      href: "/finance/pnl",
     }),
   ];
 }
 
-export function financeKpisAvailable(kpis: FinanceDashboard["kpis"]): boolean {
+/** True when finance payload has loaded (including legitimate zeros). */
+export function financeKpisLoaded(
+  kpis: FinanceDashboard["kpis"] | null | undefined,
+): kpis is FinanceDashboard["kpis"] {
+  return Boolean(kpis && typeof kpis.totalFinalPrice === "number");
+}
+
+/** Whether any financial activity exists (for empty-state messaging). */
+export function financeHasActivity(kpis: FinanceDashboard["kpis"]): boolean {
   return (
     kpis.totalFinalPrice > 0 ||
     kpis.received > 0 ||
     kpis.directProjectCosts > 0 ||
-    kpis.companyExpenses > 0
+    kpis.companyExpenses > 0 ||
+    (kpis.scopedProjectCount ?? 0) > 0
   );
+}
+
+/** @deprecated Prefer financeKpisLoaded + always render cards */
+export function financeKpisAvailable(kpis: FinanceDashboard["kpis"]): boolean {
+  return financeHasActivity(kpis);
 }

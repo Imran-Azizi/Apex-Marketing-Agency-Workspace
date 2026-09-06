@@ -8,6 +8,7 @@ export const UPLOAD_PURPOSE = Object.freeze({
   PRODUCTION_FINAL: "production-final",
   PRODUCTION_POSTER: "production-poster",
   NARRATION_AUDIO: "narration-audio",
+  CONTENT_IMPORT: "content-import",
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
   SERVICE_IMAGE: "service-image",
@@ -46,6 +47,57 @@ export const ALLOWED_UPLOAD_FOLDERS = Object.freeze([
   ...Object.values(MEDIA_ROOTS),
   ...LEGACY_UPLOAD_FOLDERS,
 ]);
+
+/** Document extensions allowed for Scenario / Narration / Storyboard text import. */
+export const CONTENT_IMPORT_DOCUMENT_EXTS = Object.freeze([
+  "txt",
+  "doc",
+  "docx",
+  "pdf",
+  "md",
+  "markdown",
+  "json",
+]);
+
+const CONTENT_IMPORT_DOCUMENT_MIME = Object.freeze([
+  "text/plain",
+  "text/markdown",
+  "application/json",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-word",
+]);
+
+/**
+ * Validate a content-import upload (documents + storyboard images).
+ * @param {{ originalname?: string, mimetype?: string }} file
+ * @returns {{ ok: true } | { ok: false, message: string }}
+ */
+export function validateContentImportFile(file) {
+  const name = String(file?.originalname || "");
+  const mime = String(file?.mimetype || "").toLowerCase();
+  const ext = extensionOf(name);
+
+  if (mime.startsWith("image/")) {
+    return { ok: true };
+  }
+
+  if (CONTENT_IMPORT_DOCUMENT_EXTS.includes(ext)) {
+    return { ok: true };
+  }
+
+  if (CONTENT_IMPORT_DOCUMENT_MIME.some((m) => mime === m || mime.startsWith(m))) {
+    return { ok: true };
+  }
+
+  // Browsers sometimes send octet-stream for Office files — allow by extension only above.
+  return {
+    ok: false,
+    message:
+      "فرمت فایل برای ورود محتوا مجاز نیست. فایل‌های مجاز: TXT، DOC، DOCX، PDF (و تصویر برای استوری‌بورد).",
+  };
+}
 
 const LEGACY_FOLDER_TO_PURPOSE = Object.freeze({
   "client-assets": UPLOAD_PURPOSE.PORTAL_ASSET,
@@ -254,6 +306,14 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
     return {
       folderPath: `${MEDIA_ROOTS.PROJECTS}/${context.projectId}/audio`,
       category: MEDIA_ROOTS.AUDIO,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.CONTENT_IMPORT && context.projectId) {
+    return {
+      folderPath: `${MEDIA_ROOTS.PROJECTS}/${context.projectId}/content`,
+      category,
       purpose,
     };
   }

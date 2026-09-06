@@ -1,9 +1,11 @@
 "use client";
 
+import type { KeyboardEvent, MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
   Eye,
   KeyRound,
+  LogIn,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -17,8 +19,12 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { EmployeeLoginCredentialsFields } from "./employee-login-credentials";
 import type { Employee } from "./types";
 
 interface EmployeeActionsProps {
@@ -30,6 +36,7 @@ interface EmployeeActionsProps {
   canEdit?: boolean;
   canDisable?: boolean;
   canDelete?: boolean;
+  canViewCredentials?: boolean;
 }
 
 export function EmployeeActions({
@@ -41,6 +48,7 @@ export function EmployeeActions({
   canEdit = true,
   canDisable = true,
   canDelete = true,
+  canViewCredentials = false,
 }: EmployeeActionsProps) {
   const router = useRouter();
   const isManagerRole =
@@ -60,7 +68,7 @@ export function EmployeeActions({
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuLabel>عملیات</DropdownMenuLabel>
         <DropdownMenuItem
           className="cursor-pointer"
@@ -95,6 +103,34 @@ export function EmployeeActions({
             </>
           )}
         </DropdownMenuItem>
+        ) : null}
+        {canViewCredentials ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="cursor-pointer [&>svg:last-child]:rtl:-scale-x-100">
+              <LogIn className="me-2 h-4 w-4" />
+              اطلاعات ورود
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent
+              align="start"
+              sideOffset={8}
+              className="w-80 p-3"
+            >
+              <div
+                dir="rtl"
+                onClick={(e: MouseEvent<HTMLDivElement>) => e.stopPropagation()}
+                onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => e.stopPropagation()}
+              >
+                <p className="mb-2.5 text-sm font-semibold">اطلاعات ورود</p>
+                <EmployeeLoginCredentialsFields
+                  key={`${employee.id}-${employee.updatedAt}`}
+                  employeeId={employee.id}
+                  email={employee.email}
+                  hasPasswordCipher={Boolean(employee.hasPasswordCipher)}
+                  compact
+                />
+              </div>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         ) : null}
         {canEdit ? (
         <DropdownMenuItem

@@ -59,6 +59,7 @@ import { CrmDashboardStats } from "./_components/crm-dashboard-stats";
 import { TransferDialog } from "./_components/transfer-dialog";
 import { CustomerStatusSelect } from "./_components/customer-status-select";
 import { InvoiceCreateDialog } from "./_components/invoice-create-dialog";
+import { CrmInvoicesDialog } from "./_components/crm-invoices-dialog";
 import {
   formatLeadSource,
   STAGE_LABELS,
@@ -107,6 +108,10 @@ export default function CrmPage() {
   const [invoiceCustomer, setInvoiceCustomer] = useState<CrmCustomer | null>(
     null,
   );
+  const [invoicesCustomer, setInvoicesCustomer] = useState<CrmCustomer | null>(
+    null,
+  );
+  const [openedInvoiceId, setOpenedInvoiceId] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -266,6 +271,11 @@ export default function CrmPage() {
 
   const openInvoice = (customer: CrmCustomer) => {
     setInvoiceCustomer(customer);
+  };
+
+  const openInvoiceList = (customer: CrmCustomer) => {
+    setOpenedInvoiceId(null);
+    setInvoicesCustomer(customer);
   };
 
   const clearFilters = () => {
@@ -490,6 +500,21 @@ export default function CrmPage() {
           if (!next) setInvoiceCustomer(null);
         }}
         customer={invoiceCustomer}
+        onCreated={({ invoice, customer }) => {
+          setOpenedInvoiceId(invoice.id);
+          setInvoicesCustomer(customer);
+        }}
+      />
+      <CrmInvoicesDialog
+        open={Boolean(invoicesCustomer)}
+        onOpenChange={(next) => {
+          if (!next) {
+            setInvoicesCustomer(null);
+            setOpenedInvoiceId(null);
+          }
+        }}
+        customer={invoicesCustomer}
+        initialInvoiceId={openedInvoiceId}
       />
 
       <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
@@ -812,6 +837,7 @@ export default function CrmPage() {
                           onEdit={openEdit}
                           onDelete={openDelete}
                           onCreateInvoice={openInvoice}
+                          onViewInvoices={openInvoiceList}
                           canEdit={canEdit}
                           canDelete={canDelete}
                           canInvoice={canInvoice}

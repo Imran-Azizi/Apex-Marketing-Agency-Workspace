@@ -287,6 +287,7 @@ model User {
   id           String       @id @default(cuid())
   email        String       @unique
   passwordHash String
+  passwordCipher String?
   fullName     String
   phone        String?
   profileImage String?
@@ -1569,9 +1570,12 @@ model Notification {
   meta            Json?
   createdAt       DateTime  @default(now())
   readAt          DateTime?
+  seenAt          DateTime?
 
   @@index([userId, isRead])
   @@index([portalAccountId, isRead])
+  @@index([userId, seenAt])
+  @@index([portalAccountId, seenAt])
   @@index([createdAt])
   @@map("notifications")
 }

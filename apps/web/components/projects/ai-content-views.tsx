@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ImageOff, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { resolveAssetSrc } from "@/lib/api";
 import { filePreviewUrl } from "@/lib/upload";
 
 type ScenarioFields = {
@@ -61,13 +62,185 @@ function faNum(n: number) {
 }
 
 function Field({ label, value }: { label: string; value?: string | null }) {
-  const trimmed = value?.trim();
-  if (!trimmed) return null;
+  if (value == null || !String(value).trim()) return null;
   return (
     <div className="text-start">
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="mt-1 whitespace-pre-wrap text-sm leading-7">{trimmed}</p>
+      <p className="mt-1 whitespace-pre-wrap text-sm leading-7">{value}</p>
     </div>
+  );
+}
+
+function ExactManualText({
+  text,
+  dir,
+  className,
+  emptyLabel,
+}: {
+  text: string;
+  dir?: "rtl" | "ltr";
+  className?: string;
+  emptyLabel: string;
+}) {
+  if (!text) {
+    return (
+      <p className="text-sm text-muted-foreground" dir={dir}>
+        {emptyLabel}
+      </p>
+    );
+  }
+  return (
+    <article
+      className={cn(
+        "rounded-xl border border-border/60 bg-card p-4 text-start sm:p-5",
+        className,
+      )}
+      dir={dir}
+    >
+      <div className="whitespace-pre-wrap break-words text-[15px] leading-8">
+        {text}
+      </div>
+    </article>
+  );
+}
+
+function getManualRaw(value: unknown): string | null {
+  const obj = asRecord(value);
+  if (!obj || obj.preserveExact !== true) return null;
+  if (typeof obj.manualRaw === "string") return obj.manualRaw;
+  return null;
+}
+
+function getUploadedImages(value: unknown): Array<{
+  url: string;
+  storageKey?: string | null;
+  originalName?: string | null;
+  name?: string | null;
+}> {
+  const obj = asRecord(value);
+  if (!obj || !Array.isArray(obj.uploadedImages)) return [];
+  return obj.uploadedImages
+    .map((item) => {
+      const img = asRecord(item);
+      if (!img) return null;
+      const url = String(img.url || "").trim();
+      if (!url) {
+        const key = String(img.storageKey || "").trim();
+        if (!key) return null;
+        const resolved =
+          resolveAssetSrc({ storageKey: key, meta: img }) ||
+          filePreviewUrl(key);
+        if (!resolved) return null;
+        return {
+          url: resolved,
+          storageKey: key,
+          originalName:
+            typeof img.originalName === "string" ? img.originalName : null,
+          name: typeof img.name === "string" ? img.name : null,
+        };
+      }
+      const resolved =
+        resolveAssetSrc({
+          url,
+          storageKey:
+            typeof img.storageKey === "string" ? img.storageKey : null,
+          meta: img,
+        }) || url;
+      return {
+        url: resolved,
+        storageKey:
+          typeof img.storageKey === "string" ? img.storageKey : null,
+        originalName:
+          typeof img.originalName === "string" ? img.originalName : null,
+        name: typeof img.name === "string" ? img.name : null,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+function ManualUploadedImagesGallery({
+  images,
+}: {
+  images: Array<{
+    url: string;
+    originalName?: string | null;
+    name?: string | null;
+  }>;
+}) {
+  if (!images.length) return null;
+
+  const single = images.length === 1;
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
+        <div className="min-w-0">
+          <h4 className="text-sm font-semibold tracking-tight">
+            تصاویر آپلودشده
+          </h4>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            تصاویر دستی استوری‌بورد
+          </p>
+        </div>
+        <span className="rounded-full bg-brand/10 px-2.5 py-1 text-[11px] font-semibold tabular-nums text-brand">
+          {faNum(images.length)} تصویر
+        </span>
+      </div>
+
+      <div
+        className={cn(
+          "bg-[#0f1115]/80 p-3 sm:p-4",
+          single
+            ? "flex justify-center"
+            : "grid gap-3 sm:grid-cols-2 xl:grid-cols-3",
+        )}
+      >
+        {images.map((img, idx) => {
+          const label =
+            img.originalName || img.name || `تصویر ${faNum(idx + 1)}`;
+          return (
+            <a
+              key={`${img.url}-${idx}`}
+              href={img.url}
+              target="_blank"
+              rel="noreferrer"
+              className={cn(
+                "group relative overflow-hidden rounded-xl border border-white/10 bg-black/30 shadow-sm transition",
+                "hover:border-brand/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
+                single ? "w-full max-w-4xl" : "w-full",
+              )}
+            >
+              <div
+                className={cn(
+                  "relative flex items-center justify-center overflow-hidden",
+                  single ? "min-h-[280px] sm:min-h-[360px]" : "aspect-[4/3]",
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={img.url}
+                  alt={label}
+                  className={cn(
+                    "max-h-full w-full object-contain transition duration-300 group-hover:scale-[1.01]",
+                    single ? "max-h-[min(70vh,520px)]" : "h-full",
+                  )}
+                  loading={idx === 0 ? "eager" : "lazy"}
+                  decoding="async"
+                />
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent px-3 pb-2.5 pt-8">
+                  <p className="truncate text-xs font-medium text-white/95">
+                    {label}
+                  </p>
+                </div>
+                <span className="absolute start-2.5 top-2.5 flex h-7 min-w-7 items-center justify-center rounded-lg bg-background/90 px-1.5 text-[11px] font-semibold tabular-nums shadow-sm ring-1 ring-border/60">
+                  {faNum(idx + 1)}
+                </span>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -259,6 +432,18 @@ export function ScenarioFinalView({
   dir?: "rtl" | "ltr";
   className?: string;
 }) {
+  const manualRaw = getManualRaw(value);
+  if (manualRaw !== null) {
+    return (
+      <ExactManualText
+        text={manualRaw}
+        dir={dir}
+        className={className}
+        emptyLabel="سناریویی ثبت نشده"
+      />
+    );
+  }
+
   const scenario = resolveSingleScenario(value);
   if (!scenario) {
     return (
@@ -337,6 +522,18 @@ export function NarrationFinalView({
   dir?: "rtl" | "ltr";
   className?: string;
 }) {
+  const manualRaw = getManualRaw(value);
+  if (manualRaw !== null) {
+    return (
+      <ExactManualText
+        text={manualRaw}
+        dir={dir}
+        className={className}
+        emptyLabel="نریشنی ثبت نشده"
+      />
+    );
+  }
+
   const obj = asRecord(value);
   const script =
     typeof obj?.script === "string"
@@ -373,7 +570,9 @@ export function NarrationFinalView({
           ) : null}
         </div>
       )}
-      <p className="whitespace-pre-wrap text-[15px] leading-8">{script}</p>
+      <p className="whitespace-pre-wrap break-words text-[15px] leading-8">
+        {script}
+      </p>
       {toneExplanation ? (
         <p className="text-xs leading-6 text-muted-foreground">{toneExplanation}</p>
       ) : null}
@@ -390,6 +589,8 @@ export function StoryboardFinalView({
   dir?: "rtl" | "ltr";
   className?: string;
 }) {
+  const exactRaw = getManualRaw(value);
+  const uploadedImages = useMemo(() => getUploadedImages(value), [value]);
   const collage = resolveStoryboardCollage(value);
   const scenes = useMemo(() => {
     const obj = asRecord(value);
@@ -408,11 +609,69 @@ export function StoryboardFinalView({
     );
   }, [value]);
 
+  const uploadedUrlSet = useMemo(
+    () => new Set(uploadedImages.map((img) => img.url)),
+    [uploadedImages],
+  );
+  const collageIsUploadedDuplicate =
+    Boolean(collage.src) && uploadedUrlSet.has(collage.src as string);
+  const hasManualUploads = uploadedImages.length > 0;
+
+  if (exactRaw !== null) {
+    const hasText = exactRaw.trim().length > 0;
+    return (
+      <div className={cn("space-y-4", className)} dir={dir}>
+        <ManualUploadedImagesGallery images={uploadedImages} />
+        {hasText ? (
+          <ExactManualText
+            text={exactRaw}
+            dir={dir}
+            emptyLabel="استوری‌بوردی ثبت نشده"
+          />
+        ) : null}
+        {!hasText && !uploadedImages.length ? (
+          <p className="text-sm text-muted-foreground" dir={dir}>
+            استوری‌بوردی ثبت نشده
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   const showLegacySceneImages =
+    !hasManualUploads &&
     !collage.src &&
     scenes.some((scene) => Boolean(resolveStoryboardImageUrl(scene)));
 
-  if (scenes.length === 0 && !collage.src) {
+  const meaningfulScenes = hasManualUploads
+    ? scenes.filter((scene) => {
+        const visual =
+          scene.visualDescription ||
+          scene.visual ||
+          scene.description ||
+          scene.notes ||
+          "";
+        const camera = scene.camera || scene.cameraAngle;
+        const action = scene.characterActions || scene.action;
+        return Boolean(
+          String(visual).trim() ||
+            camera ||
+            action ||
+            scene.visualDirection ||
+            scene.environment ||
+            scene.lighting ||
+            scene.transition ||
+            scene.editingNotes,
+        );
+      })
+    : scenes;
+
+  if (
+    meaningfulScenes.length === 0 &&
+    !collage.src &&
+    !hasManualUploads &&
+    !collage.error
+  ) {
     return (
       <p className="text-sm text-muted-foreground" dir={dir}>
         استوری‌بوردی ثبت نشده
@@ -422,7 +681,9 @@ export function StoryboardFinalView({
 
   return (
     <div className={cn("space-y-4", className)} dir={dir}>
-      {collage.src || collage.error ? (
+      <ManualUploadedImagesGallery images={uploadedImages} />
+
+      {(collage.src || collage.error) && !collageIsUploadedDuplicate ? (
         <section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
             <h4 className="text-sm font-semibold tracking-tight">
@@ -446,8 +707,9 @@ export function StoryboardFinalView({
         </section>
       ) : null}
 
+      {meaningfulScenes.length ? (
       <ol className="space-y-4">
-        {scenes.map((scene, i) => {
+        {meaningfulScenes.map((scene, i) => {
           const sceneNo = sceneNumberOf(scene, i);
           const camera = scene.camera || scene.cameraAngle;
           const action = scene.characterActions || scene.action;
@@ -527,6 +789,7 @@ export function StoryboardFinalView({
           );
         })}
       </ol>
+      ) : null}
     </div>
   );
 }

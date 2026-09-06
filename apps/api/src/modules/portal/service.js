@@ -5,7 +5,7 @@ import { AppError } from "../../utils/response.js";
 import { getCustomerPersonName } from "../../utils/crmCustomerName.js";
 import { buildPortalPasswordRecord } from "./credentials.js";
 import { generateOtp, hashToken } from "../../utils/tokens.js";
-import { normalizeWhatsapp, whatsappNumbersMatch, getWhatsappLookupKeys } from "../../utils/whatsappNormalize.js";
+import { normalizeWhatsapp, whatsappNumbersMatch, getWhatsappLookupKeys, syncCustomerWhatsappFromBrief } from "../../utils/whatsappNormalize.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { rebuildProjectContext } from "../../services/projectContext.js";
 import { buildManagerContact } from "../../services/whatsapp.js";
@@ -21,18 +21,19 @@ import {
 } from "./helpers.js";
 import {
   notifyManagersOnce,
-  createNotificationOnce,
-  buildProjectCreatedNotification,
   buildContentApprovedByCustomerNotification,
   buildContentRevisionRequestedNotification,
 } from "../../services/notifications.js";
 import { narrationService } from "../narration/service.js";
 import {
-  sumActivePayments,
   syncProjectFinanceFromPayments,
-  computeFinanceSnapshot,
   hydrateProjectsFinanceFromOpportunities,
 } from "../crm/paymentFinance.js";
+import {
+  buildProjectFinanceSnapshot,
+  createProjectGraph,
+  resolveAgreedPrice,
+} from "../projects/createProjectCore.js";
 
 async function getValidInvite(token) {
   const invite = await prisma.portalInvite.findUnique({
@@ -700,201 +701,35 @@ export const portalService = {
     if (!manager)
       throw new AppError("مدیر سیستم تعریف نشده", 500, "NO_MANAGER");
 
-    const year = new Date().getFullYear();
-    const count = await prisma.project.count();
-    const code = `APX-${year}-${String(count + 1).padStart(4, "0")}`;
-
-    const agreed = Number(opp.agreedPrice || opp.proposedPrice || 0);
-    const depositReceived = await sumActivePayments(prisma, {
+    const agreed = resolveAgreedPrice(opp, null);
+    const financeSnap = await buildProjectFinanceSnapshot(prisma, {
       crmCustomerId: auth.customerId,
       opportunityId: opp.id,
+      agreedPrice: agreed,
     });
-    const financeSnap = computeFinanceSnapshot(agreed, depositReceived);
 
-    const project = await prisma.$transaction(async (tx) => {
-      const p = await tx.project.create({
-        data: {
-          code,
-          title: brief.title || opp.title || `پروژه ${code}`,
-          status: "NEW_MANAGER_REVIEW",
-          customerFacingStatus: "INFO_RECEIVED",
-          crmCustomerId: auth.customerId,
-          portalAccountId: auth.portalAccountId,
-          managerId: manager.id,
-          serviceId: brief.serviceId || opp.serviceId,
-          formatId: brief.formatId || null,
-          durationSec: brief.durationSec || null,
-          language: brief.language || "fa",
-          tone: brief.tone || null,
-          platforms: brief.platforms || [],
-          brief: {
-            personName: brief.personName,
-            jobTitle: brief.jobTitle,
-            companyName: brief.companyName,
-            phone: brief.phone,
-            address: brief.address,
-            email: brief.email,
-            website: brief.website,
-            productName: brief.productName,
-            productDescription: brief.productDescription,
-            features: brief.features,
-            audience: brief.audience,
-            goal: brief.goal,
-            mainMessage: brief.mainMessage,
-            cta: brief.cta,
-            allowedClaims: brief.allowedClaims,
-            mandatoryTexts: brief.mandatoryTexts,
-            brandLimits: brief.brandLimits,
-            customAspectRatio: brief.customAspectRatio || null,
-          },
-          contentRevisionMax: opp.service?.revisionCount || 2,
-          videoRevisionMax: opp.service?.revisionCount || 2,
-        },
-      });
-
-      await tx.opportunity.update({
-        where: { id: opp.id },
-        data: {
-          projectId: p.id,
-          advancePayment: financeSnap.totalPaid,
-        },
-      });
-
-      // Client asset references
-      const assetIds = brief.clientAssetIds || [];
-      for (const assetId of assetIds) {
-        const asset = await tx.clientAsset.findFirst({
-          where: {
-            id: assetId,
-            crmCustomerId: auth.customerId,
-            deletedAt: null,
-          },
-        });
-        if (asset) {
-          await tx.assetReference.create({
-            data: { projectId: p.id, clientAssetId: asset.id },
-          });
-        }
-      }
-
-      // Order-specific uploads as project files
-      for (const f of brief.files || []) {
-        await tx.projectFile.create({
-          data: {
-            projectId: p.id,
-            kind: f.kind || "OTHER",
-            name: f.name,
-            storageKey: f.storageKey,
-            mimeType: f.mimeType,
-            sizeBytes: f.sizeBytes,
-          },
-        });
-      }
-
-      await tx.projectFinance.create({
-        data: {
-          projectId: p.id,
-          basePrice: agreed,
-          agreedPrice: agreed,
-          discount: 0,
-          finalProjectPrice: financeSnap.projectTotal,
-          received: financeSnap.totalPaid,
-        },
-      });
-
-      // Attach deposit invoices to project
-      await tx.invoice.updateMany({
-        where: { opportunityId: opp.id },
-        data: { projectId: p.id },
-      });
-
-      await tx.projectAssignment.create({
-        data: {
-          projectId: p.id,
-          role: "MANAGER",
-          userId: manager.id,
-        },
-      });
-
-      await tx.projectTimelineEvent.create({
-        data: {
-          projectId: p.id,
-          type: "CREATED",
-          title: "پروژه ایجاد شد",
-          body: "فرم اطلاعات پروژه ارسال شد",
-          actorId: auth.portalAccountId,
-        },
-      });
-
-      await tx.downloadPermission.create({
-        data: { projectId: p.id, allowed: false },
-      });
-
-      await rebuildProjectContext(p.id, tx);
-
-      const otherProjects = await tx.project.count({
-        where: {
-          crmCustomerId: auth.customerId,
-          deletedAt: null,
-          id: { not: p.id },
-        },
-      });
-
-      const { applyCrmEvent } = await import("../crm/sync.js");
-      const { CRM_EVENTS } = await import("../crm/pipeline.js");
-      await applyCrmEvent(tx, {
-        customerId: auth.customerId,
-        opportunityId: opp.id,
-        event: CRM_EVENTS.PROJECT_CREATED,
-        source: "PORTAL",
-        relatedType: "Project",
-        relatedId: p.id,
-        isRepeat: otherProjects > 0,
-        title: otherProjects > 0 ? "سفارش تکراری / پروژه جدید" : "پروژه ایجاد شد",
-      });
-
-      const customerName =
-        getCustomerPersonName({
-          personName: brief.personName,
-          companyName: brief.companyName,
-        }) ||
-        getCustomerPersonName(opp.crmCustomer) ||
-        "مشتری";
-
-      // Exactly one manager notification per project (idempotent per recipient).
-      await notifyManagersOnce(
-        buildProjectCreatedNotification({
-          projectId: p.id,
-          projectCode: p.code,
-          projectTitle: p.title,
-          customerName,
-          createdAt: new Date(),
-        }),
+    const { project } = await prisma.$transaction(async (tx) => {
+      const customerWithWhatsapp = await syncCustomerWhatsappFromBrief(
         tx,
+        opp.crmCustomer,
+        brief.whatsapp,
       );
 
-      if (auth.portalAccountId) {
-        await createNotificationOnce(
-          {
-            portalAccountId: auth.portalAccountId,
-            audience: "PORTAL",
-            eventKey: `project.created.portal:${p.id}`,
-            title: "پروژه با موفقیت ایجاد شد",
-            body: `${p.title} (${p.code}) آماده بررسی است.`,
-            link: `/portal/projects/${p.id}`,
-            meta: {
-              type: "PROJECT_CREATED",
-              projectId: p.id,
-              projectCode: p.code,
-              projectName: p.title,
-              statusLabel: "اطلاعات دریافت شد",
-            },
-          },
-          tx,
-        );
-      }
-
-      return p;
+      return createProjectGraph(tx, {
+        opportunity: opp,
+        customer: customerWithWhatsapp,
+        manager,
+        brief,
+        source: "PORTAL",
+        actorId: auth.portalAccountId,
+        portalAccountId: auth.portalAccountId,
+        service: opp.service,
+        agreedPrice: agreed,
+        financeSnap,
+        projectFiles: brief.files || [],
+        timelineBody: "فرم اطلاعات پروژه ارسال شد",
+        notifyPortal: true,
+      });
     });
 
     await writeAudit({
@@ -1952,6 +1787,7 @@ export const briefSchema = z.object({
   jobTitle: z.string().min(1, "سمت الزامی است"),
   companyName: z.string().min(1, "نام شرکت الزامی است"),
   phone: z.string().min(5, "شماره تماس الزامی است"),
+  whatsapp: z.string().min(5, "شماره واتساپ الزامی است").optional(),
   address: z.string().min(3, "آدرس الزامی است"),
   email: z.preprocess(
     (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),

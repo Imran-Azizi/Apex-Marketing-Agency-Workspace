@@ -13,7 +13,7 @@ const TABS: Array<{
   permission?: string;
 }> = [
   { href: "/finance", label: "داشبورد", exact: true },
-  { href: "/finance/projects", label: "پروژه‌ها", permission: "projects.view" },
+  { href: "/finance/projects", label: "پروژه‌ها", permission: "finance.view" },
   { href: "/finance/expenses", label: "مصارف شرکت" },
   { href: "/finance/salaries", label: "معاشات" },
   { href: "/finance/pnl", label: "سود و زیان" },
@@ -21,11 +21,16 @@ const TABS: Array<{
 
 export function FinanceSubnav() {
   const pathname = usePathname();
+  const canViewFinance = useHasPermission("finance.view");
   const canViewProjects = useHasPermission("projects.view");
 
-  const visibleTabs = TABS.filter(
-    (tab) => !("permission" in tab) || canViewProjects,
-  );
+  const visibleTabs = TABS.filter((tab) => {
+    if (!tab.permission) return true;
+    if (tab.href === "/finance/projects") {
+      return canViewFinance || canViewProjects;
+    }
+    return canViewFinance;
+  });
 
   return (
     <HorizontalScroll className="mb-6" bordered={false}>

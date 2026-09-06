@@ -4,6 +4,7 @@ import {
   sanitizePaymentMethodMeta,
   assertPaymentMethodMeta,
   formatPaymentMethod,
+  formatPaymentMethodMetaRows,
 } from '../../src/modules/crm/paymentMethods.js';
 
 test('keeps only fields for the selected payment method', () => {
@@ -58,4 +59,42 @@ test('labels cash as in-person and bank transfer distinctly', () => {
   assert.equal(formatPaymentMethod('CASH'), 'نقدی / حضوری');
   assert.equal(formatPaymentMethod('BANK_TRANSFER'), 'انتقال بانکی');
   assert.equal(formatPaymentMethod('HESAB_PAY'), 'حساب پی');
+});
+
+test('formatPaymentMethodMetaRows shows only selected method details', () => {
+  assert.deepEqual(
+    formatPaymentMethodMetaRows('CASH', {
+      officeAddress: 'Kabul Office',
+      responsiblePhone: '0700123456',
+      hesabPayAccount: 'drop',
+    }),
+    [
+      { label: 'آدرس دفتر', value: 'Kabul Office' },
+      { label: 'شماره تماس مسئول دفتر', value: '0700123456', ltr: true },
+    ],
+  );
+
+  assert.deepEqual(
+    formatPaymentMethodMetaRows('HAWALA', {
+      bankInfo: 'Sarafi ABC / ref 44',
+      bankCardNumber: 'should-drop',
+    }),
+    [{ label: 'جزئیات حواله', value: 'Sarafi ABC / ref 44' }],
+  );
+
+  assert.deepEqual(
+    formatPaymentMethodMetaRows('HESAB_PAY', {
+      hesabPayAccount: '998877',
+      officeAddress: 'drop',
+    }),
+    [{ label: 'شماره حساب پی', value: '998877', ltr: true }],
+  );
+
+  assert.deepEqual(
+    formatPaymentMethodMetaRows('BANK_TRANSFER', {
+      bankCardNumber: '6037-1234',
+      bankInfo: 'should-drop',
+    }),
+    [{ label: 'شماره کارت بانکی', value: '6037-1234', ltr: true }],
+  );
 });

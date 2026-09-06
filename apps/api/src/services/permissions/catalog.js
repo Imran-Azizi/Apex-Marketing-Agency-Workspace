@@ -131,6 +131,11 @@ export const PERMISSION_CATALOG = [
         description: "ویرایش اطلاعات عملیاتی پروژه",
       },
       {
+        code: "projects.create",
+        label: "ایجاد",
+        description: "ایجاد پروژه جدید برای مشتری موجود",
+      },
+      {
         code: "projects.delete",
         label: "حذف",
         description: "حذف نرم پروژه و سوابق مرتبط",
@@ -341,6 +346,11 @@ export const PERMISSION_CATALOG = [
         description: "فعال یا غیرفعال کردن حساب",
       },
       { code: "employees.delete", label: "حذف", description: "حذف نرم کارمند" },
+      {
+        code: "employees.credentials",
+        label: "اطلاعات ورود",
+        description: "مشاهده و کپی ایمیل و رمز عبور ورود کارمند",
+      },
     ],
   },
   {
@@ -615,6 +625,7 @@ export const LEGACY_CODE_MAP = {
     "employees.edit",
     "employees.disable",
     "employees.delete",
+    "employees.credentials",
   ],
   "audit:read": ["audit.view"],
   "ai:run": ["content.generate"],
@@ -681,6 +692,7 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "dashboard.view",
     "projects.view",
     "projects.edit",
+    "projects.create",
     "projects.assign",
     "projects.complete",
     "content.view",

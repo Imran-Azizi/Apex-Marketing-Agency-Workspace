@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { requireInternal, requirePermission } from "../../middleware/rbac.js";
 import { requireCsrf } from "../../middleware/csrf.js";
-import { ok } from "../../utils/response.js";
+import { ok, created } from "../../utils/response.js";
 import { projectService } from "./service.js";
 
 const router = Router();
@@ -34,6 +34,31 @@ router.get(
   async (req, res, next) => {
     try {
       ok(res, await projectService.filterOptions(req.auth));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.get(
+  "/create-options",
+  requirePermission("projects.create"),
+  async (req, res, next) => {
+    try {
+      ok(res, await projectService.createOptions(req.auth, req.query));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  "/",
+  requireCsrf,
+  requirePermission("projects.create"),
+  async (req, res, next) => {
+    try {
+      created(res, await projectService.createForCustomer(req.body, req.auth, req));
     } catch (e) {
       next(e);
     }

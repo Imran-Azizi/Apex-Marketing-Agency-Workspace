@@ -27,6 +27,7 @@ export type CustomerPayment = {
 export type PaymentMethodMetaRow = {
   label: string;
   value: string;
+  ltr?: boolean;
 };
 
 export type PaymentReceiptFinance = {

@@ -203,8 +203,10 @@ router.post('/:projectId/complete', requireCsrf, requirePermission('projects.com
 
     ok(res, {
       id: req.params.projectId,
-      status: 'COMPLETED',
-      customerFacingStatus: 'COMPLETED',
+      status: result.project?.status || 'COMPLETED',
+      customerFacingStatus:
+        result.project?.customerFacingStatus || 'COMPLETED',
+      deliveryStatus: result.project?.deliveryStatus || 'COMPLETED',
       completedAt: result.completedAt,
       alreadyCompleted: result.alreadyCompleted,
     });

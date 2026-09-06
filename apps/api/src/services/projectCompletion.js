@@ -103,32 +103,27 @@ export async function markProjectCompleted(
   const customerId = crmCustomerId || current.crmCustomerId;
   const at = completedAt instanceof Date ? completedAt : new Date(completedAt);
 
-  await db.project.update({
-    where: { id: projectId },
-    data: {
-      status: 'COMPLETED',
-      customerFacingStatus: 'COMPLETED',
-      completedAt: at,
-      deliveryStatus: 'COMPLETED',
-    },
-  });
+  await db.$transaction(async (tx) => {
+    await tx.project.update({
+      where: { id: projectId },
+      data: {
+        status: 'COMPLETED',
+        customerFacingStatus: 'COMPLETED',
+        completedAt: at,
+        deliveryStatus: 'COMPLETED',
+      },
+    });
 
-  // Keep editor/narrator workspaces in sync with project completion.
-  try {
-    await db.editingTask.updateMany({
+    await tx.editingTask.updateMany({
       where: {
         projectId,
         status: { not: 'COMPLETED' },
       },
       data: { status: 'COMPLETED', completedAt: at },
     });
-  } catch (err) {
-    console.error('[completion] editing task sync', err?.message || err);
-  }
 
-  try {
-    if (db.narrationTask?.updateMany) {
-      await db.narrationTask.updateMany({
+    if (tx.narrationTask?.updateMany) {
+      await tx.narrationTask.updateMany({
         where: {
           projectId,
           status: { not: 'APPROVED' },
@@ -136,9 +131,17 @@ export async function markProjectCompleted(
         data: { status: 'APPROVED', approvedAt: at },
       });
     }
-  } catch (err) {
-    console.error('[completion] narration task sync', err?.message || err);
-  }
+
+    await tx.projectTimelineEvent.create({
+      data: {
+        projectId,
+        type: timelineType,
+        title: timelineTitle,
+        body: timelineBody,
+        actorId: actorId || undefined,
+      },
+    });
+  });
 
   if (customerId) {
     const { applyCrmEvent } = await import('../modules/crm/sync.js');
@@ -154,16 +157,6 @@ export async function markProjectCompleted(
       actorType: actorId ? 'USER' : undefined,
     });
   }
-
-  await db.projectTimelineEvent.create({
-    data: {
-      projectId,
-      type: timelineType,
-      title: timelineTitle,
-      body: timelineBody,
-      actorId: actorId || undefined,
-    },
-  });
 
   // Notify assigned editors so their panels reflect completion.
   try {
@@ -190,6 +183,47 @@ export async function markProjectCompleted(
     }
   } catch (err) {
     console.error('[completion] editor notify', err?.message || err);
+  }
+
+  // Notify assigned narrators.
+  try {
+    const { createNotificationOnce } = await import('./notifications.js');
+    if (db.narrationTask?.findMany) {
+      const narrationTasks = await db.narrationTask.findMany({
+        where: { projectId, narratorUserId: { not: null } },
+        select: { narratorUserId: true },
+        distinct: ['narratorUserId'],
+      });
+      for (const task of narrationTasks) {
+        if (!task.narratorUserId) continue;
+        await createNotificationOnce(
+          {
+            eventKey: `project.completed.narrator:${projectId}:${task.narratorUserId}`,
+            userId: task.narratorUserId,
+            audience: 'INTERNAL',
+            title: `پروژه «${current.title || 'پروژه'}» تکمیل شد`,
+            body: [
+              `پروژه «${current.title || 'پروژه'}» توسط سیستم به‌عنوان تکمیل‌شده ثبت شد.`,
+              current.code ? `شناسه: ${current.code}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            link: `/narrator/projects`,
+            meta: {
+              type: 'PROJECT_COMPLETED',
+              projectId,
+              projectName: current.title,
+              projectCode: current.code,
+              actionType: 'PROJECT_COMPLETED',
+              createdAt: at.toISOString(),
+            },
+          },
+          db,
+        );
+      }
+    }
+  } catch (err) {
+    console.error('[completion] narrator notify', err?.message || err);
   }
 
   if (notifyProgress) {
@@ -378,5 +412,20 @@ export async function forceCompleteProject(
     actorId,
   });
 
-  return { ...result, project };
+  // Re-read authoritative status for the API response.
+  const refreshed = await db.project.findFirst({
+    where: { id: projectId, deletedAt: null },
+    select: {
+      id: true,
+      status: true,
+      customerFacingStatus: true,
+      completedAt: true,
+      deliveryStatus: true,
+      crmCustomerId: true,
+      title: true,
+      code: true,
+    },
+  });
+
+  return { ...result, project: refreshed || project };
 }

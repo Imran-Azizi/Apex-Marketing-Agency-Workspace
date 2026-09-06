@@ -33,7 +33,7 @@ const KPI_DEFS: Array<{
   {
     key: "totalProjectReceipts",
     label: "مجموع دریافتی پروژه‌ها",
-    hint: "در بازه زمانی انتخاب‌شده",
+    hint: "جمع مبلغ کل پروژه‌ها (قرارداد)",
   },
   {
     key: "received",

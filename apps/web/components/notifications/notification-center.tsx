@@ -67,6 +67,7 @@ export type NotificationItem = {
   link: string | null;
   isRead: boolean;
   isUnseen?: boolean;
+  seenAt?: string | null;
   createdAt: string;
   readAt: string | null;
   meta: NotificationMeta;
@@ -97,12 +98,41 @@ const NOTIFICATIONS_QUERY_KEY = ["notifications"] as const;
 const UNSEEN_COUNT_QUERY_KEY = ["notifications", "unseen-count"] as const;
 
 function isUnseenNotification(item: NotificationItem): boolean {
-  return item.isUnseen ?? !item.isRead;
+  if (typeof item.isUnseen === "boolean") return item.isUnseen;
+  if (item.seenAt) return false;
+  return !item.isRead;
 }
 
-function toSeen(item: NotificationItem, now: string): NotificationItem {
+function markItemSeen(item: NotificationItem, at: string): NotificationItem {
   if (!isUnseenNotification(item)) return item;
-  return { ...item, isRead: true, isUnseen: false, readAt: now };
+  return { ...item, isUnseen: false, seenAt: at };
+}
+
+function markViewedInCache(
+  data: InfiniteData<NotificationsPage> | undefined,
+  viewedBefore: string,
+): InfiniteData<NotificationsPage> | undefined {
+  if (!data) return data;
+  const cutoff = new Date(viewedBefore).getTime();
+  if (Number.isNaN(cutoff)) return data;
+
+  const pages = data.pages.map((page) => ({
+    ...page,
+    items: page.items.map((item) => {
+      if (!isUnseenNotification(item)) return item;
+      return new Date(item.createdAt).getTime() <= cutoff
+        ? markItemSeen(item, viewedBefore)
+        : item;
+    }),
+  }));
+  const unseenCount = pages.reduce(
+    (count, page) => count + page.items.filter(isUnseenNotification).length,
+    0,
+  );
+  if (pages[0]) {
+    pages[0] = { ...pages[0], unseenCount, unreadCount: unseenCount };
+  }
+  return { ...data, pages };
 }
 
 async function fetchNotificationsPage({
@@ -133,7 +163,7 @@ async function fetchNotificationsPage({
     ...data.data,
     items: data.data.items.map((item) => ({
       ...item,
-      isUnseen: item.isUnseen ?? !item.isRead,
+      isUnseen: item.isUnseen ?? !item.seenAt,
     })),
     unreadCount: unseenCount,
     unseenCount,
@@ -205,7 +235,11 @@ function markAllReadInCache(
       ...page,
       unreadCount: index === 0 ? 0 : page.unreadCount,
       unseenCount: index === 0 ? 0 : page.unseenCount,
-      items: page.items.map((item) => toSeen(item, now)),
+      items: page.items.map((item) => ({
+        ...markItemSeen(item, now),
+        isRead: true,
+        readAt: item.readAt || now,
+      })),
     })),
   };
 }
@@ -234,14 +268,14 @@ function NotificationCard({
       data-unseen={unseen ? "true" : "false"}
       className={cn(
         "relative w-full rounded-xl border p-3 text-start",
-        "transition-colors duration-300",
+        "transition-[background-color,border-color,box-shadow] duration-300",
         "hover:border-brand/40 hover:bg-brand/[0.07] hover:shadow-sm",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
         "active:scale-[0.99] active:bg-brand/10",
         "cursor-pointer",
         unseen
-          ? "border-brand/30 bg-brand/[0.08] dark:bg-brand/[0.14]"
-          : "border-border/80 bg-background",
+          ? "border-brand/25 bg-brand/[0.12] shadow-[inset_0_0_0_1px_hsl(var(--brand)/0.08)] dark:bg-brand/20"
+          : "border-border/70 bg-background",
       )}
     >
       {unseen && (
@@ -367,8 +401,7 @@ export function NotificationCenter({ className }: { className?: string }) {
     queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
 
   const markAllRead = useMutation({
-    mutationFn: (vars?: MarkSeenVars) =>
-      apiPost("/notifications/read-all", vars?.viewedBefore ? { viewedBefore: vars.viewedBefore } : {}),
+    mutationFn: () => apiPost("/notifications/read-all", {}),
     onMutate: async () => {
       await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
       const previous = queryClient.getQueryData<InfiniteData<NotificationsPage>>(
@@ -384,6 +417,43 @@ export function NotificationCenter({ className }: { className?: string }) {
       setUnseenCountCache(queryClient, 0);
       return { previous, previousCount };
     },
+    onError: (e, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(NOTIFICATIONS_QUERY_KEY, context.previous);
+      }
+      if (context?.previousCount) {
+        queryClient.setQueryData(UNSEEN_COUNT_QUERY_KEY, context.previousCount);
+      }
+      toast.error(e instanceof Error ? e.message : "خطا در به‌روزرسانی اعلان‌ها");
+    },
+    onSettled: invalidate,
+  });
+
+  const markSeen = useMutation({
+    mutationFn: (vars: MarkSeenVars) =>
+      apiPost("/notifications/seen", {
+        viewedBefore: vars.viewedBefore,
+      }),
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: NOTIFICATIONS_QUERY_KEY });
+      const previous = queryClient.getQueryData<InfiniteData<NotificationsPage>>(
+        NOTIFICATIONS_QUERY_KEY,
+      );
+      const previousCount = queryClient.getQueryData<UnseenCountPayload>(
+        UNSEEN_COUNT_QUERY_KEY,
+      );
+      const viewedBefore = vars.viewedBefore || new Date().toISOString();
+      queryClient.setQueryData<InfiniteData<NotificationsPage>>(
+        NOTIFICATIONS_QUERY_KEY,
+        (old) => markViewedInCache(old, viewedBefore),
+      );
+      const nextCount =
+        queryClient.getQueryData<InfiniteData<NotificationsPage>>(
+          NOTIFICATIONS_QUERY_KEY,
+        )?.pages[0]?.unseenCount ?? 0;
+      setUnseenCountCache(queryClient, nextCount);
+      return { previous, previousCount };
+    },
     onError: (e, vars, context) => {
       if (context?.previous) {
         queryClient.setQueryData(NOTIFICATIONS_QUERY_KEY, context.previous);
@@ -391,7 +461,7 @@ export function NotificationCenter({ className }: { className?: string }) {
       if (context?.previousCount) {
         queryClient.setQueryData(UNSEEN_COUNT_QUERY_KEY, context.previousCount);
       }
-      if (!vars?.silent) {
+      if (!vars.silent) {
         toast.error(e instanceof Error ? e.message : "خطا در به‌روزرسانی اعلان‌ها");
       }
     },
@@ -417,11 +487,11 @@ export function NotificationCenter({ className }: { className?: string }) {
   }, [open, refetchList, refetchUnseen]);
 
   function markViewedAsSeen() {
-    if (unseenCount <= 0 || markAllRead.isPending) return;
-    markAllRead.mutate({
-      viewedBefore: new Date().toISOString(),
-      silent: true,
-    });
+    if (markSeen.isPending) return;
+    const viewedBefore = new Date().toISOString();
+    const hasUnseen = items.some(isUnseenNotification) || unseenCount > 0;
+    if (!hasUnseen) return;
+    markSeen.mutate({ viewedBefore, silent: true });
   }
 
   function handleOpenChange(nextOpen: boolean) {

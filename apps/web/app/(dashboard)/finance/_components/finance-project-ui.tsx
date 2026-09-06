@@ -3,6 +3,7 @@ import {
   getCustomerListDisplay,
   getCustomerPersonName,
 } from "@/lib/crm-customer-name";
+import { getProjectStatusLabel } from "@/lib/project-status";
 import type { FinanceProject } from "./types";
 
 export const VERIFICATION_LABELS: Record<string, string> = {
@@ -23,6 +24,24 @@ export function settlementBadgeVariant(
   if (value === "PARTIAL") return "warning";
   if (value === "UNPAID") return "secondary";
   return "outline";
+}
+
+export function projectStatusBadgeVariant(
+  project: Pick<FinanceProject, "status" | "isComplete">,
+): "success" | "brand" | "secondary" | "outline" | "warning" {
+  if (project.isComplete || project.status === "COMPLETED") return "success";
+  if (project.status === "ON_HOLD") return "warning";
+  if (project.status === "CANCELED" || project.status === "CANCELLED") {
+    return "secondary";
+  }
+  return "outline";
+}
+
+export function projectLifecycleLabel(
+  project: Pick<FinanceProject, "status" | "isComplete">,
+): string {
+  if (project.isComplete || project.status === "COMPLETED") return "تکمیل‌شده";
+  return getProjectStatusLabel(project.status);
 }
 
 export function paymentProgressPct(total: number, paid: number) {

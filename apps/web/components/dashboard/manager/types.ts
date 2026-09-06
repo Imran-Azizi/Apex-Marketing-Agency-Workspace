@@ -10,6 +10,21 @@ export interface DashboardSummary {
   projectStatusCounts: Array<{ status: string; _count: number }>;
   leadsToday: number;
   followUpsDue: number;
+  projectKpis?: {
+    total: number;
+    active: number;
+    completed: number;
+    waitingCustomer: number;
+    waitingApproval: number;
+    onHold: number;
+    canceled: number;
+  };
+  monthlyProjectGrowth?: Array<{
+    key: string;
+    year: number;
+    month: number;
+    count: number;
+  }>;
 }
 
 export interface ProjectFinance {
@@ -82,4 +97,8 @@ export interface ManagerMetrics {
     available: boolean;
     cards: KpiMetric[];
   } | null;
+  crmPulse: {
+    leadsToday: number;
+    followUpsDue: number;
+  };
 }

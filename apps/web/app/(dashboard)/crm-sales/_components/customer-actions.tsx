@@ -2,6 +2,7 @@
 
 import {
   CheckCircle2,
+  Eye,
   FileText,
   MoreHorizontal,
   Pencil,
@@ -26,6 +27,7 @@ interface CustomerActionsProps {
   onEdit: (customer: CrmCustomer) => void;
   onDelete: (customer: CrmCustomer) => void;
   onCreateInvoice?: (customer: CrmCustomer) => void;
+  onViewInvoices?: (customer: CrmCustomer) => void;
   canEdit?: boolean;
   canDelete?: boolean;
   canInvoice?: boolean;
@@ -40,6 +42,7 @@ export function CustomerActions({
   onEdit,
   onDelete,
   onCreateInvoice,
+  onViewInvoices,
   canEdit = true,
   canDelete = true,
   canInvoice = false,
@@ -47,6 +50,7 @@ export function CustomerActions({
 }: CustomerActionsProps) {
   const invoiceAllowed =
     canInvoice && customer.allowedActions?.createInvoice !== false;
+  const canViewInvoices = canInvoice || customer.allowedActions?.viewInvoice;
   const {
     alreadySent,
     allowed: transferAllowed,
@@ -56,7 +60,7 @@ export function CustomerActions({
     transfer,
   } = useCustomerTransfer(customer, canTransfer);
 
-  const hasWorkflowActions = canInvoice || canTransfer;
+  const hasWorkflowActions = canInvoice || canTransfer || canViewInvoices;
   const hasMaintenanceActions = canEdit || canDelete;
 
   if (!hasWorkflowActions && !hasMaintenanceActions) return null;
@@ -97,6 +101,16 @@ export function CustomerActions({
             >
               <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="truncate">{crmSalesText("createInvoice")}</span>
+            </DropdownMenuItem>
+          ) : null}
+
+          {canViewInvoices ? (
+            <DropdownMenuItem
+              className={itemClass}
+              onClick={() => onViewInvoices?.(customer)}
+            >
+              <Eye className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{crmSalesText("viewInvoices")}</span>
             </DropdownMenuItem>
           ) : null}
 
