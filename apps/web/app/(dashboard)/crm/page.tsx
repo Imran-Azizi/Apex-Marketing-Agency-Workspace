@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -37,17 +38,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ChevronLeft,
-  ChevronRight,
-  Plus,
   Search,
   SlidersHorizontal,
   X,
   ArrowUpRight,
+  Trash2,
 } from "lucide-react";
 import { useHasPermission, useMeQuery } from "@/lib/permissions";
+import { TablePagination } from "@/components/shared/table-pagination";
 import { CustomerFormDialog } from "./_components/customer-form-dialog";
 import { DeleteCustomerDialog } from "./_components/delete-customer-dialog";
+import { BulkDeleteCustomersDialog } from "./_components/bulk-delete-customers-dialog";
+import { CrmSelectionBar } from "./_components/crm-selection-bar";
+import { useCustomerSelection } from "./_components/use-customer-selection";
 import { CustomerActions } from "./_components/customer-actions";
 import { CustomerPipelineStatusBadge } from "./_components/customer-pipeline-status-badge";
 import { formatLeadSource } from "./_components/constants";
@@ -57,7 +60,7 @@ import type {
   CrmListResponse,
 } from "./_components/types";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 const ALL = "ALL";
 
 export default function CrmPage() {
@@ -73,6 +76,7 @@ export default function CrmPage() {
   const [salesOwnerId, setSalesOwnerId] = useState(ALL);
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CrmCustomer | null>(
@@ -109,7 +113,11 @@ export default function CrmPage() {
   });
 
   const { data, isLoading, isFetching, error } = useQuery({
-    queryKey: ["crm-customers", "management", { search, source, salesOwnerId, page }],
+    queryKey: [
+      "crm-customers",
+      "management",
+      { search, source, salesOwnerId, page, pageSize: PAGE_SIZE },
+    ],
     queryFn: () => apiGet<CrmListResponse>(`/crm/customers?${listParams}`),
     placeholderData: keepPreviousData,
   });
@@ -117,7 +125,33 @@ export default function CrmPage() {
   const activeDropdownFilters =
     (source !== ALL ? 1 : 0) + (salesOwnerId !== ALL ? 1 : 0);
   const hasFilters = search !== "" || source !== ALL || salesOwnerId !== ALL;
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
+  const pageSize = data?.pageSize || PAGE_SIZE;
+  const totalPages = data
+    ? data.totalPages || Math.max(1, Math.ceil(data.total / pageSize))
+    : 1;
+
+  // After delete/filter, avoid staying on an empty trailing page.
+  useEffect(() => {
+    if (!data) return;
+    if (page > totalPages) setPage(totalPages);
+  }, [data, page, totalPages]);
+
+  const selectablePageIds = canDelete
+    ? (data?.items.map((item) => item.id) ?? [])
+    : [];
+  const {
+    selectedIds,
+    selectedCount,
+    selectAllState,
+    toggleRow,
+    toggleAllOnPage,
+    clearSelection,
+    removeIds,
+  } = useCustomerSelection(selectablePageIds);
+
+  const selectedCountLabel = `${selectedCount.toLocaleString("fa-AF", {
+    numberingSystem: "latn",
+  })} مورد انتخاب شده`;
 
   const openCreate = () => {
     setEditingCustomer(null);
@@ -229,17 +263,45 @@ export default function CrmPage() {
         title="مدیریت مشتری"
         subtitle="فقط مشتریان فعال که از CRM و فروش منتقل شده‌اند — پس از تحویل پروژه از فهرست فعال خارج می‌شوند"
         actions={
-          canCreate ? (
-            <Button
-              variant="brand"
-              asChild
-              className="h-9 shrink-0 gap-1.5 px-3 text-sm sm:h-10 sm:px-4"
-            >
-              <Link href="/crm-sales">
-                <ArrowUpRight className="h-4 w-4" />
-                <span className="whitespace-nowrap">ثبت سرنخ در CRM و فروش</span>
-              </Link>
-            </Button>
+          canCreate || (canDelete && selectedCount > 0) ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canDelete && selectedCount > 0 ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearSelection}
+                    className="h-9 text-muted-foreground"
+                  >
+                    پاک کردن انتخاب
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setBulkDeleteOpen(true)}
+                    className="h-9 shrink-0 gap-1.5 px-3 text-sm sm:h-10 sm:px-4"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="whitespace-nowrap">حذف انتخاب‌شده‌ها</span>
+                  </Button>
+                </>
+              ) : null}
+              {canCreate ? (
+                <Button
+                  variant="brand"
+                  asChild
+                  className="h-9 shrink-0 gap-1.5 px-3 text-sm sm:h-10 sm:px-4"
+                >
+                  <Link href="/crm-sales">
+                    <ArrowUpRight className="h-4 w-4" />
+                    <span className="whitespace-nowrap">
+                      ثبت سرنخ در CRM و فروش
+                    </span>
+                  </Link>
+                </Button>
+              ) : null}
+            </div>
           ) : undefined
         }
       />
@@ -253,6 +315,13 @@ export default function CrmPage() {
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         customer={deletingCustomer}
+        onDeleted={(id) => removeIds([id])}
+      />
+      <BulkDeleteCustomersDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        ids={[...selectedIds]}
+        onDeleted={removeIds}
       />
 
       <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
@@ -332,6 +401,7 @@ export default function CrmPage() {
           <p className="text-sm text-muted-foreground md:hidden">
             {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })}{" "}
             مشتری
+            {selectedCount > 0 ? ` · ${selectedCountLabel}` : ""}
           </p>
         )}
 
@@ -355,11 +425,27 @@ export default function CrmPage() {
             <p className="text-sm text-muted-foreground ms-auto">
               {data.total.toLocaleString("fa-AF", { numberingSystem: "latn" })}{" "}
               مشتری
+              {selectedCount > 0 ? (
+                <span className="ms-2 text-foreground">
+                  · {selectedCountLabel}
+                </span>
+              ) : null}
             </p>
           )}
         </div>
 
-        {isLoading && <LoadingTable columns={7} />}
+        <CrmSelectionBar
+          className="md:hidden"
+          selectedCount={selectedCount}
+          selectedLabel={selectedCountLabel}
+          canDelete={canDelete}
+          bulkDeleteLabel="حذف انتخاب‌شده‌ها"
+          clearLabel="پاک کردن انتخاب"
+          onBulkDelete={() => setBulkDeleteOpen(true)}
+          onClear={clearSelection}
+        />
+
+        {isLoading && <LoadingTable columns={canDelete ? 8 : 7} />}
 
         {error && (
           <EmptyState
@@ -401,9 +487,21 @@ export default function CrmPage() {
                 isFetching ? "opacity-70 transition-opacity" : undefined
               }
             >
-              <Table className="min-w-[46rem]">
+              <Table className="min-w-[48rem]">
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    {canDelete ? (
+                      <TableHead className="sticky top-0 z-[1] w-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        <Checkbox
+                          checked={selectAllState}
+                          onCheckedChange={(value) =>
+                            toggleAllOnPage(value === true)
+                          }
+                          aria-label="انتخاب همه"
+                          disabled={selectablePageIds.length === 0}
+                        />
+                      </TableHead>
+                    ) : null}
                     <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       مشتری
                     </TableHead>
@@ -433,6 +531,9 @@ export default function CrmPage() {
                       key={customer.id}
                       role="link"
                       tabIndex={0}
+                      data-state={
+                        selectedIds.has(customer.id) ? "selected" : undefined
+                      }
                       className="cursor-pointer"
                       onClick={() => router.push(`/crm/${customer.id}`)}
                       onKeyDown={(e) => {
@@ -442,6 +543,20 @@ export default function CrmPage() {
                         }
                       }}
                     >
+                      {canDelete ? (
+                        <TableCell
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <Checkbox
+                            checked={selectedIds.has(customer.id)}
+                            onCheckedChange={(value) =>
+                              toggleRow(customer.id, value === true)
+                            }
+                            aria-label={`انتخاب ${customer.personName}`}
+                          />
+                        </TableCell>
+                      ) : null}
                       <TableCell>
                         <div className="min-w-[8rem] font-medium">
                           {customer.personName}
@@ -507,37 +622,13 @@ export default function CrmPage() {
               </Table>
             </HorizontalScroll>
 
-            {totalPages > 1 && (
-              <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-                <p className="text-sm text-muted-foreground">
-                  صفحه{" "}
-                  {page.toLocaleString("fa-AF", { numberingSystem: "latn" })} از{" "}
-                  {totalPages.toLocaleString("fa-AF", {
-                    numberingSystem: "latn",
-                  })}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1 || isFetching}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                    قبلی
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page >= totalPages || isFetching}
-                  >
-                    بعدی
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              total={data.total}
+              onPageChange={setPage}
+              isFetching={isFetching}
+            />
           </>
         )}
       </div>

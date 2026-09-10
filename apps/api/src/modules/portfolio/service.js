@@ -4,7 +4,6 @@ import { prisma } from '../../db/prisma.js';
 import { AppError } from '../../utils/response.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { storage } from '../../services/storage.js';
-import { env } from '../../config/env.js';
 import {
   asMeta,
   isSentToCustomer,
@@ -860,8 +859,8 @@ export async function streamPortfolioVideo(req, res, file) {
       : null) ||
     'video/mp4';
 
-  // Prefer CDN redirect for Cloudinary — avoids Node proxy "terminated" errors.
-  if (env.storageDriver === 'cloudinary') {
+  // Prefer CDN redirect when the driver can issue a public/signed URL.
+  if (storage.prefersDirectCdnRedirect({ signed: false })) {
     try {
       const url =
         (await storage.createPresignedGetUrl(storageKey).catch(() => null)) ||

@@ -429,7 +429,7 @@ export default function CatalogServicesPage() {
             <DialogDescription className="leading-6">
               خدمت «{deleteTarget ? serviceTitle(deleteTarget) : ""}» حذف نرم
               می‌شود و از وب‌سایت عمومی برداشته خواهد شد. این عمل قابل‌بازگشت
-              نیست مگر از طریق پشتیبان.
+              نیست مگر از طریق بک اپ.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:justify-start">

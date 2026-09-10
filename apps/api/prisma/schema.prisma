@@ -476,6 +476,7 @@ model CrmCustomer {
   @@index([customerCode])
   @@index([convertedAt])
   @@index([lastContactAt])
+  @@index([deletedAt, updatedAt])
   @@map("crm_customers")
 }
 
@@ -791,6 +792,8 @@ model Project {
   createdAt            DateTime                @default(now())
   updatedAt            DateTime                @updatedAt
   deletedAt            DateTime?
+  /// Client-generated key so duplicate submits reuse the same project.
+  createIdempotencyKey String?                 @unique
 
   opportunity        Opportunity?
   context            ProjectContext?
@@ -823,6 +826,7 @@ model Project {
   @@index([paymentStatus])
   @@index([deletedAt])
   @@index([deletedAt, status])
+  @@index([deletedAt, updatedAt])
   @@index([customerFacingStatus])
   @@index([portalAccountId])
   @@map("projects")
@@ -1159,6 +1163,7 @@ model ContentVersion {
   @@index([projectId])
   @@index([projectId, status])
   @@index([publishedToClient])
+  @@index([publishedToClient, isLocked])
   @@map("content_versions")
 }
 
@@ -1385,6 +1390,7 @@ model Payment {
 
   @@index([invoiceId])
   @@index([verification])
+  @@index([verification, paidAt])
   @@index([crmCustomerId])
   @@index([createdAt])
   @@map("payments")
@@ -1703,6 +1709,8 @@ model SystemBackup {
   errorMessage String?
   emailTo      String?
   emailSentAt  DateTime?
+  /// Soft email-delivery failure after a successful backup (not a backup failure).
+  emailError   String?
   createdById  String?
   createdBy    User?        @relation("BackupCreator", fields: [createdById], references: [id], onDelete: SetNull)
   completedAt  DateTime?

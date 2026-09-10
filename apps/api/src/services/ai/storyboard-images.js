@@ -10,6 +10,7 @@ import { storage } from '../storage.js';
 import { aiProvider } from './ai.service.js';
 import { openRouterService } from './openrouter.service.js';
 import { normalizeStoryboardOutput } from './validate.js';
+import { isSafeExternalUrl } from '../../utils/ssrf.js';
 import {
   STORYBOARD_IMAGE_SIZE,
   buildReinforcedSceneImagePrompt,
@@ -66,9 +67,9 @@ async function imageToBuffer(image) {
     const buffer = Buffer.from(image.b64, 'base64');
     return buffer.length >= 8000 ? buffer : null;
   }
-  if (!image?.url) return null;
+  if (!image?.url || !isSafeExternalUrl(image.url)) return null;
   try {
-    const res = await fetch(image.url, { redirect: 'follow' });
+    const res = await fetch(image.url, { redirect: 'error' });
     const ct = res.headers.get('content-type') || '';
     if (!res.ok || !ct.startsWith('image/')) return null;
     const buffer = Buffer.from(await res.arrayBuffer());

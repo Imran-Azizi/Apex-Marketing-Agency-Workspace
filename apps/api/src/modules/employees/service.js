@@ -5,6 +5,7 @@ import { writeAudit } from "../../middleware/audit.js";
 import { createNotificationOnce } from "../../services/notifications.js";
 import { buildPortalPasswordRecord } from "../portal/credentials.js";
 import { decryptCredential } from "../../utils/credentialVault.js";
+import { strongPasswordSchema } from "../../utils/passwords.js";
 
 /** Roles managers can assign when creating/editing employees. */
 export const EMPLOYEE_ROLES = ["SALES", "EDITOR", "NARRATOR", "FINANCE", "PROJECT_MANAGER"];
@@ -68,7 +69,7 @@ export const createEmployeeSchema = z.object({
   fullName: z.string().min(2, "نام باید حداقل ۲ حرف باشد"),
   email: z.string().email("ایمیل معتبر وارد کنید"),
   phone: z.string().optional().nullable(),
-  password: z.string().min(8, "رمز عبور باید حداقل ۸ کاراکتر باشد"),
+  password: strongPasswordSchema(),
   role: z.enum(EMPLOYEE_ROLES),
   profileImage: z.string().optional().nullable(),
   isActive: z.boolean().optional().default(true),
@@ -112,7 +113,7 @@ function normalizeCvPayload(body) {
 }
 
 export const resetPasswordSchema = z.object({
-  password: z.string().min(8, "رمز عبور باید حداقل ۸ کاراکتر باشد"),
+  password: strongPasswordSchema(),
 });
 
 function normalizeEmail(email) {

@@ -84,6 +84,21 @@ async function authenticateSocket(socket) {
   }
   if (payload.aud !== "INTERNAL") return null;
 
+  if (payload.sid) {
+    const session = await prisma.session.findUnique({
+      where: { id: payload.sid },
+      select: { revokedAt: true, expiresAt: true, userId: true },
+    });
+    if (
+      !session ||
+      session.revokedAt ||
+      session.expiresAt < new Date() ||
+      (session.userId && session.userId !== payload.sub)
+    ) {
+      return null;
+    }
+  }
+
   const user = await prisma.user.findFirst({
     where: { id: payload.sub, isActive: true, deletedAt: null },
     select: {

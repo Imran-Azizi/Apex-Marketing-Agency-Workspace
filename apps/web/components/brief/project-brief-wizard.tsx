@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { cn, toEnglishDigits } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -66,6 +66,8 @@ export type ProjectBriefSubmitPayload = {
   platforms: string[];
   clientAssetIds: string[];
   title: string;
+  /** One-time key so duplicate submits reuse the same project. */
+  idempotencyKey: string;
   /** Internal create only — contract price for ProjectFinance / dashboards */
   agreedPrice?: number | null;
   serviceId?: string | null;
@@ -125,6 +127,13 @@ const LANGUAGE_OPTIONS = [
 ];
 
 type WizardStepId = "contact" | "content" | "video" | "assets";
+
+function createSubmissionKey() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
 
 const WIZARD_STEPS: {
   id: WizardStepId;
@@ -334,6 +343,10 @@ export function ProjectBriefWizard({
   );
   const [serviceId, setServiceId] = useState(initialServiceId || "");
   const [notes, setNotes] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSucceeded, setSubmitSucceeded] = useState(false);
+  const submitLockRef = useRef(false);
+  const idempotencyKeyRef = useRef(createSubmissionKey());
 
   const onAssetUploadStateChange = useCallback((state: AssetUploadState) => {
     setAssetUploadState(state);
@@ -454,6 +467,7 @@ export function ProjectBriefWizard({
   };
 
   const goToStep = (index: number) => {
+    if (submitLockRef.current || submitSucceeded || isSubmitting) return;
     if (index < 0 || index >= WIZARD_STEPS.length) return;
     if (index > highestReached) return;
     setStepError(null);
@@ -461,12 +475,14 @@ export function ProjectBriefWizard({
   };
 
   const goPrev = () => {
-    if (isFirstStep) return;
+    if (isFirstStep || submitLockRef.current || submitSucceeded || isSubmitting)
+      return;
     setStepError(null);
     setStepIndex((i) => i - 1);
   };
 
   const goNext = () => {
+    if (submitLockRef.current || submitSucceeded || isSubmitting) return;
     const error = validateStep(stepIndex);
     if (error) {
       setStepError(error);
@@ -547,6 +563,7 @@ export function ProjectBriefWizard({
       platforms,
       clientAssetIds: selectedAssets,
       title: `${companyName.trim() || personName.trim()} — ${productName.trim() || "پروژه"}`,
+      idempotencyKey: idempotencyKeyRef.current,
     };
 
     if (mode === "portal") {
@@ -566,13 +583,24 @@ export function ProjectBriefWizard({
   const submitMut = useMutation({
     mutationFn: () => onSubmit(buildPayload()),
     onSuccess: (project) => {
+      submitLockRef.current = true;
+      setSubmitSucceeded(true);
+      setIsSubmitting(true);
       toast.success("پروژه با موفقیت ایجاد شد");
       onSuccess(project);
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "خطا در ارسال فرم"),
+    onError: (e) => {
+      submitLockRef.current = false;
+      setIsSubmitting(false);
+      toast.error(e instanceof Error ? e.message : "خطا در ارسال فرم");
+    },
   });
 
+  const submitBusy =
+    isSubmitting || submitSucceeded || submitMut.isPending;
+
   const handleSubmit = () => {
+    if (submitLockRef.current || submitBusy) return;
     if (!assetUploadState.canSubmit) {
       const msg = assetUploadState.isUploading
         ? "هنوز آپلود فایل‌ها تمام نشده است. لطفاً صبر کنید."
@@ -592,6 +620,8 @@ export function ProjectBriefWizard({
       }
     }
     setStepError(null);
+    submitLockRef.current = true;
+    setIsSubmitting(true);
     submitMut.mutate();
   };
 
@@ -1067,7 +1097,7 @@ export function ProjectBriefWizard({
                 type="button"
                 variant="outline"
                 onClick={goPrev}
-                disabled={submitMut.isPending}
+                disabled={submitBusy}
                 className="gap-1.5 transition-all hover:bg-muted"
               >
                 <ChevronLeft className="h-4 w-4" />
@@ -1091,15 +1121,15 @@ export function ProjectBriefWizard({
                 variant="brand"
                 size="lg"
                 disabled={
-                  submitMut.isPending || !assetUploadState.canSubmit
+                  submitBusy || !assetUploadState.canSubmit
                 }
                 onClick={handleSubmit}
                 className="gap-2 transition-all hover:brightness-105"
               >
-                {submitMut.isPending ? (
+                {submitBusy ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span dir="rtl">در حال ارسال...</span>
+                    <span dir="rtl">در حال ساخت پروژه...</span>
                   </>
                 ) : assetUploadState.isUploading ? (
                   <>
@@ -1116,7 +1146,8 @@ export function ProjectBriefWizard({
                 variant="brand"
                 onClick={goNext}
                 disabled={
-                  currentStep.id === "assets" && !assetUploadState.canSubmit
+                  submitBusy ||
+                  (currentStep.id === "assets" && !assetUploadState.canSubmit)
                 }
                 className="gap-1.5 transition-all hover:brightness-105"
               >

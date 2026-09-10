@@ -67,7 +67,7 @@ export async function streamChatAttachment(req, res, attachment) {
     String(contentType).startsWith("audio/") ||
     head.resourceType === "video";
 
-  if (isAv && storage.isCloudinary?.()) {
+  if (isAv && storage.prefersDirectCdnRedirect?.({ signed: true })) {
     try {
       const url = await storage.createPresignedGetUrl(storageKey);
       if (url) {

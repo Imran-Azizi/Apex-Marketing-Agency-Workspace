@@ -54,8 +54,8 @@ export async function findAttachableOpportunity(tx, crmCustomerId) {
         { agreedPrice: { not: null } },
         { proposedPrice: { not: null } },
         { contractLocked: true },
+        // Payments link via Invoice → Opportunity (no Opportunity.payments relation).
         { invoices: { some: {} } },
-        { payments: { some: {} } },
       ],
     },
     orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
@@ -91,9 +91,6 @@ export async function resolveOpportunityForProjectCreate(
       include: { service: true },
     });
     if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
-    if (opp.projectId) {
-      throw new AppError('پروژه قبلاً ایجاد شده', 409, 'PROJECT_EXISTS');
-    }
     return { opportunity: opp, created: false };
   }
 
@@ -146,6 +143,7 @@ export async function createProjectGraph(tx, {
   projectFiles = [],
   timelineBody = 'پروژه ایجاد شد',
   notifyPortal = false,
+  createIdempotencyKey = null,
 }) {
   const crmCustomerId = customer.id;
   const year = new Date().getFullYear();
@@ -239,6 +237,15 @@ export async function createProjectGraph(tx, {
       videoRevisionMax: revisionCount,
     },
   });
+
+  if (createIdempotencyKey) {
+    // Set inside the same transaction so a unique collision rolls back this create.
+    await tx.$executeRaw`
+      UPDATE "projects"
+      SET "createIdempotencyKey" = ${createIdempotencyKey}
+      WHERE id = ${p.id}
+    `;
+  }
 
   const opportunityUpdate = {
     projectId: p.id,

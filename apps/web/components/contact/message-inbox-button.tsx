@@ -18,8 +18,8 @@ export function MessageInboxButton({ className }: { className?: string }) {
     queryFn: () => apiGet<{ unreadCount: number; total?: number; readCount?: number }>("/contact/unread-count"),
     enabled: canView,
     staleTime: 20_000,
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   if (!canView) return null;

@@ -6,16 +6,17 @@ import { toast } from "sonner";
 import {
   Check,
   CheckCheck,
+  Loader2,
   Mic,
   Paperclip,
+  Pause,
   Pin,
+  Play,
   Search,
   Send,
   Settings2,
-  Square,
   X,
   ArrowRight,
-  Volume2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveAssetSrc } from "@/lib/api";
@@ -84,6 +85,33 @@ function StatusTicks({ status }: { status?: ChatMessage["status"] }) {
   return <Check className="h-3.5 w-3.5 opacity-70" />;
 }
 
+function formatVoiceTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const total = Math.floor(seconds);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Only one voice message may play at a time across the chat UI. */
+const voicePlaybackLock = {
+  ownerId: null as string | null,
+  stop: null as (() => void) | null,
+  claim(id: string, stop: () => void) {
+    if (this.ownerId && this.ownerId !== id) {
+      this.stop?.();
+    }
+    this.ownerId = id;
+    this.stop = stop;
+  },
+  release(id: string) {
+    if (this.ownerId === id) {
+      this.ownerId = null;
+      this.stop = null;
+    }
+  },
+};
+
 function VoiceBubble({
   attachment,
   mine,
@@ -92,14 +120,26 @@ function VoiceBubble({
   mine: boolean;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const seekingRef = useRef(false);
+  const stopFromLockRef = useRef(() => {});
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [durationSec, setDurationSec] = useState<number | null>(
+    attachment.durationMs && attachment.durationMs > 0
+      ? attachment.durationMs / 1000
+      : null,
+  );
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const duration = attachment.durationMs
-    ? Math.round(attachment.durationMs / 1000)
-    : null;
+
+  stopFromLockRef.current = () => {
+    const el = audioRef.current;
+    if (el && !el.paused) el.pause();
+    setPlaying(false);
+  };
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -108,6 +148,12 @@ function VoiceBubble({
     setError(null);
     setPlaying(false);
     setProgress(0);
+    setCurrentTime(0);
+    setDurationSec(
+      attachment.durationMs && attachment.durationMs > 0
+        ? attachment.durationMs / 1000
+        : null,
+    );
 
     void fetchChatAttachmentBlob(attachment.id)
       .then((blob) => {
@@ -117,7 +163,11 @@ function VoiceBubble({
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "پخش ناموفق بود");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "امکان پخش این پیام صوتی وجود ندارد",
+        );
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -125,70 +175,233 @@ function VoiceBubble({
 
     return () => {
       cancelled = true;
+      voicePlaybackLock.release(attachment.id);
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [attachment.id]);
+  }, [attachment.id, attachment.durationMs]);
+
+  const seekFromClientX = (clientX: number) => {
+    const el = audioRef.current;
+    const track = trackRef.current;
+    if (!el || !track) return;
+    const duration = el.duration || durationSec || 0;
+    if (!duration || !Number.isFinite(duration)) return;
+    const rect = track.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    el.currentTime = ratio * duration;
+    setProgress(ratio);
+    setCurrentTime(ratio * duration);
+  };
+
+  const togglePlayback = async () => {
+    const el = audioRef.current;
+    if (!el || !audioUrl || loading || error) return;
+
+    if (el.paused) {
+      voicePlaybackLock.claim(attachment.id, () => {
+        stopFromLockRef.current();
+      });
+      try {
+        await el.play();
+        setPlaying(true);
+      } catch {
+        voicePlaybackLock.release(attachment.id);
+        setPlaying(false);
+        setError("امکان پخش این پیام صوتی وجود ندارد");
+      }
+      return;
+    }
+
+    el.pause();
+    setPlaying(false);
+    voicePlaybackLock.release(attachment.id);
+  };
+
+  const canInteract = Boolean(audioUrl) && !loading && !error;
+  const totalLabel = durationSec != null ? formatVoiceTime(durationSec) : "--:--";
 
   return (
-    <div className="flex min-w-[180px] items-center gap-2">
+    <div className="flex min-w-[200px] max-w-[280px] items-center gap-2.5">
       <button
         type="button"
-        disabled={loading || Boolean(error) || !audioUrl}
+        disabled={!canInteract}
+        aria-label={playing ? "توقف پخش" : "پخش پیام صوتی"}
+        aria-pressed={playing}
         className={cn(
-          "flex h-9 w-9 items-center justify-center rounded-full disabled:opacity-50",
-          mine ? "bg-white/15" : "bg-primary/10",
+          "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          mine
+            ? "bg-white/15 hover:bg-white/25 active:bg-white/30 focus-visible:ring-white/50 focus-visible:ring-offset-transparent"
+            : "bg-primary/10 hover:bg-primary/20 active:bg-primary/25 focus-visible:ring-primary/40 focus-visible:ring-offset-background",
         )}
-        onClick={() => {
-          const el = audioRef.current;
-          if (!el || !audioUrl) return;
-          if (el.paused) {
-            void el.play().catch(() => setError("پخش ناموفق بود"));
-            setPlaying(true);
-          } else {
-            el.pause();
-            setPlaying(false);
-          }
-        }}
+        onClick={() => void togglePlayback()}
       >
         {loading ? (
-          <span className="text-[10px]">…</span>
+          <Loader2 className="h-4 w-4 animate-spin opacity-80" aria-hidden />
         ) : playing ? (
-          <Square className="h-3.5 w-3.5" />
+          <Pause className="h-4 w-4" fill="currentColor" aria-hidden />
         ) : (
-          <Volume2 className="h-4 w-4" />
+          <Play className="ms-0.5 h-4 w-4" fill="currentColor" aria-hidden />
         )}
       </button>
-      <div className="flex-1">
-        <div className="h-1.5 overflow-hidden rounded-full bg-black/10">
+
+      <div className="min-w-0 flex-1">
+        <div
+          ref={trackRef}
+          role="slider"
+          tabIndex={canInteract ? 0 : -1}
+          aria-label="موقعیت پخش"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(durationSec || 0)}
+          aria-valuenow={Math.round(currentTime)}
+          aria-valuetext={`${formatVoiceTime(currentTime)} از ${totalLabel}`}
+          aria-disabled={!canInteract}
+          className={cn(
+            "group relative flex h-5 cursor-pointer items-center rounded-full outline-none",
+            "focus-visible:ring-2 focus-visible:ring-current/30",
+            !canInteract && "cursor-not-allowed opacity-60",
+          )}
+          onPointerDown={(e) => {
+            if (!canInteract) return;
+            e.preventDefault();
+            seekingRef.current = true;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            seekFromClientX(e.clientX);
+          }}
+          onPointerMove={(e) => {
+            if (!seekingRef.current || !canInteract) return;
+            seekFromClientX(e.clientX);
+          }}
+          onPointerUp={(e) => {
+            if (!seekingRef.current) return;
+            seekingRef.current = false;
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            } catch {
+              /* already released */
+            }
+          }}
+          onPointerCancel={() => {
+            seekingRef.current = false;
+          }}
+          onKeyDown={(e) => {
+            const el = audioRef.current;
+            if (!el || !canInteract) return;
+            const duration = el.duration || durationSec || 0;
+            if (!duration) return;
+            const step = e.shiftKey ? 5 : 2;
+            if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+              e.preventDefault();
+              const delta =
+                e.key === "ArrowRight" ? step : -step;
+              const next = Math.min(
+                duration,
+                Math.max(0, el.currentTime + delta),
+              );
+              el.currentTime = next;
+              setCurrentTime(next);
+              setProgress(next / duration);
+            } else if (e.key === "Home") {
+              e.preventDefault();
+              el.currentTime = 0;
+              setCurrentTime(0);
+              setProgress(0);
+            } else if (e.key === "End") {
+              e.preventDefault();
+              el.currentTime = duration;
+              setCurrentTime(duration);
+              setProgress(1);
+            }
+          }}
+        >
           <div
-            className="h-full bg-current transition-all"
-            style={{ width: `${progress * 100}%` }}
-          />
+            className={cn(
+              "relative h-1.5 w-full rounded-full",
+              mine ? "bg-white/20" : "bg-black/10",
+            )}
+          >
+            <div
+              className={cn(
+                "absolute inset-y-0 left-0 rounded-full transition-[width] duration-75 ease-linear",
+                mine ? "bg-white" : "bg-primary",
+              )}
+              style={{ width: `${progress * 100}%` }}
+            />
+            <span
+              className={cn(
+                "absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-0 shadow-sm transition-opacity",
+                "group-hover:opacity-100 group-focus-visible:opacity-100",
+                playing && "opacity-100",
+                mine ? "bg-white" : "bg-primary",
+              )}
+              style={{ left: `${progress * 100}%` }}
+            />
+          </div>
         </div>
-        <div className="mt-1 text-[10px] opacity-70">
-          {error
-            ? error
-            : duration != null
-              ? `${duration}ث`
-              : loading
-                ? "در حال بارگذاری…"
-                : "پیام صوتی"}
+
+        <div
+          className="mt-1 flex items-center justify-between gap-2 text-[10px] tabular-nums opacity-70"
+          dir="ltr"
+        >
+          {error ? (
+            <span
+              className={cn(
+                "opacity-100",
+                mine ? "text-red-200" : "text-destructive",
+              )}
+              dir="rtl"
+            >
+              {error}
+            </span>
+          ) : loading ? (
+            <span dir="rtl">در حال بارگذاری…</span>
+          ) : (
+            <>
+              <span>{formatVoiceTime(currentTime)}</span>
+              <span>{totalLabel}</span>
+            </>
+          )}
         </div>
       </div>
+
       {audioUrl ? (
         <audio
           ref={audioRef}
           src={audioUrl}
           preload="metadata"
-          onTimeUpdate={(e) => {
-            const el = e.currentTarget;
-            if (el.duration) setProgress(el.currentTime / el.duration);
+          onLoadedMetadata={(e) => {
+            const d = e.currentTarget.duration;
+            if (Number.isFinite(d) && d > 0) setDurationSec(d);
           }}
+          onDurationChange={(e) => {
+            const d = e.currentTarget.duration;
+            if (Number.isFinite(d) && d > 0) setDurationSec(d);
+          }}
+          onTimeUpdate={(e) => {
+            if (seekingRef.current) return;
+            const el = e.currentTarget;
+            const d = el.duration || durationSec || 0;
+            if (!d) return;
+            setCurrentTime(el.currentTime);
+            setProgress(el.currentTime / d);
+          }}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
           onEnded={() => {
             setPlaying(false);
             setProgress(0);
+            setCurrentTime(0);
+            const el = audioRef.current;
+            if (el) el.currentTime = 0;
+            voicePlaybackLock.release(attachment.id);
           }}
-          onError={() => setError("پخش ناموفق بود")}
+          onError={() => {
+            setPlaying(false);
+            voicePlaybackLock.release(attachment.id);
+            setError("امکان پخش این پیام صوتی وجود ندارد");
+          }}
         />
       ) : null}
     </div>

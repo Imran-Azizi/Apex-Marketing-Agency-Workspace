@@ -9,8 +9,8 @@ import {
 } from "@tanstack/react-query";
 import { Building2, Search, UserRound, X } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
-import { getMe } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
+import { useMeQuery } from "@/lib/permissions";
 import { cn, toEnglishDigits } from "@/lib/utils";
 import { invalidateFinanceQueries } from "@/lib/finance-queries";
 import { PageHeader } from "@/components/shared/page-header";
@@ -105,11 +105,7 @@ export default function NewProjectPage() {
 
   const selectedCustomerId = selectedCustomer?.id ?? null;
 
-  const { data: me, isLoading: meLoading } = useQuery({
-    queryKey: ["me"],
-    queryFn: getMe,
-    retry: false,
-  });
+  const { data: me, isLoading: meLoading } = useMeQuery();
 
   const canCreate = hasPermission(
     me?.permissions,

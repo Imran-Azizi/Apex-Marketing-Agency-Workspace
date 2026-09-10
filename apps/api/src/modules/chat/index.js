@@ -19,6 +19,8 @@ import {
 import { assertDirectStillAllowed } from "./authz.js";
 import { saveChatAttachment } from "./upload.js";
 import { streamChatAttachment } from "./attachmentStream.js";
+import { parsePagination } from "../../utils/pagination.js";
+import { SECURITY } from "../../config/security.js";
 import { z } from "zod";
 
 const upload = multer({
@@ -110,7 +112,10 @@ router.get(
         res,
         await chatService.listMessages(req.auth, req.params.id, {
           cursor: req.query.cursor,
-          limit: Number(req.query.limit || 40),
+          limit: parsePagination(req.query, {
+            defaultPageSize: 40,
+            maxPageSize: SECURITY.pagination.chatMessageMax,
+          }).take,
         }),
       );
     } catch (e) {
@@ -259,7 +264,10 @@ router.get(
         res,
         await chatService.search(req.auth, {
           q: req.query.q,
-          limit: Number(req.query.limit || 30),
+          limit: parsePagination(req.query, {
+            defaultPageSize: 30,
+            maxPageSize: 50,
+          }).take,
         }),
       );
     } catch (e) {

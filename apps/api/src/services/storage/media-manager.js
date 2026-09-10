@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { env } from "../../config/env.js";
-import { extensionOf, resolveCloudinaryResourceType } from "./resource-type.js";
+import { SECURITY } from "../../config/security.js";
+import { extensionOf, resolveMediaKind } from "./resource-type.js";
 
 /** Canonical upload purposes — single source of truth for folder routing. */
 export const UPLOAD_PURPOSE = Object.freeze({
@@ -20,7 +21,7 @@ export const UPLOAD_PURPOSE = Object.freeze({
   GENERIC: "generic",
 });
 
-/** Top-level Cloudinary folder segments (under CLOUDINARY_FOLDER_PREFIX). */
+/** Top-level storage folder segments (under BUNNY_STORAGE_PATH_PREFIX). */
 export const MEDIA_ROOTS = Object.freeze({
   IMAGES: "images",
   VIDEOS: "videos",
@@ -163,19 +164,13 @@ export function normalizeUploadFolder(folder) {
  * @param {string | null | undefined} filename
  */
 export function mediaCategoryFromMime(mimeType, filename) {
-  const resourceType = resolveCloudinaryResourceType({
+  const kind = resolveMediaKind({
     contentType: mimeType,
     filename,
   });
-  if (resourceType === "image") return MIME_MEDIA_CATEGORY.image;
-  if (resourceType === "video") {
-    const mime = String(mimeType || "").toLowerCase();
-    if (mime.startsWith("audio/")) return MIME_MEDIA_CATEGORY.audio;
-    const ext = extensionOf(filename);
-    const audioExt = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus"]);
-    if (ext && audioExt.has(ext)) return MIME_MEDIA_CATEGORY.audio;
-    return MIME_MEDIA_CATEGORY.video;
-  }
+  if (kind === "image") return MIME_MEDIA_CATEGORY.image;
+  if (kind === "audio") return MIME_MEDIA_CATEGORY.audio;
+  if (kind === "video") return MIME_MEDIA_CATEGORY.video;
   return MIME_MEDIA_CATEGORY.document;
 }
 
@@ -227,7 +222,7 @@ export function legacyPurposeFromFolder(folder) {
 }
 
 /**
- * Resolve Cloudinary folder path (without account prefix) for a new upload.
+ * Resolve object-storage folder path (without account prefix) for a new upload.
  * @param {UploadContext} context
  * @param {{ contentType?: string | null, filename?: string | null }} fileInfo
  * @returns {{ folderPath: string, category: string, purpose: string }}
@@ -505,23 +500,56 @@ export function isCleanFinalStorageKey(storageKey) {
 }
 
 /**
+ * Strip the Bunny account prefix (`apex/...`) when present.
+ */
+export function stripStoragePrefix(storageKey) {
+  const key = String(storageKey || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  const prefix = String(env.bunnyStoragePathPrefix || "apex").replace(
+    /^\/+|\/+$/g,
+    "",
+  );
+  if (prefix && (key === prefix || key.startsWith(`${prefix}/`))) {
+    return key.slice(prefix.length).replace(/^\/+/, "");
+  }
+  return key;
+}
+
+/**
+ * Marketing / public-website objects that may be fetched without a session.
+ */
+export function isPublicStorageKey(storageKey) {
+  const raw = String(storageKey || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  if (!raw || raw.includes("..") || raw.includes("//")) return false;
+  const unprefixed = stripStoragePrefix(raw);
+  return SECURITY.publicStoragePrefixes.some(
+    (prefix) =>
+      unprefixed === prefix.replace(/\/$/, "") || unprefixed.startsWith(prefix),
+  );
+}
+
+/**
  * Build metadata persisted on ClientAsset / ProjectFile.meta.storage
  * @param {object} saved upload result from storage.saveBuffer
  * @param {{ folderPath: string, category: string, purpose: string }} placement
  */
 export function buildStorageMeta(saved, placement) {
-  const prefix = String(env.cloudinaryFolderPrefix || "apex").replace(
+  const prefix = String(env.bunnyStoragePathPrefix || "apex").replace(
     /^\/+|\/+$/g,
     "",
   );
   const folderPath = placement.folderPath;
   const publicId = saved.publicId || null;
+  const prefixed = prefix ? `${prefix}/${folderPath}` : folderPath;
   return {
     provider: saved.provider || env.storageDriver,
     publicId,
     folder: placement.category,
     folderPath,
-    cloudinaryFolder: prefix ? `${prefix}/${folderPath}` : folderPath,
+    storageFolder: prefixed,
     resourceType: saved.resourceType || null,
     url: saved.url || null,
     category: placement.category,
@@ -546,7 +574,7 @@ export function mergeStorageMeta(existingMeta, storageMeta) {
 }
 
 /**
- * Cloudinary tags for an upload.
+ * Provider-agnostic tags for an upload (used by the Cloudinary legacy driver).
  */
 export function buildCloudinaryTags(placement) {
   const tags = ["apex", placement.category, placement.purpose];

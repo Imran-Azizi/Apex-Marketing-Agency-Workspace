@@ -355,34 +355,34 @@ export const PERMISSION_CATALOG = [
   },
   {
     id: "backup",
-    label: "پشتیبان‌گیری",
-    description: "تهیه، بازیابی و زمان‌بندی نسخه پشتیبان",
+    label: "بک اپ گیری",
+    description: "تهیه، بازیابی و زمان‌بندی نسخه بک اپ",
     actions: [
       {
         code: "backup.view",
         label: "مشاهده",
-        description: "مشاهده فهرست و وضعیت پشتیبان‌ها",
+        description: "مشاهده فهرست و وضعیت بک اپ‌ها",
       },
       {
         code: "backup.create",
         label: "ایجاد",
-        description: "تهیه پشتیبان دستی",
+        description: "تهیه بک اپ دستی",
       },
       {
         code: "backup.download",
         label: "دانلود",
-        description: "دانلود فایل پشتیبان",
+        description: "دانلود فایل بک اپ",
       },
       {
         code: "backup.restore",
         label: "بازیابی",
-        description: "بازیابی سیستم از پشتیبان",
+        description: "بازیابی سیستم از بک اپ",
       },
-      { code: "backup.delete", label: "حذف", description: "حذف فایل پشتیبان" },
+      { code: "backup.delete", label: "حذف", description: "حذف فایل بک اپ" },
       {
         code: "backup.manage",
         label: "زمان‌بندی",
-        description: "ویرایش زمان‌بندی پشتیبان خودکار",
+        description: "ویرایش زمان‌بندی بک اپ خودکار",
       },
     ],
   },

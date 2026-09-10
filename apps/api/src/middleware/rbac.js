@@ -14,6 +14,9 @@ export function can(req, ...codes) {
 export function requirePermission(...codes) {
   return (req, res, next) => {
     if (!req.auth) return next(new AppError('Authentication required', 401, 'UNAUTHENTICATED'));
+    if (!codes.length) {
+      return next(new AppError('شما اجازه دسترسی به این منبع را ندارید', 403, 'FORBIDDEN'));
+    }
     if (hasAnyPermission(req.auth.permissions, codes, req.auth.roleCode)) return next();
     return next(new AppError('شما اجازه دسترسی به این منبع را ندارید', 403, 'FORBIDDEN'));
   };

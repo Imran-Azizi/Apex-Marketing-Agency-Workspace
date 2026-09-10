@@ -61,7 +61,13 @@ function ChannelIconButton({ channel }: { channel: ContactChannel }) {
   );
 }
 
-export function PublicFooter() {
+export function PublicFooter({
+  initialServices,
+  initialContact,
+}: {
+  initialServices?: PublicService[] | null;
+  initialContact?: PublicContactInfo | null;
+}) {
   const year = new Date().getFullYear();
   const { goToSection } = usePublicSectionNav();
 
@@ -69,6 +75,7 @@ export function PublicFooter() {
     queryKey: ["public-services"],
     queryFn: () => apiGet<PublicService[]>("/public/services"),
     staleTime: 10 * 60_000,
+    initialData: initialServices ?? undefined,
     refetchOnWindowFocus: false,
   });
 
@@ -76,6 +83,7 @@ export function PublicFooter() {
     queryKey: ["public-contact-info"],
     queryFn: () => apiGet<PublicContactInfo>("/public/contact-info"),
     staleTime: 10 * 60_000,
+    initialData: initialContact ?? undefined,
     refetchOnWindowFocus: false,
   });
 

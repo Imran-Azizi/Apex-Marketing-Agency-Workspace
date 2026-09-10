@@ -40,19 +40,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Plus,
-  Search,
-  Send,
-  SlidersHorizontal,
-  X,
-} from "lucide-react";
+import { Plus, Search, Send, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useHasPermission, useMeQuery } from "@/lib/permissions";
+import { TablePagination } from "@/components/shared/table-pagination";
 import { CustomerFormDialog } from "./_components/customer-form-dialog";
 import { DeleteCustomerDialog } from "@/app/(dashboard)/crm/_components/delete-customer-dialog";
+import { BulkDeleteCustomersDialog } from "@/app/(dashboard)/crm/_components/bulk-delete-customers-dialog";
+import { CrmSelectionBar } from "@/app/(dashboard)/crm/_components/crm-selection-bar";
+import { useCustomerSelection } from "@/app/(dashboard)/crm/_components/use-customer-selection";
 import { CustomerActions } from "./_components/customer-actions";
 import { CustomerManagementIndicator } from "./_components/customer-management-indicator";
 import { CrmDashboardStats } from "./_components/crm-dashboard-stats";
@@ -75,7 +71,7 @@ import type {
   CrmTransferResult,
 } from "./_components/types";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 15;
 const ALL = "ALL";
 
 export default function CrmPage() {
@@ -94,8 +90,8 @@ export default function CrmPage() {
   const [category, setCategory] = useState(ALL);
   const [page, setPage] = useState(1);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [transferOpen, setTransferOpen] = useState(false);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<CrmCustomer | null>(
@@ -144,7 +140,7 @@ export default function CrmPage() {
     queryKey: [
       "crm-customers",
       "pipeline",
-      { search, source, salesOwnerId, stage, category, page },
+      { search, source, salesOwnerId, stage, category, page, pageSize: PAGE_SIZE },
     ],
     queryFn: () => apiGet<CrmListResponse>(`/crm/customers?${listParams}`),
     placeholderData: keepPreviousData,
@@ -167,33 +163,33 @@ export default function CrmPage() {
     salesOwnerId !== ALL ||
     stage !== ALL ||
     category !== ALL;
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
-  const pageIds = data?.items.map((item) => item.id) ?? [];
-  const selectedOnPage = pageIds.filter((id) => selectedIds.has(id));
-  const allPageSelected =
-    pageIds.length > 0 && selectedOnPage.length === pageIds.length;
-  const somePageSelected = selectedOnPage.length > 0 && !allPageSelected;
-  const selectedCount = selectedIds.size;
+  const totalPages = data
+    ? Math.max(1, Math.ceil(data.total / (data.pageSize || PAGE_SIZE)))
+    : 1;
 
-  const toggleRow = (id: string, checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  };
+  // After delete/filter, avoid staying on an empty trailing page.
+  useEffect(() => {
+    if (!data) return;
+    if (page > totalPages) setPage(totalPages);
+  }, [data, page, totalPages]);
 
-  const toggleAllOnPage = (checked: boolean) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      for (const id of pageIds) {
-        if (checked) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
-  };
+  const canSelect = canCreate || canDelete;
+  const selectablePageIds =
+    data?.items
+      .filter((customer) => canSelect && (!customer.isConverted || canDelete))
+      .map((item) => item.id) ?? [];
+  const {
+    selectedIds,
+    selectedCount,
+    selectAllState,
+    toggleRow,
+    toggleAllOnPage,
+    clearSelection,
+    removeIds,
+  } = useCustomerSelection(selectablePageIds);
+
+  const isRowSelectable = (customer: CrmCustomer) =>
+    canSelect && (!customer.isConverted || canDelete);
 
   const transferMutation = useMutation({
     mutationFn: (ids: string[]) =>
@@ -235,7 +231,7 @@ export default function CrmPage() {
       if (transferred || already) toast.success(parts.join(" "));
       else toast.error(parts.join(" ") || crmSalesText("transferFailed"));
 
-      setSelectedIds(new Set());
+      clearSelection();
       setTransferOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["crm-customers"] }),
@@ -434,17 +430,6 @@ export default function CrmPage() {
         actions={
           canCreate ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {selectedCount > 0 ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedIds(new Set())}
-                  className="h-9 text-muted-foreground"
-                >
-                  {crmSalesText("clearSelection")}
-                </Button>
-              ) : null}
               <Button
                 variant="outline"
                 onClick={() => setTransferOpen(true)}
@@ -480,6 +465,13 @@ export default function CrmPage() {
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
         customer={deletingCustomer}
+        onDeleted={(id) => removeIds([id])}
+      />
+      <BulkDeleteCustomersDialog
+        open={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        ids={[...selectedIds]}
+        onDeleted={removeIds}
       />
       <TransferDialog
         open={transferOpen}
@@ -657,6 +649,21 @@ export default function CrmPage() {
           )}
         </div>
 
+        <CrmSelectionBar
+          className="md:hidden"
+          selectedCount={selectedCount}
+          selectedLabel={crmSalesText("selectedCount", {
+            count: selectedCount.toLocaleString("fa-AF", {
+              numberingSystem: "latn",
+            }),
+          })}
+          canDelete={canDelete}
+          bulkDeleteLabel={crmSalesText("bulkDelete")}
+          clearLabel={crmSalesText("clearSelection")}
+          onBulkDelete={() => setBulkDeleteOpen(true)}
+          onClear={clearSelection}
+        />
+
         {isLoading && <LoadingTable columns={6} />}
 
         {error && (
@@ -702,18 +709,12 @@ export default function CrmPage() {
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     <TableHead className="sticky top-0 z-[1] w-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       <Checkbox
-                        checked={
-                          allPageSelected
-                            ? true
-                            : somePageSelected
-                              ? "indeterminate"
-                              : false
-                        }
+                        checked={selectAllState}
                         onCheckedChange={(value) =>
                           toggleAllOnPage(value === true)
                         }
                         aria-label={crmSalesText("selectAll")}
-                        disabled={!canCreate || pageIds.length === 0}
+                        disabled={!canSelect || selectablePageIds.length === 0}
                       />
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
@@ -763,7 +764,7 @@ export default function CrmPage() {
                             toggleRow(customer.id, value === true)
                           }
                           aria-label={crmSalesText("selectRow")}
-                          disabled={!canCreate || customer.isConverted}
+                          disabled={!isRowSelectable(customer)}
                         />
                       </TableCell>
                       <TableCell className="font-mono text-xs" dir="ltr">
@@ -850,37 +851,13 @@ export default function CrmPage() {
               </Table>
             </HorizontalScroll>
 
-            {totalPages > 1 && (
-              <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-                <p className="text-sm text-muted-foreground">
-                  صفحه{" "}
-                  {page.toLocaleString("fa-AF", { numberingSystem: "latn" })} از{" "}
-                  {totalPages.toLocaleString("fa-AF", {
-                    numberingSystem: "latn",
-                  })}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page <= 1 || isFetching}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                    قبلی
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page >= totalPages || isFetching}
-                  >
-                    بعدی
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            )}
+            <TablePagination
+              page={page}
+              pageSize={data.pageSize || PAGE_SIZE}
+              total={data.total}
+              onPageChange={setPage}
+              isFetching={isFetching}
+            />
           </>
         )}
       </div>

@@ -29,6 +29,10 @@ import {
   projectProfit,
   roundMoney,
 } from './metrics.js';
+import { createTtlCache } from '../../utils/ttlCache.js';
+
+const financeSourceCache = createTtlCache();
+const FINANCE_SOURCE_TTL_MS = 30_000;
 
 function dec(v) {
   return roundMoney(v);
@@ -239,6 +243,14 @@ export async function loadPaymentsGroupedByProject(projects) {
   return grouped;
 }
 
+async function loadCachedFinanceSource() {
+  return financeSourceCache.getOrSet('all', FINANCE_SOURCE_TTL_MS, async () => {
+    const projects = await loadAllProjectsForFinanceList();
+    const paymentsByProject = await loadPaymentsGroupedByProject(projects);
+    return { projects, paymentsByProject };
+  });
+}
+
 export function projectFinanceMetrics(project, projectPayments) {
   const finance = project.finance;
   const finalProjectPrice = resolveContractPrice(project);
@@ -276,12 +288,12 @@ export async function computeFinanceKpis(range = {}) {
     range.to instanceof Date ? range.to : parseDateBound(range.to, true);
   const hasRange = Boolean(from || to);
 
-  const [companyExpenses, projects, received] = await Promise.all([
+  const [companyExpenses, source, received] = await Promise.all([
     sumCompanyExpenses({ from, to }),
-    loadAllProjectsForFinanceList(),
+    loadCachedFinanceSource(),
     sumVerifiedPayments({ from, to }),
   ]);
-  const paymentsByProject = await loadPaymentsGroupedByProject(projects);
+  const { projects, paymentsByProject } = source;
 
   let totalFinalPrice = 0;
   let directProjectCosts = 0;

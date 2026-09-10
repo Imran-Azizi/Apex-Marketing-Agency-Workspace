@@ -57,6 +57,21 @@ export async function requireAuth(req, res, next) {
       });
       if (!user) throw new AppError('User not found', 401, 'UNAUTHENTICATED');
 
+      if (payload.sid) {
+        const session = await prisma.session.findUnique({
+          where: { id: payload.sid },
+          select: { revokedAt: true, expiresAt: true, userId: true },
+        });
+        if (
+          !session ||
+          session.revokedAt ||
+          session.expiresAt < new Date() ||
+          (session.userId && session.userId !== user.id)
+        ) {
+          throw new AppError('Session revoked or expired', 401, 'SESSION_INVALID');
+        }
+      }
+
       assertPanelMatchesRole(panel, user.role.code, 'INTERNAL');
 
       req.auth = {
@@ -86,6 +101,21 @@ export async function requireAuth(req, res, next) {
       });
       if (!account || account.crmCustomer?.deletedAt) {
         throw new AppError('Portal account not found', 401, 'UNAUTHENTICATED');
+      }
+
+      if (payload.sid) {
+        const session = await prisma.session.findUnique({
+          where: { id: payload.sid },
+          select: { revokedAt: true, expiresAt: true, portalAccountId: true },
+        });
+        if (
+          !session ||
+          session.revokedAt ||
+          session.expiresAt < new Date() ||
+          (session.portalAccountId && session.portalAccountId !== account.id)
+        ) {
+          throw new AppError('Session revoked or expired', 401, 'SESSION_INVALID');
+        }
       }
 
       assertPanelMatchesRole(panel, 'CUSTOMER', 'PORTAL');

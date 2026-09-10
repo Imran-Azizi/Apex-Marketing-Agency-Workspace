@@ -2,7 +2,7 @@
 
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ArrowUpRight,
@@ -39,7 +39,6 @@ import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -50,6 +49,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
+import { DateRangePills } from "@/components/shared/date-range-pills";
+import {
+  EMPTY_DATE_RANGE,
+  dateRangeQueryParams,
+  isDateRangeReady,
+} from "@/lib/date-range";
 import { computeManagerMetrics, assigneeName } from "./compute-metrics";
 import {
   EmptyInline,
@@ -61,7 +66,6 @@ import {
 } from "./widgets";
 import type {
   DashboardSummary,
-  DatePreset,
   DateRange,
   ManagerProject,
 } from "./types";
@@ -128,85 +132,6 @@ function LiveClock({ className }: { className?: string }) {
   );
 }
 
-function DateFilters({
-  range,
-  onChange,
-}: {
-  range: DateRange;
-  onChange: (next: DateRange) => void;
-}) {
-  const presets: Array<{ key: DatePreset; label: string }> = [
-    { key: "all", label: "همه" },
-    { key: "today", label: "امروز" },
-    { key: "week", label: "این هفته" },
-    { key: "month", label: "این ماه" },
-    { key: "year", label: "امسال" },
-    { key: "custom", label: "بازه سفارشی" },
-  ];
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div
-        className="flex flex-wrap gap-2"
-        role="group"
-        aria-label="فیلتر بازه زمانی داشبورد"
-      >
-        {presets.map((p) => (
-          <Button
-            key={p.key}
-            type="button"
-            size="sm"
-            variant={range.preset === p.key ? "brand" : "outline"}
-            className="rounded-full"
-            aria-pressed={range.preset === p.key}
-            onClick={() =>
-              onChange({
-                preset: p.key,
-                from: p.key === "custom" ? range.from : null,
-                to: p.key === "custom" ? range.to : null,
-              })
-            }
-          >
-            {p.label}
-          </Button>
-        ))}
-      </div>
-      {range.preset === "custom" ? (
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="space-y-1 text-xs text-muted-foreground">
-            از تاریخ
-            <Input
-              type="date"
-              className="h-9 w-auto"
-              value={range.from ? range.from.toISOString().slice(0, 10) : ""}
-              onChange={(e) =>
-                onChange({
-                  ...range,
-                  from: e.target.value ? new Date(e.target.value) : null,
-                })
-              }
-            />
-          </label>
-          <label className="space-y-1 text-xs text-muted-foreground">
-            تا تاریخ
-            <Input
-              type="date"
-              className="h-9 w-auto"
-              value={range.to ? range.to.toISOString().slice(0, 10) : ""}
-              onChange={(e) =>
-                onChange({
-                  ...range,
-                  to: e.target.value ? new Date(e.target.value) : null,
-                })
-              }
-            />
-          </label>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function PulseChip({
   icon: Icon,
   label,
@@ -239,11 +164,7 @@ function PulseChip({
 }
 
 export function ManagerDashboard() {
-  const [range, setRange] = useState<DateRange>({
-    preset: "all",
-    from: null,
-    to: null,
-  });
+  const [range, setRange] = useState<DateRange>(EMPTY_DATE_RANGE);
 
   const me = useQuery({
     queryKey: ["me", "internal"],
@@ -254,19 +175,28 @@ export function ManagerDashboard() {
   const summary = useQuery({
     queryKey: ["dashboard-summary", "MANAGER"],
     queryFn: () => apiGet<DashboardSummary>("/projects/dashboard-summary"),
-    refetchOnWindowFocus: true,
   });
 
   const projects = useQuery({
     queryKey: ["projects-home", "MANAGER"],
-    queryFn: () => apiGet<ManagerProject[]>("/projects"),
-    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const res = await apiGet<{ items: ManagerProject[] }>(
+        "/projects?page=1&pageSize=100",
+      );
+      return res.items;
+    },
   });
 
   const financeQuery = useQuery({
-    queryKey: ["finance-dashboard", "manager", range],
+    queryKey: [
+      "finance-dashboard",
+      "manager",
+      range.preset,
+      dateRangeQueryParams(range),
+    ],
     queryFn: () => apiGet<FinanceDashboard>(financeDashboardQueryUrl(range)),
-    refetchOnWindowFocus: true,
+    enabled: isDateRangeReady(range),
+    placeholderData: keepPreviousData,
   });
 
   const metrics = useMemo(() => {
@@ -383,7 +313,11 @@ export function ManagerDashboard() {
             ) : null}
           </div>
           <div className="flex flex-col items-stretch gap-3 sm:items-end">
-            <DateFilters range={range} onChange={setRange} />
+            <DateRangePills
+              range={range}
+              onChange={setRange}
+              ariaLabel="فیلتر بازه زمانی داشبورد"
+            />
             <Button
               type="button"
               size="sm"

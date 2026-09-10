@@ -13,14 +13,17 @@ import { ServiceCardsGrid } from "@/components/public/service-cards";
 
 export function PublicServicesSection({
   previewLimit = 3,
+  initialServices,
 }: {
   previewLimit?: number;
+  initialServices?: PublicService[] | null;
 }) {
   const [showAll, setShowAll] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["public-services"],
     queryFn: () => apiGet<PublicService[]>("/public/services"),
     staleTime: 10 * 60_000,
+    initialData: initialServices ?? undefined,
     refetchOnWindowFocus: false,
   });
 

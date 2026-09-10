@@ -35,7 +35,12 @@ type ProjectRow = {
 export default function ProjectManagerDashboardPage() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["projects", "pm-dashboard"],
-    queryFn: () => apiGet<ProjectRow[]>("/projects"),
+    queryFn: async () => {
+      const res = await apiGet<{ items: ProjectRow[] }>(
+        "/projects?page=1&pageSize=100",
+      );
+      return res.items;
+    },
   });
 
   const stats = useMemo(() => {

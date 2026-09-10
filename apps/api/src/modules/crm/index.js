@@ -5,6 +5,7 @@ import { requirePermission, requireInternal } from "../../middleware/rbac.js";
 import { requireCsrf } from "../../middleware/csrf.js";
 import { validate } from "../../middleware/validate.js";
 import { ok, created } from "../../utils/response.js";
+import { parsePagination } from "../../utils/pagination.js";
 import {
   crmService,
   createCustomerSchema,
@@ -18,6 +19,7 @@ import {
   createInvoiceSchema,
   ingestWhatsappSchema,
   transferCustomersSchema,
+  bulkDeleteCustomersSchema,
   createCustomerInvoiceSchema,
 } from "./service.js";
 import { portalInvitesService } from "./portalInvites.js";
@@ -82,12 +84,10 @@ router.get(
             dateTo: req.query.dateTo,
             sort: req.query.sort,
             scope: req.query.scope,
-            page: Number(req.query.page || 1),
-            pageSize: Number(req.query.pageSize || 20),
+            ...parsePagination(req.query, { defaultPageSize: 20, maxPageSize: 100 }),
           },
           req.auth,
         ),
-        { page: Number(req.query.page || 1) },
       );
     } catch (e) {
       next(e);
@@ -130,6 +130,23 @@ router.post(
   async (req, res, next) => {
     try {
       ok(res, await crmService.transferCustomers(req.body.ids, req.auth, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  "/customers/bulk-delete",
+  requireCsrf,
+  requirePermission("crm.delete"),
+  validate(bulkDeleteCustomersSchema),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await crmService.bulkDeleteCustomers(req.body.ids, req.auth, req),
+      );
     } catch (e) {
       next(e);
     }
@@ -187,7 +204,7 @@ router.get(
   requirePermission("crm.view"),
   async (req, res, next) => {
     try {
-      ok(res, await crmService.getActivity(req.params.id));
+      ok(res, await crmService.getActivity(req.params.id, req.auth));
     } catch (e) {
       next(e);
     }
@@ -484,7 +501,7 @@ router.get(
   requirePermission("crm.view", "finance.view", "crm.opportunity"),
   async (req, res, next) => {
     try {
-      ok(res, await crmService.getPaymentReceipt(req.params.id));
+      ok(res, await crmService.getPaymentReceipt(req.params.id, req.auth));
     } catch (e) {
       next(e);
     }
@@ -496,7 +513,7 @@ router.get(
   requirePermission("crm.view", "finance.view", "crm.opportunity"),
   async (req, res, next) => {
     try {
-      const html = await crmService.getPaymentReceiptHtml(req.params.id);
+      const html = await crmService.getPaymentReceiptHtml(req.params.id, req.auth);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader(
         "Content-Disposition",

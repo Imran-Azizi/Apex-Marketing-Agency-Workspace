@@ -8,11 +8,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { scrollToSection } from "@/components/public/use-active-section";
 
-export function PublicHero(_props: { whatsappUrl?: string }) {
+export function PublicHero({
+  initialSlides,
+}: {
+  initialSlides?: HeroSlide[];
+}) {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["public-hero"],
     queryFn: () => apiGet<HeroSlide[]>("/public/hero"),
     staleTime: 60_000,
+    initialData: initialSlides,
     refetchOnWindowFocus: false,
   });
 

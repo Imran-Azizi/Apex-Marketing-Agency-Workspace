@@ -1,7 +1,19 @@
-import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
+
+// Always load apps/api/.env relative to this file (not process.cwd()),
+// so workspace / monorepo launches still pick up the active Bunny account.
+dotenv.config({
+  path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.env"),
+});
 
 const nodeEnv = process.env.NODE_ENV || "development";
 const isProd = nodeEnv === "production";
+
+function trimEnv(value) {
+  return String(value ?? "").trim();
+}
 
 const WEAK_SECRET_MARKERS = [
   "dev-",
@@ -101,22 +113,21 @@ if (isProd) {
   }
 
   const storageDriver = (
-    process.env.STORAGE_DRIVER || "cloudinary"
+    trimEnv(process.env.STORAGE_DRIVER) || "bunny"
   ).toLowerCase();
-  if (storageDriver === "cloudinary") {
-    if (isProd) {
-      requiredProd("CLOUDINARY_CLOUD_NAME");
-      requiredProd("CLOUDINARY_API_KEY");
-      requiredProd("CLOUDINARY_API_SECRET");
-    }
-  } else if (storageDriver === "s3" || storageDriver === "r2") {
-    requiredProd("S3_BUCKET");
-    requiredProd("S3_ACCESS_KEY");
-    requiredProd("S3_SECRET_KEY");
-    requiredProd("STORAGE_PUBLIC_BASE");
-  } else {
+  if (storageDriver !== "bunny") {
     throw new Error(
-      `Unsupported STORAGE_DRIVER="${storageDriver}". Use cloudinary | s3 | r2.`,
+      `Unsupported STORAGE_DRIVER="${storageDriver}". This application uses Bunny.net only.`,
+    );
+  }
+  requiredProd("BUNNY_STORAGE_ZONE");
+  requiredProd("BUNNY_STORAGE_API_KEY");
+  if (
+    !trimEnv(process.env.BUNNY_CDN_HOSTNAME) &&
+    !trimEnv(process.env.STORAGE_PUBLIC_BASE)
+  ) {
+    throw new Error(
+      "BUNNY_CDN_HOSTNAME (or STORAGE_PUBLIC_BASE) is required in production",
     );
   }
 }
@@ -130,7 +141,7 @@ const webUrl = isProd
 
 const corsOrigins = parseOrigins(webUrl);
 const apiHost = hostOf(apiUrl);
-/** True when frontend and API are on different hosts (Vercel ↔ Railway). */
+/** True when frontend and API are on different hosts (split hosting). */
 const crossOrigin = Boolean(
   apiHost &&
   corsOrigins.some((origin) => {
@@ -139,8 +150,10 @@ const crossOrigin = Boolean(
   }),
 );
 
-/** Railway injects PORT; local/dev may use API_PORT. */
+/** Prefer PORT (process managers); local/dev may use API_PORT. */
 const port = Number(process.env.PORT || process.env.API_PORT || 4000);
+/** Bind address — use 127.0.0.1 behind Nginx on a VPS; 0.0.0.0 for local/dev. */
+const host = process.env.HOST || (isProd ? "127.0.0.1" : "0.0.0.0");
 
 const cookieSameSiteRaw = (process.env.COOKIE_SAME_SITE || "").toLowerCase();
 let cookieSameSite =
@@ -149,9 +162,8 @@ let cookieSecure =
   process.env.COOKIE_SECURE === "true" ||
   (isProd && (crossOrigin || cookieSameSite === "none"));
 
-// Cross-site credentialed auth (browser on Vercel, API on Railway) requires
-// SameSite=None; Secure. Force whenever CORS includes a different frontend host
-// — do not require API_URL itself to be https (Railway private URLs are often http).
+// Cross-site credentialed auth (browser and API on different hosts) requires
+// SameSite=None; Secure. Force whenever CORS includes a different frontend host.
 const frontendUsesHttps = corsOrigins.some((o) => /^https:/i.test(o));
 const forceCrossSiteCookies = crossOrigin && (isProd || frontendUsesHttps);
 if (forceCrossSiteCookies) {
@@ -177,6 +189,7 @@ export const env = {
   nodeEnv,
   isProd,
   port,
+  host,
   apiUrl,
   webUrl,
   corsOrigins,
@@ -197,29 +210,40 @@ export const env = {
   cookieSecure,
   cookieSameSite,
   csrfSecret: required("CSRF_SECRET", "dev-csrf-secret-min-32-characters-xxxx"),
-  storageDriver: (process.env.STORAGE_DRIVER || "cloudinary").toLowerCase(),
+  storageDriver: (trimEnv(process.env.STORAGE_DRIVER) || "bunny").toLowerCase(),
   storagePublicBase: (
-    process.env.STORAGE_PUBLIC_BASE ||
-    (String(process.env.STORAGE_DRIVER || "cloudinary").toLowerCase() ===
-      "cloudinary" && process.env.CLOUDINARY_CLOUD_NAME
-      ? `https://res.cloudinary.com/${process.env.CLOUDINARY_CLOUD_NAME}`
-      : `${apiUrl}/files`)
+    trimEnv(process.env.STORAGE_PUBLIC_BASE) ||
+    (() => {
+      const bunnyCdn = trimEnv(process.env.BUNNY_CDN_HOSTNAME).replace(
+        /\/+$/,
+        "",
+      );
+      if (bunnyCdn) {
+        return /^https?:\/\//i.test(bunnyCdn) ? bunnyCdn : `https://${bunnyCdn}`;
+      }
+      return `${apiUrl}/files`;
+    })()
   ).replace(/\/$/, ""),
 
-  // Cloudflare R2 / AWS S3 / MinIO — when STORAGE_DRIVER=s3|r2
-  s3Endpoint: process.env.S3_ENDPOINT || "",
-  s3Bucket: process.env.S3_BUCKET || "",
-  s3AccessKey: process.env.S3_ACCESS_KEY || "",
-  s3SecretKey: process.env.S3_SECRET_KEY || "",
-  s3Region: process.env.S3_REGION || "auto",
-  s3ForcePathStyle: bool("S3_FORCE_PATH_STYLE", false),
-
-  // Cloudinary — when STORAGE_DRIVER=cloudinary (good for testing / image-heavy media)
-  cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
-  cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || "",
-  cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || "",
-  /** Optional root folder prefix inside the Cloudinary account (e.g. "apex"). */
-  cloudinaryFolderPrefix: process.env.CLOUDINARY_FOLDER_PREFIX || "apex",
+  /** Active Bunny Storage Zone name (dashboard → Storage). */
+  bunnyStorageZone: trimEnv(process.env.BUNNY_STORAGE_ZONE),
+  /** Storage Zone password / API Access Key — never hardcode. */
+  bunnyStorageApiKey: trimEnv(process.env.BUNNY_STORAGE_API_KEY),
+  /** Regional storage hostname from Bunny (e.g. sg.storage.bunnycdn.com). */
+  bunnyStorageHostname:
+    trimEnv(process.env.BUNNY_STORAGE_HOSTNAME) || "storage.bunnycdn.com",
+  /** Pull Zone hostname for CDN delivery (e.g. myzone.b-cdn.net). */
+  bunnyCdnHostname: trimEnv(process.env.BUNNY_CDN_HOSTNAME).replace(
+    /^https?:\/\//i,
+    "",
+  ).replace(/\/+$/, ""),
+  /** Optional Pull Zone token-authentication key for signed CDN URLs.
+   *  Required for private assets on a public pull zone. Without it, private
+   *  objects are proxied through the API instead of returning unsigned CDN URLs. */
+  bunnyCdnTokenKey: trimEnv(process.env.BUNNY_CDN_TOKEN_KEY),
+  /** App folder prefix inside the storage zone (not a Bunny dashboard field). */
+  bunnyStoragePathPrefix:
+    trimEnv(process.env.BUNNY_STORAGE_PATH_PREFIX) || "apex",
 
   /** openrouter | openai | anthropic | gemini | mock */
   aiProvider: process.env.AI_PROVIDER || "openrouter",
@@ -316,7 +340,7 @@ export const env = {
    * Return plaintext OTP in API responses for manual WhatsApp delivery.
    * Defaults to true because no automated WhatsApp/SMS OTP provider is wired yet.
    * Set PORTAL_EXPOSE_OTP=false only after automated delivery is configured.
-   * (Previously gated on NODE_ENV===production, which broke registration on Railway.)
+   * (Previously gated on NODE_ENV===production, which broke registration in some hosts.)
    */
   portalExposeOtp: bool("PORTAL_EXPOSE_OTP", true),
   /**
@@ -397,4 +421,54 @@ export function getActiveAiConfig() {
     lightModel: "mock-apex-v5",
     imageModel: null,
   };
+}
+
+/** Safe summary for logs — never includes API keys or token secrets. */
+export function getBunnyStorageSummary() {
+  return {
+    driver: env.storageDriver,
+    zone: env.bunnyStorageZone || "(unset)",
+    storageHostname: env.bunnyStorageHostname,
+    cdnHostname: env.bunnyCdnHostname || "(unset)",
+    publicBase: env.storagePublicBase,
+    pathPrefix: env.bunnyStoragePathPrefix,
+    configured: Boolean(env.bunnyStorageZone && env.bunnyStorageApiKey),
+    tokenAuth: Boolean(env.bunnyCdnTokenKey),
+  };
+}
+
+/**
+ * Soft checks for local/dev: warn loudly if Bunny is incomplete or
+ * STORAGE_PUBLIC_BASE points at a different host than BUNNY_CDN_HOSTNAME.
+ */
+export function warnIfBunnyMisconfigured() {
+  if (!env.bunnyStorageZone || !env.bunnyStorageApiKey) {
+    console.warn(
+      "[env] Bunny.net is not fully configured. Set BUNNY_STORAGE_ZONE and BUNNY_STORAGE_API_KEY — uploads will fail.",
+    );
+    return;
+  }
+
+  if (env.bunnyCdnHostname && env.storagePublicBase) {
+    try {
+      const cdnHost = env.bunnyCdnHostname.toLowerCase();
+      const publicHost = new URL(
+        /^https?:\/\//i.test(env.storagePublicBase)
+          ? env.storagePublicBase
+          : `https://${env.storagePublicBase}`,
+      ).host.toLowerCase();
+      if (
+        publicHost &&
+        cdnHost &&
+        publicHost !== cdnHost &&
+        !/\/files$/i.test(env.storagePublicBase)
+      ) {
+        console.warn(
+          `[env] STORAGE_PUBLIC_BASE host (${publicHost}) differs from BUNNY_CDN_HOSTNAME (${cdnHost}). New uploads use the zone API key; public URLs may 404 if the Pull Zone is wrong.`,
+        );
+      }
+    } catch {
+      /* ignore parse errors */
+    }
+  }
 }

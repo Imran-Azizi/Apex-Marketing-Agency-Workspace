@@ -107,6 +107,7 @@ backup.sql
 .stylelintcache
 .turbo/
 .vercel/
+.railway/
 .netlify/
 .swc/
 *.pid

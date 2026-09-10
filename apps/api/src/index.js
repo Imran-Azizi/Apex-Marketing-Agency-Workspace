@@ -1,6 +1,10 @@
 import dns from "dns";
 import { createApp } from "./app.js";
-import { env } from "./config/env.js";
+import {
+  env,
+  getBunnyStorageSummary,
+  warnIfBunnyMisconfigured,
+} from "./config/env.js";
 import { startBackupScheduler } from "./services/backupScheduler.js";
 import { startSalesAssistantScheduler } from "./modules/sales-assistant/scheduler.js";
 import { attachChatRealtime } from "./realtime/chatSocket.js";
@@ -12,7 +16,7 @@ try {
 }
 
 /**
- * Transient outbound network failures (Cloudinary/undici HTTP/2 resets, etc.)
+ * Transient outbound network failures (storage CDN / undici HTTP/2 resets, etc.)
  * must not tear down the whole API process.
  */
 function isTransientNetworkError(err) {
@@ -72,10 +76,15 @@ process.on("unhandledRejection", (err) => {
 
 const app = createApp();
 
-const server = app.listen(env.port, "0.0.0.0", () => {
-  console.log(`APEX API listening on 0.0.0.0:${env.port} [${env.nodeEnv}]`);
+const server = app.listen(env.port, env.host, () => {
+  console.log(`APEX API listening on ${env.host}:${env.port} [${env.nodeEnv}]`);
   console.log(
     `[boot] storage=${env.storageDriver} cors=${env.corsOrigins.join(",")} api=${env.apiUrl}`,
+  );
+  warnIfBunnyMisconfigured();
+  const bunny = getBunnyStorageSummary();
+  console.log(
+    `[boot] bunny zone=${bunny.zone} host=${bunny.storageHostname} cdn=${bunny.cdnHostname} prefix=${bunny.pathPrefix} configured=${bunny.configured} tokenAuth=${bunny.tokenAuth}`,
   );
   startBackupScheduler().catch((err) =>
     console.error("[boot] backup scheduler:", err?.message || err),
@@ -92,7 +101,7 @@ try {
   console.error("[boot] chat realtime failed:", err?.message || err);
 }
 
-// Large Cloudinary video uploads can exceed Node's default request timeout.
+// Large video uploads can exceed Node's default request timeout.
 server.requestTimeout = 20 * 60 * 1000;
 server.headersTimeout = 21 * 60 * 1000;
 server.timeout = 20 * 60 * 1000;

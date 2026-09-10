@@ -1,5 +1,3 @@
-"use client";
-
 import { Film } from "lucide-react";
 import type { PublicPortfolioItem } from "@/lib/portfolio";
 import { PortfolioGrid } from "./portfolio-grid";

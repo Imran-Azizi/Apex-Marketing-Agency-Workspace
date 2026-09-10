@@ -47,29 +47,14 @@ async function hasSelectedPair(userAId, userBId, tx = prisma) {
   return Boolean(row);
 }
 
-/**
- * Server-side communication authorization.
- * Never trust the client for this decision.
- *
- * Rules:
- * - Self: never
- * - Either party inactive: no
- * - Either is manager/admin: yes
- * - Employee ↔ employee: only when org policy permits
- */
-export async function canUsersCommunicate(actorId, targetId, tx = prisma) {
-  if (!actorId || !targetId || actorId === targetId) {
-    return { allowed: false, reason: "INVALID_TARGET" };
-  }
+function pairKey(userAId, userBId) {
+  const pair = orderedUserPair(userAId, userBId);
+  return `${pair.userLowId}:${pair.userHighId}`;
+}
 
-  const [actor, target, settings] = await Promise.all([
-    loadActiveUser(actorId, tx),
-    loadActiveUser(targetId, tx),
-    getOrgSettings(tx),
-  ]);
-
+function decideCommunication({ actor, target, settings, pairExists = false }) {
   if (!actor || !target) {
-    return { allowed: false, reason: "USER_NOT_FOUND" };
+    return { allowed: false, reason: "USER_NOT_FOUND", settings, actor, target };
   }
 
   const actorRole = actor.role?.code;
@@ -115,8 +100,7 @@ export async function canUsersCommunicate(actorId, targetId, tx = prisma) {
   }
 
   if (policy === "SELECTED") {
-    const ok = await hasSelectedPair(actorId, targetId, tx);
-    if (ok) {
+    if (pairExists) {
       return { allowed: true, reason: "POLICY_SELECTED", settings, actor, target };
     }
     return {
@@ -129,6 +113,124 @@ export async function canUsersCommunicate(actorId, targetId, tx = prisma) {
   }
 
   return { allowed: false, reason: "EMPLOYEE_CHAT_DISABLED", settings, actor, target };
+}
+
+/**
+ * Server-side communication authorization.
+ * Never trust the client for this decision.
+ *
+ * Rules:
+ * - Self: never
+ * - Either party inactive: no
+ * - Either is manager/admin: yes
+ * - Employee ↔ employee: only when org policy permits
+ */
+export async function canUsersCommunicate(actorId, targetId, tx = prisma) {
+  if (!actorId || !targetId || actorId === targetId) {
+    return { allowed: false, reason: "INVALID_TARGET" };
+  }
+
+  const [actor, target, settings] = await Promise.all([
+    loadActiveUser(actorId, tx),
+    loadActiveUser(targetId, tx),
+    getOrgSettings(tx),
+  ]);
+
+  let pairExists = false;
+  const policy = settings.employeePolicy || "DISABLED";
+  const needsPair =
+    policy === "SELECTED" &&
+    actor &&
+    target &&
+    !isChatManagerRole(actor.role?.code) &&
+    !isChatManagerRole(target.role?.code) &&
+    isChatEmployeeRole(actor.role?.code) &&
+    isChatEmployeeRole(target.role?.code);
+  if (needsPair) {
+    pairExists = await hasSelectedPair(actorId, targetId, tx);
+  }
+
+  return decideCommunication({ actor, target, settings, pairExists });
+}
+
+/**
+ * Batch authorization for directory / conversation lists.
+ * Same rules as canUsersCommunicate — one settings load, one user query, one pair query.
+ */
+export async function canUsersCommunicateMany(actorId, targetIds, tx = prisma) {
+  const unique = [
+    ...new Set(
+      (targetIds || []).filter((id) => id && id !== actorId).map(String),
+    ),
+  ];
+  const results = new Map();
+  if (!actorId || !unique.length) return results;
+
+  const [actor, targets, settings] = await Promise.all([
+    loadActiveUser(actorId, tx),
+    tx.user.findMany({
+      where: { id: { in: unique }, isActive: true, deletedAt: null },
+      select: {
+        id: true,
+        fullName: true,
+        profileImage: true,
+        isActive: true,
+        role: { select: { code: true } },
+        teamProfile: { select: { kind: true } },
+      },
+    }),
+    getOrgSettings(tx),
+  ]);
+
+  const targetById = new Map(targets.map((row) => [row.id, row]));
+  const policy = settings.employeePolicy || "DISABLED";
+  const actorIsManager = isChatManagerRole(actor?.role?.code);
+  const pairSet = new Set();
+
+  if (
+    policy === "SELECTED" &&
+    actor &&
+    !actorIsManager &&
+    isChatEmployeeRole(actor.role?.code)
+  ) {
+    const employeeTargets = unique.filter((id) => {
+      const target = targetById.get(id);
+      return (
+        target &&
+        !isChatManagerRole(target.role?.code) &&
+        isChatEmployeeRole(target.role?.code)
+      );
+    });
+    if (employeeTargets.length) {
+      const pairs = employeeTargets.map((id) => orderedUserPair(actorId, id));
+      const rows = await tx.chatEmployeeAllowPair.findMany({
+        where: {
+          OR: pairs.map((p) => ({
+            userLowId: p.userLowId,
+            userHighId: p.userHighId,
+          })),
+        },
+        select: { userLowId: true, userHighId: true },
+      });
+      for (const row of rows) {
+        pairSet.add(`${row.userLowId}:${row.userHighId}`);
+      }
+    }
+  }
+
+  for (const targetId of unique) {
+    results.set(
+      targetId,
+      decideCommunication({
+        actor,
+        target: targetById.get(targetId) || null,
+        settings,
+        pairExists: pairSet.has(pairKey(actorId, targetId)),
+      }),
+    );
+  }
+
+  return results;
 }
 
 export async function assertCanCommunicate(actorId, targetId, tx = prisma) {

@@ -10,7 +10,7 @@ import { encryptCredential } from '../src/utils/credentialVault.js';
 import { verifyPassword } from '../src/utils/passwords.js';
 
 /**
- * Railway public proxies can drop the first TCP attempt from local networks.
+ * Some remote Postgres proxies drop the first TCP attempt.
  * Retry connect before seeding instead of failing immediately.
  */
 function ensureDbUrl() {
@@ -103,7 +103,7 @@ async function main() {
     }
   })();
   console.log(`Connecting to database at ${host}…`);
-  console.log('(Railway public proxies can take 30–60s per attempt; please wait.)');
+  console.log('(Remote DB proxies can take 30–60s per attempt; please wait.)');
   await connectWithRetry();
   console.log('Database connected. Writing seed data…');
 

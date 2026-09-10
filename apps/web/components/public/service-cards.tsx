@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Clapperboard } from "lucide-react";
 import {
@@ -11,33 +10,24 @@ import {
 import { formatCurrency, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CoverImage } from "@/components/media/cover-image";
 
 function orderLabel(index: number) {
   return String(index + 1).padStart(2, "0");
 }
 
 function ServiceImage({ src, alt }: { src: string | null; alt: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/15 via-muted to-background">
-        <Clapperboard className="h-10 w-10 text-brand/70" />
-      </div>
-    );
-  }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <CoverImage
       src={src}
       alt={alt}
-      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-      loading="lazy"
-      onError={() => {
-        if (process.env.NODE_ENV !== "production") {
-          console.warn("[service-image] failed to load:", src);
-        }
-        setFailed(true);
-      }}
+      sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+      className="transition-transform duration-500 group-hover:scale-[1.04]"
+      fallback={
+        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/15 via-muted to-background">
+          <Clapperboard className="h-10 w-10 text-brand/70" />
+        </div>
+      }
     />
   );
 }

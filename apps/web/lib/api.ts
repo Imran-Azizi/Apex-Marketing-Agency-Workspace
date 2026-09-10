@@ -84,8 +84,9 @@ export const CSRF_COOKIE = "apex_csrf";
 
 /**
  * In-memory CSRF token from GET /auth/csrf.
- * Required for cross-origin (Vercel → Railway): the CSRF cookie is scoped to the
- * API host, so document.cookie on the web origin cannot read it.
+ * Required for cross-origin setups: the CSRF cookie is scoped to the API host,
+ * so document.cookie on a different web origin cannot read it. Same-origin VPS
+ * deploys can still use the in-memory token from GET /auth/csrf.
  */
 let csrfTokenMemory: string | null = null;
 

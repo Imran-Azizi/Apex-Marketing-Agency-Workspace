@@ -107,7 +107,7 @@ export const authController = {
       } catch {
         /* ignore */
       }
-      await authService.logout(sessionId);
+      await authService.logout(sessionId, req);
       if (panel) clearPanelAuthCookies(res, panel);
       else {
         // No panel hint — clear legacy only (avoid wiping every concurrent panel).
@@ -121,7 +121,7 @@ export const authController = {
 
   logoutAll: async (req, res, next) => {
     try {
-      await authService.logoutAll(req.auth);
+      await authService.logoutAll(req.auth, req);
       const panel = req.auth?.panel || resolveAuthPanel(req) || roleToPanel(req.auth?.roleCode);
       if (panel) clearPanelAuthCookies(res, panel);
       clearLegacyAuthCookies(res);

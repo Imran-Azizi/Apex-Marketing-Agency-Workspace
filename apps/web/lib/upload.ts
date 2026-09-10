@@ -202,7 +202,7 @@ function typedFileBlob(
 
 /**
  * Always fetch via authenticated /files/raw and return a blob: URL.
- * Required for PDF iframe preview — Cloudinary/CDN URLs are often blocked by
+ * Required for PDF iframe preview — CDN URLs are often blocked by
  * X-Frame-Options when embedded cross-origin.
  */
 export async function fetchAuthenticatedFileBlobUrl(

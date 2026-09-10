@@ -67,43 +67,40 @@ export const salesAssistantService = {
       ...(query.customerId ? { crmCustomerId: String(query.customerId) } : {}),
     };
 
-    const [rows, total, allOpenForStats] = await Promise.all([
-      prisma.salesAssistantRecommendation.findMany({
-        where,
-        include: recInclude,
-        orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.salesAssistantRecommendation.count({ where }),
-      prisma.salesAssistantRecommendation.findMany({
-        where: openWhere,
-        select: {
-          priority: true,
-          category: true,
-          kind: true,
-          actionState: true,
-        },
-      }),
-    ]);
+    const [rows, total, openCount, newCount, highCount, opportunityCount] =
+      await Promise.all([
+        prisma.salesAssistantRecommendation.findMany({
+          where,
+          include: recInclude,
+          orderBy: [{ priority: 'asc' }, { createdAt: 'desc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prisma.salesAssistantRecommendation.count({ where }),
+        prisma.salesAssistantRecommendation.count({ where: openWhere }),
+        prisma.salesAssistantRecommendation.count({
+          where: { ...openWhere, actionState: ACTION_STATES.NEW },
+        }),
+        prisma.salesAssistantRecommendation.count({
+          where: { ...openWhere, priority: 'HIGH' },
+        }),
+        prisma.salesAssistantRecommendation.count({
+          where: {
+            ...openWhere,
+            priority: { not: 'HIGH' },
+            OR: [{ category: 'REPEAT' }, { kind: 'REPEAT_ORDER' }],
+          },
+        }),
+      ]);
 
     const stats = {
-      open: allOpenForStats.length,
-      newCount: 0,
-      urgent: 0,
-      followUp: 0,
-      opportunity: 0,
-      high: 0,
+      open: openCount,
+      newCount,
+      urgent: highCount,
+      followUp: Math.max(0, openCount - highCount - opportunityCount),
+      opportunity: opportunityCount,
+      high: highCount,
     };
-
-    for (const row of allOpenForStats) {
-      if (row.actionState === ACTION_STATES.NEW) stats.newCount += 1;
-      if (row.priority === 'HIGH') stats.high += 1;
-      const section = inboxSectionFor(row);
-      if (section === 'urgent') stats.urgent += 1;
-      else if (section === 'opportunity') stats.opportunity += 1;
-      else stats.followUp += 1;
-    }
 
     const items = rows.map((r) => {
       const serialized = serializeRecommendation(r);

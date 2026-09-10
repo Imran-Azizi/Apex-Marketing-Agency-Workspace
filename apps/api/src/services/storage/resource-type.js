@@ -1,6 +1,5 @@
 /**
- * Map MIME / file extension → Cloudinary resource_type.
- * Audio is uploaded as "video" (Cloudinary streaming path).
+ * Map MIME / file extension → media kind and Cloudinary resource_type.
  */
 
 const IMAGE_EXT = new Set([
@@ -82,10 +81,11 @@ export function toCloudinaryPublicId(storageKey) {
 }
 
 /**
+ * Provider-agnostic media kind.
  * @param {{ contentType?: string | null, filename?: string | null, storageKey?: string | null }} input
- * @returns {"image" | "video" | "raw"}
+ * @returns {"image" | "video" | "audio" | "document"}
  */
-export function resolveCloudinaryResourceType({
+export function resolveMediaKind({
   contentType,
   filename,
   storageKey,
@@ -96,12 +96,25 @@ export function resolveCloudinaryResourceType({
     .trim();
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
 
   const ext =
     extensionOf(filename) || extensionOf(storageKey) || extensionOf(mime);
   if (ext && IMAGE_EXT.has(ext)) return "image";
   if (ext && VIDEO_EXT.has(ext)) return "video";
-  if (ext && AUDIO_EXT.has(ext)) return "video";
+  if (ext && AUDIO_EXT.has(ext)) return "audio";
+  return "document";
+}
+
+/**
+ * Map MIME / file extension → Cloudinary resource_type (legacy driver).
+ * Audio is uploaded as "video" on Cloudinary's streaming path.
+ * @param {{ contentType?: string | null, filename?: string | null, storageKey?: string | null }} input
+ * @returns {"image" | "video" | "raw"}
+ */
+export function resolveCloudinaryResourceType(input = {}) {
+  const kind = resolveMediaKind(input);
+  if (kind === "image") return "image";
+  if (kind === "video" || kind === "audio") return "video";
   return "raw";
 }

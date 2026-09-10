@@ -7,11 +7,16 @@ import { ContactForm } from "@/components/public/contact-form";
 import { ContactInfoPanel } from "@/components/public/contact-info-panel";
 import { PublicSection } from "@/components/public/public-section";
 
-export function PublicContactSection() {
+export function PublicContactSection({
+  initialContact,
+}: {
+  initialContact?: PublicContactInfo | null;
+}) {
   const { data, isLoading } = useQuery({
     queryKey: ["public-contact-info"],
     queryFn: () => apiGet<PublicContactInfo>("/public/contact-info"),
     staleTime: 10 * 60_000,
+    initialData: initialContact ?? undefined,
     refetchOnWindowFocus: false,
   });
 

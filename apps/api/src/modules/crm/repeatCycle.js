@@ -61,8 +61,8 @@ export async function openFreshCycleOpportunity(tx, customer, extras = {}) {
         advancePayment: null,
         proposedPrice: null,
         agreedTerms: null,
+        // Payments are on Invoice (and customer), not Opportunity.
         invoices: { none: {} },
-        payments: { none: {} },
       },
       orderBy: { createdAt: "desc" },
     });

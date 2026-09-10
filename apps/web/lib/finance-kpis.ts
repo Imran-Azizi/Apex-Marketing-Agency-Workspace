@@ -1,7 +1,6 @@
 import type { FinanceDashboard } from "@/app/(dashboard)/finance/_components/types";
 import type { KpiMetric } from "@/components/dashboard/manager/types";
-import { resolveDateRange } from "@/components/dashboard/manager/compute-metrics";
-import type { DateRange } from "@/components/dashboard/manager/types";
+import { dateRangeQueryParams, type DateRange } from "@/lib/date-range";
 
 function kpi(
   partial: Omit<KpiMetric, "tone"> & { tone?: KpiMetric["tone"] },
@@ -9,12 +8,12 @@ function kpi(
   return { tone: "default", format: "number", ...partial };
 }
 
-/** Build `/finance/dashboard` URL for the manager dashboard date filter. */
+/** Build `/finance/dashboard` URL for date-filtered KPI requests. */
 export function financeDashboardQueryUrl(range: DateRange): string {
-  const { from, to } = resolveDateRange(range);
+  const { from, to } = dateRangeQueryParams(range);
   const params = new URLSearchParams();
-  if (from) params.set("from", from.toISOString().slice(0, 10));
-  if (to) params.set("to", to.toISOString().slice(0, 10));
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
   const qs = params.toString();
   return `/finance/dashboard${qs ? `?${qs}` : ""}`;
 }

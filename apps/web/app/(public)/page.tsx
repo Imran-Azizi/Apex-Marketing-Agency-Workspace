@@ -1,11 +1,19 @@
-"use client";
-
 import dynamic from "next/dynamic";
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "@/lib/api";
-import { Skeleton } from "@/components/ui/skeleton";
 import { PublicHero } from "@/components/public/public-hero";
 import { CompanyIntroSection } from "@/components/public/company-intro-section";
+import { Skeleton } from "@/components/ui/skeleton";
+import { fetchPublicJson } from "@/lib/public-api";
+import type { HeroSlide } from "@/lib/hero";
+import type { PublicService } from "@/lib/services";
+import type { ShowcaseCustomer } from "@/lib/customers";
+import type { PublicContactInfo } from "@/lib/contact";
+import {
+  MIXED_SLUG,
+  type PublicPortfolioList,
+  type PublicPortfolioTabs,
+} from "@/lib/portfolio";
+
+export const revalidate = 60;
 
 const PublicServicesSection = dynamic(
   () =>
@@ -36,32 +44,31 @@ const PublicContactSection = dynamic(
   { loading: () => <Skeleton className="mx-auto h-64 max-w-7xl rounded-2xl" /> },
 );
 
-interface WhatsappCta {
-  number: string;
-  message: string;
-  url: string;
-}
-
-export default function HomePage() {
-  const { data: cta } = useQuery({
-    queryKey: ["whatsapp-cta", "home"],
-    queryFn: () =>
-      apiGet<WhatsappCta>(
-        `/public/whatsapp-cta?message=${encodeURIComponent("سلام، می‌خواهم درباره خدمات اپیکس اطلاعات بگیرم.")}`,
+export default async function HomePage() {
+  const [hero, services, customers, contact, portfolioTabs, portfolioList] =
+    await Promise.all([
+      fetchPublicJson<HeroSlide[]>("/public/hero", 30),
+      fetchPublicJson<PublicService[]>("/public/services", 60),
+      fetchPublicJson<ShowcaseCustomer[]>("/public/customers", 30),
+      fetchPublicJson<PublicContactInfo>("/public/contact-info", 30),
+      fetchPublicJson<PublicPortfolioTabs>("/public/portfolio/categories", 30),
+      fetchPublicJson<PublicPortfolioList>(
+        `/public/portfolio?category=${encodeURIComponent(MIXED_SLUG)}`,
+        30,
       ),
-    staleTime: 10 * 60_000,
-    refetchOnWindowFocus: false,
-  });
+    ]);
 
   return (
     <div className="overflow-x-hidden">
-      <PublicHero whatsappUrl={cta?.url} />
+      <PublicHero initialSlides={hero ?? undefined} />
       <CompanyIntroSection />
-
-      <PublicServicesSection />
-      <PublicPortfolioSection />
-      <PublicCustomersSection />
-      <PublicContactSection />
+      <PublicServicesSection initialServices={services} />
+      <PublicPortfolioSection
+        initialTabs={portfolioTabs}
+        initialList={portfolioList}
+      />
+      <PublicCustomersSection initialCustomers={customers} />
+      <PublicContactSection initialContact={contact} />
     </div>
   );
 }

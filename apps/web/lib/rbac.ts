@@ -115,7 +115,7 @@ const MANAGER_NAV: NavItem[] = [
     ],
   },
   { href: "/employees", label: "مدیریت کارمندان", icon: UserCog },
-  { href: "/backup", label: "پشتیبان‌گیری", icon: HardDrive },
+  { href: "/backup", label: "بک اپ گیری", icon: HardDrive },
   { href: "/settings", label: "تنظیمات", icon: Settings },
 ];
 
@@ -337,7 +337,7 @@ const EXTRA_NAV: Array<NavItem & { permission: string }> = [
   },
   {
     href: "/backup",
-    label: "پشتیبان‌گیری",
+    label: "بک اپ گیری",
     icon: HardDrive,
     permission: "backup.view",
   },

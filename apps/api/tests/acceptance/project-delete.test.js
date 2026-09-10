@@ -12,6 +12,7 @@ test('project softDelete removes finance, portfolio, and CRM project links', asy
   const suffix = Date.now().toString().slice(-8);
   const customer = await prisma.crmCustomer.create({
     data: {
+      customerCode: `APEX-T${suffix}`,
       personName: `Delete Test ${suffix}`,
       whatsappRaw: `0799${suffix}`,
       normalizedWhatsapp: `93799${suffix}`,
@@ -111,11 +112,11 @@ test('project softDelete removes finance, portfolio, and CRM project links', asy
 
   await prisma.portfolioItem.create({
     data: {
-      projectId: project.id,
+      title: `Delete Test ${suffix}`,
       slug: `delete-test-${suffix}`,
-      companyDisplay: 'Test Co',
       status: 'PUBLISHED',
       publishedAt: new Date(),
+      project: { connect: { id: project.id } },
     },
   });
 
@@ -137,16 +138,16 @@ test('project softDelete removes finance, portfolio, and CRM project links', asy
   assert.equal(await prisma.expense.count({ where: { projectId: project.id } }), 0);
   assert.equal(await prisma.employeePayable.count({ where: { projectId: project.id } }), 0);
 
-  const portfolio = await prisma.portfolioItem.findUnique({ where: { projectId: project.id } });
-  assert.ok(portfolio.deletedAt);
+  const portfolio = await prisma.portfolioItem.findFirst({ where: { projectId: project.id } });
+  assert.ok(portfolio?.deletedAt);
   assert.equal(portfolio.status, 'UNPUBLISHED');
 
   const opp = await prisma.opportunity.findUnique({ where: { id: opportunity.id } });
   assert.equal(opp.projectId, null);
-  assert.equal(opp.pipelineStage, 'ORDER_CONFIRMED');
+  assert.equal(opp.pipelineStage, 'DEPOSIT_CONFIRMED');
 
   const cust = await prisma.crmCustomer.findUnique({ where: { id: customer.id } });
-  assert.equal(cust.pipelineStage, 'ORDER_CONFIRMED');
+  assert.equal(cust.pipelineStage, 'DEPOSIT_CONFIRMED');
 
   // Active finance list must not include the deleted project's invoices
   const liveInvoices = await prisma.invoice.findMany({

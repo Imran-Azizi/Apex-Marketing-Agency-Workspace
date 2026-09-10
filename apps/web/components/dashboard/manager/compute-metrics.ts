@@ -1,4 +1,5 @@
 import { PROJECT_STATUS_LABELS } from "@/lib/project-status";
+import { resolveDateRange } from "@/lib/date-range";
 import type {
   DashboardSummary,
   DateRange,
@@ -40,18 +41,6 @@ function num(v: string | number | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function startOfDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function endOfDay(d: Date) {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
-}
-
 function monthKey(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -63,38 +52,6 @@ function monthLabel(key: string) {
     year: "numeric",
     month: "short",
   }).format(new Date(y, m - 1, 1));
-}
-
-export function resolveDateRange(range: DateRange): {
-  from: Date | null;
-  to: Date | null;
-} {
-  const now = new Date();
-  if (range.preset === "all") return { from: null, to: null };
-  if (range.preset === "custom") {
-    return {
-      from: range.from ? startOfDay(range.from) : null,
-      to: range.to ? endOfDay(range.to) : null,
-    };
-  }
-  if (range.preset === "today") {
-    return { from: startOfDay(now), to: endOfDay(now) };
-  }
-  if (range.preset === "week") {
-    const from = startOfDay(now);
-    from.setDate(from.getDate() - ((from.getDay() + 1) % 7));
-    return { from, to: endOfDay(now) };
-  }
-  if (range.preset === "month") {
-    return {
-      from: new Date(now.getFullYear(), now.getMonth(), 1),
-      to: endOfDay(now),
-    };
-  }
-  return {
-    from: new Date(now.getFullYear(), 0, 1),
-    to: endOfDay(now),
-  };
 }
 
 function inRange(

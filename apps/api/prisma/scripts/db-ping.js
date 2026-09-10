@@ -1,5 +1,5 @@
 /**
- * Quick Railway / Postgres reachability check (run from apps/api):
+ * Quick Postgres reachability check (run from apps/api):
  *   node prisma/scripts/db-ping.js
  */
 import 'dotenv/config';
@@ -8,6 +8,7 @@ import { PrismaClient } from '@prisma/client';
 function normalizeUrl(raw) {
   if (!raw) throw new Error('DATABASE_URL is missing in .env');
   const url = new URL(raw);
+  // Legacy remote proxies sometimes need SSL + longer connect timeout.
   if (!url.searchParams.has('sslmode') && /rlwy\.net|railway/i.test(url.hostname)) {
     url.searchParams.set('sslmode', 'require');
   }
@@ -44,10 +45,10 @@ console.error('FAILED — cannot reach database.');
 console.error(lastError?.message || lastError);
 console.error(`
 Tips:
-1. Railway → Postgres → must be Running (not sleeping).
-2. Use the PUBLIC URL (*.proxy.rlwy.net), not the internal hostname.
-3. Ensure DATABASE_URL includes: ?sslmode=require&connect_timeout=60
-4. Prefer seeding inside Railway (one-off): npm run db:seed
+1. Confirm PostgreSQL is running (systemctl status postgresql).
+2. For local VPS DB use 127.0.0.1 and a matching DATABASE_URL user/password.
+3. For remote SSL hosts, include: ?sslmode=require&connect_timeout=60
+4. Then: npm run db:seed
 `);
 await prisma.$disconnect().catch(() => {});
 process.exit(1);

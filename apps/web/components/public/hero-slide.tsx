@@ -2,6 +2,7 @@
 
 import { heroImageSrc, type HeroSlide } from "@/lib/hero";
 import { cn } from "@/lib/utils";
+import { CoverImage } from "@/components/media/cover-image";
 
 export function HeroSlideView({
   slide,
@@ -29,20 +30,16 @@ export function HeroSlideView({
       aria-hidden={!active}
     >
       {src ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <CoverImage
           src={src}
           alt={active ? alt : ""}
-          width={1920}
-          height={1080}
-          decoding="async"
-          fetchPriority={priority ? "high" : "low"}
-          loading={priority ? "eager" : "lazy"}
+          sizes="100vw"
+          priority={priority}
           className={cn(
-            "hero-slide-visual absolute inset-0 h-full w-full object-cover object-center",
+            "hero-slide-visual object-center",
             animate && active && "hero-slide-visual-active",
           )}
-          sizes="100vw"
+          fallback={<div className="absolute inset-0 bg-muted" />}
         />
       ) : (
         <div className="absolute inset-0 bg-muted" />

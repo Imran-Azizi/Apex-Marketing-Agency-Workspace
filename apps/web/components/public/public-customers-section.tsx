@@ -8,11 +8,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PublicSection } from "@/components/public/public-section";
 import { CustomerCarousel } from "@/components/public/customers/customer-carousel";
 
-export function PublicCustomersSection() {
+export function PublicCustomersSection({
+  initialCustomers,
+}: {
+  initialCustomers?: ShowcaseCustomer[] | null;
+}) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["public-customers"],
     queryFn: () => apiGet<ShowcaseCustomer[]>("/public/customers"),
     staleTime: 10 * 60_000,
+    initialData: initialCustomers ?? undefined,
     refetchOnWindowFocus: false,
   });
 

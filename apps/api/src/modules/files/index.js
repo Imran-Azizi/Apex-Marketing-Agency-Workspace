@@ -1,18 +1,23 @@
 import { Router } from "express";
 import multer from "multer";
 import path from "path";
+import crypto from "crypto";
+import { tmpdir } from "os";
+import { unlink } from "fs/promises";
 import { requireAuth } from "../../middleware/auth.js";
 import { requireCsrf } from "../../middleware/csrf.js";
+import { uploadLimiter } from "../../middleware/rateLimit.js";
 import { created, AppError } from "../../utils/response.js";
 import { storage } from "../../services/storage.js";
 import {
-  isCleanFinalStorageKey,
   parseUploadContext,
   UPLOAD_PURPOSE,
   validateContentImportFile,
 } from "../../services/storage/media-manager.js";
 import { prisma } from "../../db/prisma.js";
 import { normalizeDigitsDeep } from "../../utils/toEnglishDigits.js";
+import { SECURITY, BLOCKED_UPLOAD_EXTENSIONS } from "../../config/security.js";
+import { assertRawStorageAccess } from "./rawAccess.js";
 
 const ALLOWED_MIME_PREFIXES = [
   "image/",
@@ -22,24 +27,69 @@ const ALLOWED_MIME_PREFIXES = [
   "application/msword",
   "application/vnd.",
   "application/postscript",
-  "application/octet-stream",
   "text/plain",
 ];
 
-function isAllowedMime(mime) {
+const OCTET_STREAM_EXTS = new Set([
+  "pdf",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "ppt",
+  "pptx",
+  "mp4",
+  "mov",
+  "mkv",
+  "webm",
+  "mp3",
+  "wav",
+  "m4a",
+  "aac",
+  "ogg",
+  "zip",
+]);
+
+function fileExtension(name) {
+  return path.extname(String(name || "")).slice(1).toLowerCase();
+}
+
+function isBlockedUploadName(name) {
+  return BLOCKED_UPLOAD_EXTENSIONS.includes(fileExtension(name));
+}
+
+function isAllowedMime(mime, originalname) {
+  if (isBlockedUploadName(originalname)) return false;
+  const ext = fileExtension(originalname);
+  if (ext === "svg") return false;
   const value = String(mime || "").toLowerCase();
-  if (!value) return true;
+  if (!value || value === "image/svg+xml") return false;
+  if (value === "application/octet-stream") {
+    return OCTET_STREAM_EXTS.has(ext);
+  }
   return ALLOWED_MIME_PREFIXES.some(
     (prefix) => value === prefix || value.startsWith(prefix),
   );
 }
 
 const upload = multer({
-  storage: multer.memoryStorage(),
-  // No fileSize cap — production and portfolio videos must not be rejected by size.
-  limits: { files: 1 },
+  // Disk-backed so large videos are streamed to Bunny without sitting in RAM.
+  storage: multer.diskStorage({
+    destination(_req, _file, cb) {
+      cb(null, tmpdir());
+    },
+    filename(_req, file, cb) {
+      const ext = path.extname(file.originalname || "").slice(0, 16);
+      cb(
+        null,
+        `apex-upload-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`,
+      );
+    },
+  }),
+  // Large production videos are allowed; unbounded bodies are not.
+  limits: { files: 1, fileSize: SECURITY.upload.maxFileBytes },
   fileFilter(_req, file, cb) {
-    if (!isAllowedMime(file.mimetype)) {
+    if (!isAllowedMime(file.mimetype, file.originalname)) {
       cb(new AppError("نوع فایل مجاز نیست", 400, "FILE_TYPE_NOT_ALLOWED"));
       return;
     }
@@ -243,15 +293,15 @@ async function streamStoredFile(
     "application/octet-stream";
 
   /**
-   * Cloudinary video/audio: after ACL, send the player straight to a short-lived
-   * CDN URL. Proxying the body through Node+undici causes frequent "terminated"
-   * failures on HTTP/2 (especially with Range seeking).
+   * After ACL, send AV players to a short-lived CDN URL when the driver can
+   * sign it (Bunny token auth / Cloudinary signed URL). Otherwise proxy/stream
+   * so protected files are not left on a permanent public CDN URL.
    */
   const isAv =
     String(contentType).startsWith("video/") ||
     String(contentType).startsWith("audio/") ||
     head.resourceType === "video";
-  if (isAv && storage.isCloudinary()) {
+  if (isAv && storage.prefersDirectCdnRedirect({ signed: true })) {
     try {
       const url = await storage.createPresignedGetUrl(storageKey);
       if (url) {
@@ -261,7 +311,7 @@ async function streamStoredFile(
       }
     } catch (err) {
       console.warn(
-        "[files] cloudinary CDN redirect failed, falling back to proxy:",
+        "[files] CDN redirect failed, falling back to proxy:",
         err?.message || err,
       );
     }
@@ -319,14 +369,18 @@ router.post(
   "/upload",
   requireAuth,
   requireCsrf,
+  uploadLimiter,
   (req, res, next) => {
-    // Final videos can take several minutes on slow Cloudinary links.
+    // Final videos can take several minutes on slow storage links.
     req.setTimeout(20 * 60 * 1000);
     res.setTimeout(20 * 60 * 1000);
     next();
   },
   (req, res, next) => {
     upload.single("file")(req, res, (err) => {
+      if (err && req.file?.path) {
+        unlink(req.file.path).catch(() => {});
+      }
       if (!err) return next();
       if (err instanceof AppError) return next(err);
       if (err instanceof multer.MulterError) {
@@ -357,7 +411,7 @@ router.post(
           throw new AppError(check.message, 400, "FILE_TYPE_NOT_ALLOWED");
         }
       }
-      const saved = await storage.saveBuffer(req.file.buffer, {
+      const saved = await storage.saveUploadedFile(req.file, {
         filename: req.file.originalname,
         folder: uploadContext.folder,
         contentType: req.file.mimetype,
@@ -382,6 +436,10 @@ router.post(
       });
     } catch (e) {
       next(e);
+    } finally {
+      if (req.file?.path) {
+        await unlink(req.file.path).catch(() => {});
+      }
     }
   },
 );
@@ -397,7 +455,7 @@ router.get("/signed", async (req, res, next) => {
         throw new AppError("دسترسی دانلود لغو شده", 403, "DOWNLOAD_REVOKED");
     }
 
-    // Prefer short-lived direct object URL when using R2/S3 (faster, less Railway bandwidth).
+    // Prefer short-lived direct object/CDN URL (faster, less API bandwidth).
     if (storage.isObjectStorage()) {
       const direct = await storage.createPresignedGetUrl(payload.key);
       if (direct) {
@@ -437,14 +495,7 @@ router.get("/media/:fileId", requireAuth, async (req, res, next) => {
 router.get("/raw/*", requireAuth, async (req, res, next) => {
   try {
     const key = req.params[0];
-    // Harden: never serve CLEAN_FINAL via raw key lookup without ACL
-    if (isCleanFinalStorageKey(key)) {
-      throw new AppError(
-        "از مسیر امن رسانه استفاده کنید",
-        403,
-        "USE_MEDIA_ROUTE",
-      );
-    }
+    await assertRawStorageAccess(key, req.auth);
     await streamStoredFile(req, res, key);
   } catch (e) {
     next(e);

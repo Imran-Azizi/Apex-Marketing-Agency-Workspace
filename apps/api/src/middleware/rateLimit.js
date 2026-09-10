@@ -1,29 +1,47 @@
 import rateLimit from 'express-rate-limit';
+import { SECURITY } from '../config/security.js';
+
+function jsonMessage(code, message) {
+  return { success: false, error: { code, message } };
+}
 
 export const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
+  windowMs: SECURITY.rateLimit.global.windowMs,
+  max: SECURITY.rateLimit.global.max,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => String(req.originalUrl || req.url || "").startsWith("/files/"),
 });
 
 export const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many auth attempts' } },
+  windowMs: SECURITY.rateLimit.auth.windowMs,
+  max: SECURITY.rateLimit.auth.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: jsonMessage('RATE_LIMITED', 'Too many auth attempts'),
+});
+
+export const loginLimiter = rateLimit({
+  windowMs: SECURITY.rateLimit.login.windowMs,
+  max: SECURITY.rateLimit.login.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.ip || 'anonymous'),
+  message: jsonMessage('RATE_LIMITED', 'Too many auth attempts'),
 });
 
 export const otpLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { success: false, error: { code: 'RATE_LIMITED', message: 'Too many OTP requests' } },
+  windowMs: SECURITY.rateLimit.otp.windowMs,
+  max: SECURITY.rateLimit.otp.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: jsonMessage('RATE_LIMITED', 'Too many OTP requests'),
 });
 
 /** Public Contact Us form — abuse / spam protection */
 export const contactLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 8,
+  windowMs: SECURITY.rateLimit.contact.windowMs,
+  max: SECURITY.rateLimit.contact.max,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => String(req.ip || "anonymous"),
@@ -38,8 +56,8 @@ export const contactLimiter = rateLimit({
 
 /** Per-user AI generation limiter (expensive LLM calls) */
 export const aiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 40,
+  windowMs: SECURITY.rateLimit.ai.windowMs,
+  max: SECURITY.rateLimit.ai.max,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => String(req.auth?.userId || req.ip || 'anonymous'),
@@ -51,8 +69,8 @@ export const aiLimiter = rateLimit({
 
 /** Chat message send / conversation open */
 export const chatMessageLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
+  windowMs: SECURITY.rateLimit.chatMessage.windowMs,
+  max: SECURITY.rateLimit.chatMessage.max,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => String(req.auth?.userId || req.ip || 'anonymous'),
@@ -67,8 +85,8 @@ export const chatMessageLimiter = rateLimit({
 
 /** Chat attachment / voice uploads */
 export const chatUploadLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 40,
+  windowMs: SECURITY.rateLimit.chatUpload.windowMs,
+  max: SECURITY.rateLimit.chatUpload.max,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => String(req.auth?.userId || req.ip || 'anonymous'),
@@ -76,6 +94,22 @@ export const chatUploadLimiter = rateLimit({
     success: false,
     error: {
       code: 'CHAT_UPLOAD_RATE_LIMITED',
+      message: 'تعداد بارگذاری فایل زیاد است. کمی بعد تلاش کنید.',
+    },
+  },
+});
+
+/** General authenticated file uploads */
+export const uploadLimiter = rateLimit({
+  windowMs: SECURITY.rateLimit.upload.windowMs,
+  max: SECURITY.rateLimit.upload.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.auth?.userId || req.ip || 'anonymous'),
+  message: {
+    success: false,
+    error: {
+      code: 'UPLOAD_RATE_LIMITED',
       message: 'تعداد بارگذاری فایل زیاد است. کمی بعد تلاش کنید.',
     },
   },

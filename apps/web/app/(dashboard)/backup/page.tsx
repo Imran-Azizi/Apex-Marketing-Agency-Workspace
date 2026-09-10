@@ -77,6 +77,7 @@ interface SystemBackup {
   errorMessage: string | null;
   emailTo: string | null;
   emailSentAt: string | null;
+  emailError?: string | null;
   completedAt: string | null;
   createdAt: string;
   createdBy?: { id: string; fullName: string; email: string } | null;
@@ -253,9 +254,23 @@ export default function BackupPage() {
           qc.invalidateQueries({ queryKey: ["backup-list"] });
           qc.invalidateQueries({ queryKey: ["backup-overview"] });
           if (row.status === "SUCCESS") {
-            toast.success("پشتیبان با موفقیت ایجاد شد");
+            if (row.emailSentAt) {
+              toast.success("بک اپ ایجاد و به ایمیل ارسال شد", {
+                description: row.emailTo
+                  ? `گیرنده: ${row.emailTo}`
+                  : undefined,
+              });
+            } else if (row.emailError || row.emailTo) {
+              toast.warning("بک اپ ایجاد شد اما ارسال ایمیل انجام نشد", {
+                description:
+                  row.emailError ||
+                  "فایل برای دانلود دستی در دسترس است.",
+              });
+            } else {
+              toast.success("بک اپ با موفقیت ایجاد شد");
+            }
           } else {
-            toast.error(row.errorMessage || "ایجاد پشتیبان ناموفق بود");
+            toast.error(row.errorMessage || "ایجاد بک اپ ناموفق بود");
           }
           setTimeout(() => setProgress(0), 800);
         }
@@ -279,13 +294,13 @@ export default function BackupPage() {
     onSuccess: (row) => {
       setProgress(8);
       setPendingBackupId(row.id);
-      toast.message("پشتیبان‌گیری شروع شد", {
+      toast.message("بک اپ گیری شروع شد", {
         description: "در حال آماده‌سازی و ارسال به ایمیل…",
       });
       qc.invalidateQueries({ queryKey: ["backup-list"] });
     },
     onError: (e) =>
-      toast.error(e instanceof Error ? e.message : "خطا در ایجاد پشتیبان"),
+      toast.error(e instanceof Error ? e.message : "خطا در ایجاد بک اپ"),
   });
 
   const saveScheduleMut = useMutation({
@@ -298,7 +313,15 @@ export default function BackupPage() {
       return data.data;
     },
     onSuccess: (data: { schedule?: ScheduleConfig } | undefined) => {
-      toast.success("زمان‌بندی ذخیره شد");
+      const savedEmail = data?.schedule?.emailTo?.trim();
+      toast.success(
+        savedEmail
+          ? "زمان‌بندی ذخیره شد — بک اپ‌های بعدی به این ایمیل ارسال می‌شوند"
+          : "زمان‌بندی ذخیره شد",
+        savedEmail
+          ? { description: `گیرنده: ${savedEmail}` }
+          : undefined,
+      );
       if (data?.schedule) setScheduleDraft(data.schedule);
       else setScheduleDraft(null);
       qc.invalidateQueries({ queryKey: ["backup-overview"] });
@@ -310,7 +333,7 @@ export default function BackupPage() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => apiDelete(`/backup/${id}`),
     onSuccess: () => {
-      toast.success("پشتیبان حذف شد");
+      toast.success("بک اپ حذف شد");
       setDeleteTarget(null);
       qc.invalidateQueries({ queryKey: ["backup-list"] });
       qc.invalidateQueries({ queryKey: ["backup-overview"] });
@@ -371,7 +394,7 @@ export default function BackupPage() {
     },
     onSuccess: (info, file) => {
       setUploadMeta({ file, info });
-      toast.success("فایل پشتیبان معتبر است");
+      toast.success("فایل بک اپ معتبر است");
     },
     onError: (e) =>
       toast.error(e instanceof Error ? e.message : "اعتبارسنجی ناموفق بود"),
@@ -396,14 +419,14 @@ export default function BackupPage() {
   return (
     <div className="space-y-6 animate-fade-slide" dir="rtl">
       <PageHeader
-        title="پشتیبان‌گیری و بازگردانی"
-        subtitle="ایجاد، زمان‌بندی، دانلود و بازگردانی امن نسخه‌های پشتیبان سیستم"
+        title="بک اپ گیری و بازگردانی"
+        subtitle="ایجاد، زمان‌بندی، دانلود و بازگردانی امن نسخه‌های بک اپ سیستم"
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {
-            label: "کل پشتیبان‌ها",
+            label: "کل بک اپ‌ها",
             value: overview.data?.stats.total ?? "—",
             tone: "brand",
           },
@@ -441,7 +464,7 @@ export default function BackupPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <HardDriveDownload className="h-5 w-5 text-brand" />
-              ایجاد پشتیبان جدید
+              ایجاد بک اپ جدید
             </CardTitle>
             <CardDescription>
               نسخه کامل داده‌های سیستم (دیتابیس، کاربران، مشتریان، پروژه‌ها، مالی و
@@ -451,7 +474,7 @@ export default function BackupPage() {
           <CardContent className="space-y-4">
             {overview.data?.latest ? (
               <div className="rounded-xl border bg-muted/30 p-3 text-sm">
-                <p className="font-medium">آخرین پشتیبان موفق</p>
+                <p className="font-medium">آخرین بک اپ موفق</p>
                 <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-muted-foreground">
                   <span>{formatDateTime(overview.data.latest.createdAt)}</span>
                   <span aria-hidden>·</span>
@@ -465,7 +488,7 @@ export default function BackupPage() {
             {(pendingBackupId || progress > 0) && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>پیشرفت پشتیبان‌گیری</span>
+                  <span>پیشرفت بک اپ گیری</span>
                   <span className="tabular-nums">{progress}٪</span>
                 </div>
                 <Progress value={progress} />
@@ -475,8 +498,10 @@ export default function BackupPage() {
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Mail className="h-3.5 w-3.5" />
               {overview.data?.emailConfigured
-                ? `ایمیل فعال · گیرنده: ${overview.data.schedule.emailTo || "پیش‌فرض سیستم"}`
-                : "SMTP پیکربندی نشده — فایل فقط در فضای ذخیره ذخیره می‌شود"}
+                ? overview.data.schedule.emailTo
+                  ? `ایمیل فعال · بک اپ‌ها به ${overview.data.schedule.emailTo} ارسال می‌شوند`
+                  : "ایمیل SMTP فعال است — برای ارسال خودکار، ایمیل دریافت بک اپ را ذخیره کنید"
+                : "SMTP پیکربندی نشده — فایل ذخیره می‌شود اما ایمیل ارسال نمی‌شود"}
             </div>
 
             <Button
@@ -491,7 +516,7 @@ export default function BackupPage() {
               ) : (
                 <HardDrive className="h-4 w-4" />
               )}
-              ایجاد پشتیبان اکنون
+              ایجاد بک اپ اکنون
             </Button>
           </CardContent>
         </Card>
@@ -501,10 +526,10 @@ export default function BackupPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <RotateCcw className="h-5 w-5 text-brand" />
-              بازگردانی از پشتیبان
+              بازگردانی از بک اپ
             </CardTitle>
             <CardDescription>
-              فایل پشتیبان را بارگذاری کنید. قبل از بازگردانی، اعتبارسنجی و تأیید
+              فایل بک اپ را بارگذاری کنید. قبل از بازگردانی، اعتبارسنجی و تأیید
               امنیتی انجام می‌شود.
             </CardDescription>
           </CardHeader>
@@ -531,7 +556,7 @@ export default function BackupPage() {
               ) : (
                 <Upload className="h-4 w-4" />
               )}
-              انتخاب فایل پشتیبان
+              انتخاب فایل بک اپ
             </Button>
 
             {uploadMeta ? (
@@ -544,7 +569,7 @@ export default function BackupPage() {
                   <li>جداول: {uploadMeta.info.tableCount}</li>
                   <li>رکوردها: {uploadMeta.info.recordCount}</li>
                   <li>
-                    تاریخ پشتیبان: {formatDateTime(uploadMeta.info.createdAt)}
+                    تاریخ بک اپ: {formatDateTime(uploadMeta.info.createdAt)}
                   </li>
                 </ul>
                 <Button
@@ -568,7 +593,7 @@ export default function BackupPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <CalendarClock className="h-5 w-5 text-brand" />
-            زمان‌بندی پشتیبان خودکار
+            زمان‌بندی بک اپ خودکار
           </CardTitle>
           <CardDescription>
             {nextRunLabel || "در حال بارگذاری…"}
@@ -580,7 +605,7 @@ export default function BackupPage() {
           ) : (
             <>
               <div className="max-w-md space-y-2">
-                <Label htmlFor="backup-email">ایمیل دریافت پشتیبان</Label>
+                <Label htmlFor="backup-email">ایمیل دریافت بک اپ</Label>
                 <Input
                   id="backup-email"
                   dir="ltr"
@@ -594,6 +619,10 @@ export default function BackupPage() {
                     })
                   }
                 />
+                <p className="text-xs text-muted-foreground">
+                  پس از ذخیره، هر بک اپ جدید به‌صورت خودکار به این آدرس ارسال
+                  می‌شود (نیاز به پیکربندی SMTP در سرور).
+                </p>
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">
@@ -740,7 +769,21 @@ export default function BackupPage() {
                 variant="brand"
                 className="rounded-xl"
                 disabled={!scheduleDraft || saveScheduleMut.isPending}
-                onClick={() => scheduleDraft && saveScheduleMut.mutate(scheduleDraft)}
+                onClick={() => {
+                  if (!scheduleDraft) return;
+                  const email = scheduleDraft.emailTo.trim();
+                  if (
+                    email &&
+                    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+                  ) {
+                    toast.error("آدرس ایمیل دریافت بک اپ نامعتبر است");
+                    return;
+                  }
+                  saveScheduleMut.mutate({
+                    ...scheduleDraft,
+                    emailTo: email,
+                  });
+                }}
               >
                 {saveScheduleMut.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -756,7 +799,7 @@ export default function BackupPage() {
       <Card className="border-border/60 shadow-sm">
         <CardHeader className="gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <CardTitle className="text-base">تاریخچه پشتیبان‌ها</CardTitle>
+            <CardTitle className="text-base">تاریخچه بک اپ‌ها</CardTitle>
             <CardDescription>
               دانلود، بازگردانی یا حذف نسخه‌های ذخیره‌شده
             </CardDescription>
@@ -824,8 +867,8 @@ export default function BackupPage() {
             <Skeleton className="h-48 w-full rounded-xl" />
           ) : !list.data?.items.length ? (
             <EmptyState
-              title="هنوز پشتیبانی ثبت نشده"
-              description="با دکمه «ایجاد پشتیبان اکنون» اولین نسخه را بسازید."
+              title="هنوز بک اپ ثبت نشده"
+              description="با دکمه «ایجاد بک اپ اکنون» اولین نسخه را بسازید."
             />
           ) : (
             <>
@@ -856,10 +899,14 @@ export default function BackupPage() {
                         <TableCell>
                           <StatusBadge status={row.status} />
                         </TableCell>
-                        <TableCell className="max-w-[140px] truncate text-xs text-muted-foreground">
+                        <TableCell className="max-w-[180px] truncate text-xs text-muted-foreground">
                           {row.emailSentAt
                             ? "ارسال شد"
-                            : row.emailTo || "—"}
+                            : row.emailError
+                              ? "ارسال ناموفق"
+                              : row.emailTo
+                                ? "در انتظار/ارسال نشده"
+                                : "—"}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
@@ -947,9 +994,9 @@ export default function BackupPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>حذف پشتیبان</DialogTitle>
+            <DialogTitle>حذف بک اپ</DialogTitle>
             <DialogDescription>
-              این عمل فایل پشتیبان را برای همیشه حذف می‌کند و قابل بازگشت نیست.
+              این عمل فایل بک اپ را برای همیشه حذف می‌کند و قابل بازگشت نیست.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
@@ -987,12 +1034,12 @@ export default function BackupPage() {
             </DialogTitle>
             <DialogDescription className="space-y-2 text-start">
               <span className="block">
-                بازگردانی، داده‌های فعلی سیستم را با نسخه پشتیبان جایگزین می‌کند.
+                بازگردانی، داده‌های فعلی سیستم را با نسخه بک اپ جایگزین می‌کند.
                 این عملیات برگشت‌پذیر نیست.
               </span>
               <span className="block font-medium text-foreground">
                 فقط مدیر مجاز است این کار را انجام دهد. قبل از ادامه، از وضعیت
-                فعلی نسخه پشتیبان بگیرید.
+                فعلی نسخه بک اپ بگیرید.
               </span>
             </DialogDescription>
           </DialogHeader>

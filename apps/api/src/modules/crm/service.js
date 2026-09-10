@@ -159,6 +159,18 @@ export const transferCustomersSchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(100),
 });
 
+export const bulkDeleteCustomersSchema = z.object({
+  ids: z.array(z.string().trim().min(1).max(64)).min(1).max(100),
+});
+
+export function normalizeBulkCustomerIds(ids) {
+  return [
+    ...new Set(
+      (ids || []).map((id) => String(id || "").trim()).filter(Boolean),
+    ),
+  ];
+}
+
 const paymentMethodMetaSchema = z
   .object({
     hesabPayAccount: z.string().trim().max(200).optional(),
@@ -430,11 +442,13 @@ export const crmService = {
       }),
       prisma.crmCustomer.count({ where }),
     ]);
+    const totalPages = Math.max(1, Math.ceil(total / safePageSize));
     return {
       items: items.map((row) => serializeListItem(row, auth)),
       total,
       page: safePage,
       pageSize: safePageSize,
+      totalPages,
     };
   },
 
@@ -460,11 +474,20 @@ export const crmService = {
       total += row._count._all;
     }
     const categories = {};
-    for (const code of ["GHOST", "INTERESTED", "FOLLOW_UP", "OUR_CUSTOMERS"]) {
-      const catWhere = buildCategoryWhere(code);
-      categories[code] = catWhere
-        ? await prisma.crmCustomer.count({ where: { AND: [activeWhere, catWhere] } })
-        : 0;
+    const categoryCodes = ["GHOST", "INTERESTED", "FOLLOW_UP", "OUR_CUSTOMERS"];
+    const categoryCounts = await Promise.all(
+      categoryCodes.map(async (code) => {
+        const catWhere = buildCategoryWhere(code);
+        const count = catWhere
+          ? await prisma.crmCustomer.count({
+              where: { AND: [activeWhere, catWhere] },
+            })
+          : 0;
+        return [code, count];
+      }),
+    );
+    for (const [code, count] of categoryCounts) {
+      categories[code] = count;
     }
     return {
       total,
@@ -534,6 +557,12 @@ export const crmService = {
           take: 100,
         },
         salesOwner: true,
+        _count: {
+          select: {
+            invoices: true,
+            payments: true,
+          },
+        },
       },
     });
     if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
@@ -542,12 +571,20 @@ export const crmService = {
     const recorderIds = [
       ...new Set(customer.payments.map((p) => p.recordedById).filter(Boolean)),
     ];
-    const recorders = recorderIds.length
-      ? await prisma.user.findMany({
-          where: { id: { in: recorderIds } },
-          select: { id: true, fullName: true },
-        })
-      : [];
+    const [recorders, financeByOpp, activities, verifiedProbe] = await Promise.all([
+      recorderIds.length
+        ? prisma.user.findMany({
+            where: { id: { in: recorderIds } },
+            select: { id: true, fullName: true },
+          })
+        : [],
+      batchOpportunityFinanceSnapshots(prisma, customer.opportunities),
+      listCrmActivities(prisma, customer.id),
+      prisma.payment.findFirst({
+        where: { crmCustomerId: customer.id, verification: "VERIFIED" },
+        select: { id: true },
+      }),
+    ]);
     const recorderById = Object.fromEntries(recorders.map((u) => [u.id, u]));
 
     const payments = customer.payments.map((p) => ({
@@ -556,11 +593,6 @@ export const crmService = {
       recordedBy: p.recordedById ? recorderById[p.recordedById] || null : null,
     }));
 
-    // Attach live finance snapshot per opportunity (payments = source of truth).
-    const financeByOpp = await batchOpportunityFinanceSnapshots(
-      prisma,
-      customer.opportunities,
-    );
     const opportunities = customer.opportunities.map((opp) => {
       const finance =
         financeByOpp.get(opp.id) || computeFinanceSnapshot(opp.agreedPrice, 0);
@@ -570,8 +602,6 @@ export const crmService = {
         finance,
       };
     });
-
-    const activities = await listCrmActivities(prisma, customer.id);
 
     const portal = customer.portalAccount;
     const portalAccount = portal
@@ -587,27 +617,11 @@ export const crmService = {
         }
       : null;
     const portalCredentials = serializePortalCredentials(customer, extras.auth);
-
-    const extrasCounts = await prisma.crmCustomer.findFirst({
-      where: { id },
-      select: {
-        _count: {
-          select: {
-            invoices: true,
-            payments: true,
-          },
-        },
-        payments: {
-          where: { verification: "VERIFIED" },
-          select: { id: true },
-          take: 1,
-        },
-      },
-    });
+    const { _count, ...customerRest } = customer;
 
     return withCrmView(
       {
-        ...customer,
+        ...customerRest,
         portalAccount,
         portalCredentials,
         opportunities,
@@ -617,9 +631,9 @@ export const crmService = {
       extras.auth,
       {
         hasProject: customer.projects.length > 0,
-        hasInvoice: Boolean(extrasCounts?._count?.invoices),
-        hasPayment: Boolean(extrasCounts?._count?.payments),
-        hasVerifiedPayment: Boolean(extrasCounts?.payments?.length),
+        hasInvoice: Boolean(_count?.invoices),
+        hasPayment: Boolean(_count?.payments),
+        hasVerifiedPayment: Boolean(verifiedProbe),
       },
     );
   },
@@ -770,7 +784,7 @@ export const crmService = {
   },
 
   async updateCustomer(id, data, auth, req) {
-    const before = await this.getCustomer(id);
+    const before = await this.getCustomer(id, { auth });
 
     const patch = {};
     if (data.personName !== undefined) patch.personName = data.personName;
@@ -2062,7 +2076,7 @@ export const crmService = {
   },
 
   /** Structured receipt payload for a recorded payment. */
-  async getPaymentReceipt(paymentId) {
+  async getPaymentReceipt(paymentId, auth) {
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: {
@@ -2096,6 +2110,7 @@ export const crmService = {
             email: true,
             city: true,
             address: true,
+            salesOwnerId: true,
             opportunities: {
               where: { deletedAt: null },
               orderBy: { updatedAt: "desc" },
@@ -2113,6 +2128,7 @@ export const crmService = {
       },
     });
     if (!payment) throw new AppError("پرداخت یافت نشد", 404, "NOT_FOUND");
+    assertSalesCustomerAccess(payment.crmCustomer, auth);
 
     const recordedBy = payment.recordedById
       ? await prisma.user.findUnique({
@@ -2342,8 +2358,8 @@ export const crmService = {
   },
 
   /** Printable HTML receipt (print / Save as PDF). */
-  async getPaymentReceiptHtml(paymentId) {
-    const receipt = await this.getPaymentReceipt(paymentId);
+  async getPaymentReceiptHtml(paymentId, auth) {
+    const receipt = await this.getPaymentReceipt(paymentId, auth);
     return buildPaymentReceiptHtml(receipt);
   },
 
@@ -2777,7 +2793,7 @@ export const crmService = {
   },
 
   async softDeleteCustomer(id, auth, req) {
-    const customer = await this.getCustomer(id);
+    const customer = await this.getCustomer(id, { auth });
     const liveProjects = customer.projects || [];
 
     if (
@@ -2984,6 +3000,56 @@ export const crmService = {
     };
   },
 
+  async bulkDeleteCustomers(ids, auth, req) {
+    const unique = normalizeBulkCustomerIds(ids);
+    if (!unique.length) {
+      throw new AppError("حداقل یک مورد را انتخاب کنید", 400, "VALIDATION");
+    }
+    if (unique.length > 100) {
+      throw new AppError(
+        "حداکثر ۱۰۰ مورد در هر درخواست قابل حذف است",
+        400,
+        "VALIDATION",
+      );
+    }
+
+    const deleted = [];
+    const failed = [];
+
+    for (const id of unique) {
+      try {
+        const result = await this.softDeleteCustomer(id, auth, req);
+        deleted.push({ id: result.id });
+      } catch (err) {
+        failed.push({
+          id,
+          message:
+            err instanceof AppError
+              ? err.message
+              : "حذف این مورد انجام نشد. لطفاً دوباره تلاش کنید.",
+          status: err instanceof AppError ? err.status : 500,
+          code: err instanceof AppError ? err.code : "APP_ERROR",
+        });
+      }
+    }
+
+    if (!deleted.length) {
+      const first = failed[0];
+      throw new AppError(
+        first?.message || "حذف انتخاب‌شده‌ها انجام نشد",
+        first?.status || 400,
+        first?.code || "BULK_DELETE_FAILED",
+        { failed: failed.map(({ id, message }) => ({ id, message })) },
+      );
+    }
+
+    return {
+      selected: unique.length,
+      deleted,
+      failed: failed.map(({ id, message }) => ({ id, message })),
+    };
+  },
+
   /**
    * Spec §5.4 — Merge Duplicate: manager/senior sales only; keep projects & timeline on survivor.
    */
@@ -3070,7 +3136,7 @@ export const crmService = {
       req,
     });
 
-    return this.getCustomer(survivorId);
+    return this.getCustomer(survivorId, { auth });
   },
 
   checkDuplicate(whatsapp) {
@@ -3089,13 +3155,13 @@ export const crmService = {
       .then((found) => ({ normalized, exists: !!found, customer: found }));
   },
 
-  async getActivity(customerId) {
-    await this.getCustomer(customerId);
+  async getActivity(customerId, auth) {
+    await this.getCustomer(customerId, { auth });
     return { items: await listCrmActivities(prisma, customerId) };
   },
 
   async addInteraction(customerId, { type, body }, auth, req) {
-    await this.getCustomer(customerId);
+    await this.getCustomer(customerId, { auth });
     const event = type === "NOTE" ? null : CRM_EVENTS.INTERACTION;
     await prisma.$transaction(async (tx) => {
       if (type === "NOTE") {
@@ -3153,7 +3219,7 @@ export const crmService = {
   },
 
   async changeStage(customerId, { stage }, auth, req) {
-    const before = await this.getCustomer(customerId);
+    const before = await this.getCustomer(customerId, { auth });
     const current = canonicalizeStage(before.pipelineStage);
     const next = canonicalizeStage(stage);
     if (current === next && next !== "REPEAT_CUSTOMER") {

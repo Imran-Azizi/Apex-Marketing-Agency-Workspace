@@ -1,13 +1,19 @@
 import { z } from 'zod';
 import { prisma } from '../../db/prisma.js';
 import { AppError } from '../../utils/response.js';
-import { hashPassword, verifyPassword } from '../../utils/passwords.js';
-import { encryptCredential } from '../../utils/credentialVault.js';
+import { verifyPassword } from '../../utils/passwords.js';
 import { hashToken, randomToken, signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/tokens.js';
 import { writeAudit } from '../../middleware/audit.js';
+import {
+  assertLoginNotLocked,
+  clearLoginFailures,
+  loginAttemptKey,
+  recordLoginFailure,
+} from '../../middleware/loginGuard.js';
 import { getWhatsappLookupKeys, parseInternationalPhone, WHATSAPP_VALIDATION_MESSAGE } from '../../utils/whatsappNormalize.js';
 import { roleToPanel } from '../../config/cookies.js';
 import { effectiveFromUser } from '../../services/permissions/effective.js';
+import { SECURITY } from '../../config/security.js';
 
 function parseExpiryToDate(expiresIn) {
   const match = /^(\d+)([smhd])$/.exec(expiresIn || '7d');
@@ -37,27 +43,32 @@ function buildTokens({ sub, aud, role, sessionId }) {
   return { accessToken, refreshToken };
 }
 
-function recoverableCipher(plaintext) {
-  try {
-    return encryptCredential(plaintext) || null;
-  } catch {
-    return null;
-  }
-}
-
 export const authService = {
   async loginInternal({ email, password }, req) {
+    const identity = String(email || '').toLowerCase();
+    const attemptKey = loginAttemptKey({ identity, ip: req.ip });
+    assertLoginNotLocked(attemptKey);
+
     const user = await prisma.user.findFirst({
-      where: { email: email.toLowerCase(), deletedAt: null },
+      where: { email: identity, deletedAt: null },
       include: {
         role: { include: { permissions: { include: { permission: true } } } },
         userPermissions: { include: { permission: true } },
       },
     });
     if (!user || !(await verifyPassword(password, user.passwordHash))) {
+      recordLoginFailure(attemptKey);
+      await writeAudit({
+        action: 'LOGIN_FAILED',
+        entityType: 'User',
+        entityId: user?.id || null,
+        after: { audience: 'INTERNAL' },
+        req,
+      });
       throw new AppError('ایمیل یا رمز عبور نادرست است', 401, 'INVALID_CREDENTIALS');
     }
     if (!user.isActive) throw new AppError('حساب غیرفعال است', 403, 'INACTIVE');
+    clearLoginFailures(attemptKey);
 
     const refreshToken = randomToken();
     const session = await createSession({
@@ -79,10 +90,6 @@ export const authService = {
     });
 
     const loginUpdate = { lastLoginAt: new Date() };
-    if (!user.passwordCipher) {
-      const passwordCipher = recoverableCipher(password);
-      if (passwordCipher) loginUpdate.passwordCipher = passwordCipher;
-    }
     await prisma.user.update({
       where: { id: user.id },
       data: loginUpdate,
@@ -110,17 +117,29 @@ export const authService = {
   },
 
   async loginPortal({ whatsapp, password }, req) {
+    const attemptKey = loginAttemptKey({ identity: `portal:${whatsapp}`, ip: req.ip });
+    assertLoginNotLocked(attemptKey);
+
     const lookupKeys = getWhatsappLookupKeys(whatsapp);
     const account = await prisma.portalAccount.findFirst({
       where: { normalizedWhatsapp: { in: lookupKeys }, deletedAt: null },
       include: { crmCustomer: true },
     });
     if (!account?.passwordHash || !(await verifyPassword(password, account.passwordHash))) {
+      recordLoginFailure(attemptKey);
+      await writeAudit({
+        action: 'LOGIN_FAILED',
+        entityType: 'PortalAccount',
+        entityId: account?.id || null,
+        after: { audience: 'PORTAL' },
+        req,
+      });
       throw new AppError('شماره یا رمز عبور نادرست است', 401, 'INVALID_CREDENTIALS');
     }
     if (!account.isActive || account.crmCustomer?.deletedAt) {
       throw new AppError('حساب غیرفعال است', 403, 'INACTIVE');
     }
+    clearLoginFailures(attemptKey);
 
     const session = await createSession({
       audience: 'PORTAL',
@@ -137,6 +156,14 @@ export const authService = {
     await prisma.session.update({
       where: { id: session.id },
       data: { refreshTokenHash: hashToken(tokens.refreshToken) },
+    });
+
+    await writeAudit({
+      action: 'LOGIN',
+      entityType: 'PortalAccount',
+      entityId: account.id,
+      after: { audience: 'PORTAL' },
+      req,
     });
 
     return {
@@ -213,15 +240,21 @@ export const authService = {
     return { tokens, panel };
   },
 
-  async logout(sessionId) {
+  async logout(sessionId, req) {
     if (!sessionId) return;
     await prisma.session.updateMany({
       where: { id: sessionId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    await writeAudit({
+      action: 'LOGOUT',
+      entityType: 'Session',
+      entityId: sessionId,
+      req,
+    });
   },
 
-  async logoutAll(auth) {
+  async logoutAll(auth, req) {
     if (auth.audience === 'INTERNAL') {
       await prisma.session.updateMany({
         where: { userId: auth.userId, revokedAt: null },
@@ -233,6 +266,13 @@ export const authService = {
         data: { revokedAt: new Date() },
       });
     }
+    await writeAudit({
+      userId: auth.userId || null,
+      action: 'LOGOUT_ALL',
+      entityType: auth.audience === 'INTERNAL' ? 'User' : 'PortalAccount',
+      entityId: auth.userId || auth.portalAccountId || null,
+      req,
+    });
   },
 
   async me(auth) {
@@ -262,7 +302,7 @@ export const authService = {
 
 export const loginSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().min(SECURITY.password.loginMinLength).max(SECURITY.password.maxLength),
 });
 
 const whatsappFieldSchema = z
@@ -279,7 +319,7 @@ const whatsappFieldSchema = z
 
 export const portalLoginSchema = z.object({
   whatsapp: whatsappFieldSchema,
-  password: z.string().min(6),
+  password: z.string().min(SECURITY.password.loginMinLength).max(SECURITY.password.maxLength),
 });
 
-export { hashPassword };
+export { hashPassword } from '../../utils/passwords.js';

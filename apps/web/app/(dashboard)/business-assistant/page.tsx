@@ -11,8 +11,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import dynamic from "next/dynamic";
 import { ActionItem, BulletCard } from "./_components/briefing-ui";
-import { PerformanceChart } from "./_components/performance-chart";
+
+const PerformanceChart = dynamic(
+  () =>
+    import("./_components/performance-chart").then((m) => m.PerformanceChart),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-64 w-full rounded-xl" />,
+  },
+);
 import {
   formatCount,
   formatDateTimeEn,

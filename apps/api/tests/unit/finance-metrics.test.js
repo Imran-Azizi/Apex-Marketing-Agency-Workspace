@@ -12,6 +12,7 @@ import {
   remainingBalance,
   roundMoney,
   targetMetForMonth,
+  parseDateBound,
 } from '../../src/modules/finance/metrics.js';
 import {
   deriveSettlementStatus,
@@ -258,4 +259,27 @@ test('deriveSettlementStatus maps payment progress to remaining states', () => {
   assert.equal(deriveSettlementStatus({ finalProjectPrice: 10000, received: 4000 }), 'PARTIAL');
   assert.equal(deriveSettlementStatus({ finalProjectPrice: 10000, received: 10000 }), 'PAID');
   assert.equal(deriveSettlementStatus({ finalProjectPrice: 10000, received: 12000 }), 'PAID');
+});
+
+test('parseDateBound treats YYYY-MM-DD as a local calendar day', () => {
+  const from = parseDateBound('2026-09-08', false);
+  const to = parseDateBound('2026-09-08', true);
+  assert.ok(from);
+  assert.ok(to);
+  assert.equal(from.getFullYear(), 2026);
+  assert.equal(from.getMonth(), 8);
+  assert.equal(from.getDate(), 8);
+  assert.equal(from.getHours(), 0);
+  assert.equal(from.getMinutes(), 0);
+  assert.equal(to.getFullYear(), 2026);
+  assert.equal(to.getMonth(), 8);
+  assert.equal(to.getDate(), 8);
+  assert.equal(to.getHours(), 23);
+  assert.equal(to.getMinutes(), 59);
+});
+
+test('parseDateBound returns null for empty or invalid values', () => {
+  assert.equal(parseDateBound(null), null);
+  assert.equal(parseDateBound(''), null);
+  assert.equal(parseDateBound('not-a-date'), null);
 });

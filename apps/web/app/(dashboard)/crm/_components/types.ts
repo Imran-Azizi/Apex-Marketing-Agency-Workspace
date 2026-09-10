@@ -26,6 +26,7 @@ export interface CrmListResponse {
   total: number;
   page: number;
   pageSize: number;
+  totalPages?: number;
 }
 
 export interface CrmFormOptions {

@@ -372,8 +372,8 @@ export function NotificationCenter({ className }: { className?: string }) {
     queryKey: UNSEEN_COUNT_QUERY_KEY,
     queryFn: fetchUnseenCount,
     staleTime: 8_000,
-    refetchInterval: open ? 8_000 : 12_000,
-    refetchOnWindowFocus: true,
+    refetchInterval: open ? 8_000 : 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const query = useInfiniteQuery({

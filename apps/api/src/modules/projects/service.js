@@ -17,6 +17,15 @@ import {
   resolveAgreedPrice,
   resolveOpportunityForProjectCreate,
 } from './createProjectCore.js';
+import {
+  findProjectByCreateKey,
+  findProjectForOpportunity,
+  isIdempotencyUniqueConflict,
+  lockOpportunityRow,
+  normalizeIdempotencyKey,
+  withProjectCreateLock,
+} from './projectCreateGuard.js';
+import { canAccessProject } from '../../services/projectAccess.js';
 import { z } from 'zod';
 
 const createProjectSchema = z.object({
@@ -59,18 +68,8 @@ const createProjectSchema = z.object({
     z.string().trim().max(500).optional().nullable(),
   ),
   clientAssetIds: z.array(z.string()).optional(),
+  idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
 });
-
-function canAccessProject(project, auth) {
-  if (auth.roleCode === 'MANAGER' || auth.roleCode === 'ADMIN' || auth.roleCode === 'FINANCE' || auth.roleCode === 'SALES') return true;
-  if (auth.roleCode === 'PROJECT_MANAGER') return true;
-  if (auth.roleCode === 'EDITOR' || auth.roleCode === 'NARRATOR') {
-    return project.assignments?.some(
-      (a) => a.isActive && (a.userId === auth.userId || a.teamProfile?.userId === auth.userId),
-    );
-  }
-  return false;
-}
 
 function stripFinanceForRole(project, roleCode) {
   if (['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(roleCode)) {
@@ -202,26 +201,46 @@ export const projectService = {
     assertCanListProjects(auth);
     const where = buildListWhere(auth, query);
 
-    const items = await prisma.project.findMany({
-      where,
-      include: {
-        crmCustomer: { select: { id: true, personName: true, companyName: true } },
-        assignments: {
-          where: { isActive: true },
-          include: {
-            teamProfile: { select: { displayName: true, userId: true } },
-            user: { select: { id: true, fullName: true } },
+    const safePage = Math.max(1, Number(query.page) || 1);
+    const rawSize = Number(query.pageSize ?? query.limit ?? 15);
+    const safePageSize = Math.min(100, Math.max(1, Number.isFinite(rawSize) ? rawSize : 15));
+
+    const [rows, total] = await Promise.all([
+      prisma.project.findMany({
+        where,
+        include: {
+          crmCustomer: { select: { id: true, personName: true, companyName: true } },
+          assignments: {
+            where: { isActive: true },
+            include: {
+              teamProfile: { select: { displayName: true, userId: true } },
+              user: { select: { id: true, fullName: true } },
+            },
           },
+          finance: ['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(auth.roleCode)
+            ? false
+            : true,
         },
-        finance: ['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(auth.roleCode) ? false : true,
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: 100,
-    });
-    return attachProjectProgressMany(
-      items.map((p) => stripFinanceForRole(p, auth.roleCode)),
+        orderBy: { updatedAt: 'desc' },
+        skip: (safePage - 1) * safePageSize,
+        take: safePageSize,
+      }),
+      prisma.project.count({ where }),
+    ]);
+
+    const items = await attachProjectProgressMany(
+      rows.map((p) => stripFinanceForRole(p, auth.roleCode)),
       'internal',
     );
+
+    const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+    return {
+      items,
+      total,
+      page: safePage,
+      pageSize: safePageSize,
+      totalPages,
+    };
   },
 
   async filterOptions(auth) {
@@ -537,6 +556,12 @@ export const projectService = {
         await tx.employeePayable.deleteMany({ where: { projectId: id } })
       ).count;
 
+      // 4) Unpublish + soft-delete portfolio showcase rows tied to this project
+      const portfolioUpdated = await tx.portfolioItem.updateMany({
+        where: { projectId: id, deletedAt: null },
+        data: { deletedAt, status: 'UNPUBLISHED' },
+      });
+
       // Detach opportunity and restore pre-project CRM stage
       if (project.opportunity) {
         await tx.opportunity.update({
@@ -574,6 +599,7 @@ export const projectService = {
           payments: paymentsDeleted,
           expenses: expensesDeleted,
           payables: payablesDeleted,
+          portfolioItems: portfolioUpdated.count,
         },
       };
     });
@@ -625,6 +651,8 @@ export const projectService = {
       'MANAGER_FINAL_REVIEW',
     ]);
 
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
     const [counts, leadsToday, followUps, createdRows] = await Promise.all([
       prisma.project.groupBy({
         by: ['status'],
@@ -640,15 +668,14 @@ export const projectService = {
       prisma.crmCustomer.count({
         where: { nextFollowUpAt: { lte: new Date() }, deletedAt: null },
       }),
-      prisma.project.findMany({
-        where: {
-          deletedAt: null,
-          createdAt: {
-            gte: new Date(new Date().getFullYear(), new Date().getMonth() - 5, 1),
-          },
-        },
-        select: { createdAt: true },
-      }),
+      prisma.$queryRaw`
+        SELECT to_char(date_trunc('month', "createdAt"), 'YYYY-MM') AS key,
+               COUNT(*)::int AS count
+        FROM projects
+        WHERE "deletedAt" IS NULL
+          AND "createdAt" >= ${sixMonthsAgo}
+        GROUP BY 1
+      `,
     ]);
 
     let total = 0;
@@ -671,7 +698,6 @@ export const projectService = {
     }
 
     const monthKeys = [];
-    const now = new Date();
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       monthKeys.push(
@@ -679,10 +705,10 @@ export const projectService = {
       );
     }
     const growthMap = new Map(monthKeys.map((k) => [k, 0]));
-    for (const p of createdRows) {
-      const d = new Date(p.createdAt);
-      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      if (growthMap.has(k)) growthMap.set(k, growthMap.get(k) + 1);
+    for (const p of createdRows || []) {
+      const k = String(p.key || '');
+      const n = Number(p.count) || 0;
+      if (growthMap.has(k)) growthMap.set(k, n);
     }
     const monthlyProjectGrowth = monthKeys.map((key) => {
       const [y, m] = key.split('-').map(Number);
@@ -771,117 +797,165 @@ export const projectService = {
     const input = parsed.data;
     const title = input.title.trim();
     const crmCustomerId = input.crmCustomerId;
+    const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
 
-    const customer = await prisma.crmCustomer.findFirst({
-      where: { id: crmCustomerId, deletedAt: null },
-      include: { portalAccount: true },
-    });
-    if (!customer) throw new AppError('مشتری یافت نشد', 404, 'NOT_FOUND');
+    const replayIfExists = async () => {
+      const byKey = await findProjectByCreateKey(
+        prisma,
+        idempotencyKey,
+        crmCustomerId,
+      );
+      if (byKey) return byKey;
+      if (input.opportunityId) {
+        const byOpp = await findProjectForOpportunity(prisma, input.opportunityId);
+        if (byOpp && byOpp.crmCustomerId === crmCustomerId) return byOpp;
+      }
+      return null;
+    };
 
-    let service = null;
-    if (input.serviceId) {
-      service = await prisma.service.findFirst({
-        where: { id: input.serviceId, deletedAt: null },
+    const existing = await replayIfExists();
+    if (existing) return this.get(existing.id, auth);
+
+    return withProjectCreateLock(idempotencyKey, async () => {
+      const lockedExisting = await replayIfExists();
+      if (lockedExisting) return this.get(lockedExisting.id, auth);
+
+      const customer = await prisma.crmCustomer.findFirst({
+        where: { id: crmCustomerId, deletedAt: null },
+        include: { portalAccount: true },
       });
-      if (!service) throw new AppError('سرویس یافت نشد', 404, 'NOT_FOUND');
-    }
+      if (!customer) throw new AppError('مشتری یافت نشد', 404, 'NOT_FOUND');
 
-    if (input.formatId) {
-      const format = await prisma.format.findUnique({ where: { id: input.formatId } });
-      if (!format) throw new AppError('فرمت یافت نشد', 404, 'NOT_FOUND');
-    }
+      let service = null;
+      if (input.serviceId) {
+        service = await prisma.service.findFirst({
+          where: { id: input.serviceId, deletedAt: null },
+        });
+        if (!service) throw new AppError('سرویس یافت نشد', 404, 'NOT_FOUND');
+      }
 
-    const manager =
-      (auth.roleCode === 'MANAGER' || auth.roleCode === 'ADMIN'
-        ? await prisma.user.findFirst({
-            where: { id: auth.userId, isActive: true, deletedAt: null },
-          })
-        : null) ||
-      (await prisma.user.findFirst({
-        where: { role: { code: 'MANAGER' }, isActive: true, deletedAt: null },
-      }));
-    if (!manager) {
-      throw new AppError('مدیر سیستم تعریف نشده', 500, 'NO_MANAGER');
-    }
+      if (input.formatId) {
+        const format = await prisma.format.findUnique({ where: { id: input.formatId } });
+        if (!format) throw new AppError('فرمت یافت نشد', 404, 'NOT_FOUND');
+      }
 
-    const priorProjects = await prisma.project.count({
-      where: { crmCustomerId, deletedAt: null },
-    });
+      const manager =
+        (auth.roleCode === 'MANAGER' || auth.roleCode === 'ADMIN'
+          ? await prisma.user.findFirst({
+              where: { id: auth.userId, isActive: true, deletedAt: null },
+            })
+          : null) ||
+        (await prisma.user.findFirst({
+          where: { role: { code: 'MANAGER' }, isActive: true, deletedAt: null },
+        }));
+      if (!manager) {
+        throw new AppError('مدیر سیستم تعریف نشده', 500, 'NO_MANAGER');
+      }
 
-    const { project, opportunityId, agreedPrice } = await prisma.$transaction(
-      async (tx) => {
-        const customerWithWhatsapp = await syncCustomerWhatsappFromBrief(
-          tx,
-          customer,
-          input.whatsapp,
-        );
+      const priorProjects = await prisma.project.count({
+        where: { crmCustomerId, deletedAt: null },
+      });
 
-        const { opportunity } = await resolveOpportunityForProjectCreate(
-          tx,
-          customerWithWhatsapp,
-          {
-            opportunityId: input.opportunityId || null,
-            title,
-            pipelineStage: priorProjects > 0 ? 'REPEAT_CUSTOMER' : 'ORDER_CONFIRMED',
-            // Prefer attaching to a CRM-priced open cycle when available;
-            // only force a brand-new blank cycle when neither id nor attachable opp exists.
-            alwaysCreateFresh: false,
-          },
-        );
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          const customerWithWhatsapp = await syncCustomerWhatsappFromBrief(
+            tx,
+            customer,
+            input.whatsapp,
+          );
 
-        const agreed = resolveAgreedPrice(opportunity, input.agreedPrice);
-        const financeSnap = await buildProjectFinanceSnapshot(tx, {
-          crmCustomerId,
-          opportunityId: opportunity.id,
-          agreedPrice: agreed,
+          const { opportunity } = await resolveOpportunityForProjectCreate(
+            tx,
+            customerWithWhatsapp,
+            {
+              opportunityId: input.opportunityId || null,
+              title,
+              pipelineStage: priorProjects > 0 ? 'REPEAT_CUSTOMER' : 'ORDER_CONFIRMED',
+              alwaysCreateFresh: false,
+            },
+          );
+
+          const locked = await lockOpportunityRow(tx, opportunity.id);
+          if (locked.projectId) {
+            const existingProject = await tx.project.findFirst({
+              where: { id: locked.projectId, deletedAt: null },
+            });
+            if (existingProject) {
+              return { project: existingProject, opportunityId: opportunity.id, agreedPrice: 0, replayed: true };
+            }
+          }
+
+          const liveOpportunity = await tx.opportunity.findFirst({
+            where: { id: opportunity.id },
+            include: { service: true },
+          });
+
+          const agreed = resolveAgreedPrice(liveOpportunity, input.agreedPrice);
+          const financeSnap = await buildProjectFinanceSnapshot(tx, {
+            crmCustomerId,
+            opportunityId: liveOpportunity.id,
+            agreedPrice: agreed,
+          });
+
+          const isFreshBlank =
+            !liveOpportunity.agreedPrice &&
+            !liveOpportunity.proposedPrice &&
+            !liveOpportunity.contractLocked;
+          if (isFreshBlank && agreed <= 0) {
+            throw new AppError(
+              'مبلغ توافق‌شده برای پروژه الزامی است',
+              400,
+              'VALIDATION',
+            );
+          }
+
+          const created = await createProjectGraph(tx, {
+            opportunity: liveOpportunity,
+            customer: customerWithWhatsapp,
+            manager,
+            brief: { ...input, title },
+            source: 'INTERNAL',
+            actorId: auth.userId,
+            portalAccountId: customerWithWhatsapp.portalAccount?.id || null,
+            service,
+            agreedPrice: agreed,
+            financeSnap,
+            timelineBody: 'پروژه توسط مدیر برای مشتری موجود ایجاد شد',
+            notifyPortal: Boolean(customerWithWhatsapp.portalAccount?.id),
+            createIdempotencyKey: idempotencyKey,
+          });
+          return { ...created, replayed: false };
         });
 
-        // Fresh cycles with no CRM price require an agreed price so finance KPIs stay consistent.
-        const isFreshBlank =
-          !opportunity.agreedPrice &&
-          !opportunity.proposedPrice &&
-          !opportunity.contractLocked;
-        if (isFreshBlank && agreed <= 0) {
-          throw new AppError(
-            'مبلغ توافق‌شده برای پروژه الزامی است',
-            400,
-            'VALIDATION',
-          );
+        if (!result.replayed) {
+          await writeAudit({
+            userId: auth.userId,
+            action: 'PROJECT_CREATE',
+            entityType: 'Project',
+            entityId: result.project.id,
+            after: {
+              code: result.project.code,
+              title: result.project.title,
+              crmCustomerId,
+              opportunityId: result.opportunityId,
+              agreedPrice: result.agreedPrice,
+              source: 'INTERNAL',
+            },
+            req,
+          });
         }
 
-        return createProjectGraph(tx, {
-          opportunity,
-          customer: customerWithWhatsapp,
-          manager,
-          brief: { ...input, title },
-          source: 'INTERNAL',
-          actorId: auth.userId,
-          portalAccountId: customerWithWhatsapp.portalAccount?.id || null,
-          service,
-          agreedPrice: agreed,
-          financeSnap,
-          timelineBody: 'پروژه توسط مدیر برای مشتری موجود ایجاد شد',
-          notifyPortal: Boolean(customerWithWhatsapp.portalAccount?.id),
-        });
-      },
-    );
-
-    await writeAudit({
-      userId: auth.userId,
-      action: 'PROJECT_CREATE',
-      entityType: 'Project',
-      entityId: project.id,
-      after: {
-        code: project.code,
-        title: project.title,
-        crmCustomerId,
-        opportunityId,
-        agreedPrice,
-        source: 'INTERNAL',
-      },
-      req,
+        return this.get(result.project.id, auth);
+      } catch (err) {
+        if (
+          isIdempotencyUniqueConflict(err) ||
+          err?.code === 'PROJECT_EXISTS'
+        ) {
+          const replayed = await replayIfExists();
+          if (replayed) return this.get(replayed.id, auth);
+        }
+        throw err;
+      }
     });
-
-    return this.get(project.id, auth);
   },
 };

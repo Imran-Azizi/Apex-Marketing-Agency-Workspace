@@ -8,6 +8,7 @@ import {
   portfolioWorkPath,
   type PublicPortfolioItem,
 } from "@/lib/portfolio";
+import { CoverImage } from "@/components/media/cover-image";
 
 export function PortfolioCard({
   item,
@@ -28,12 +29,11 @@ export function PortfolioCard({
       >
         <span className="relative block aspect-video w-full overflow-hidden bg-muted">
           {item.thumbnailUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <CoverImage
               src={item.thumbnailUrl}
               alt=""
-              loading="lazy"
-              className="h-full w-full object-cover transition-transform duration-500 motion-safe:group-hover:scale-[1.04]"
+              sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
+              className="transition-transform duration-500 motion-safe:group-hover:scale-[1.04]"
             />
           ) : (
             <span

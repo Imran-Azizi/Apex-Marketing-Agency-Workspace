@@ -7,7 +7,7 @@ import {
   notifyManagersOnce,
   buildContactMessageNotification,
 } from "../../services/notifications.js";
-import { getWhatsappNumber } from "../../services/whatsapp.js";
+import { buildWhatsappCta, getWhatsappNumber } from "../../services/whatsapp.js";
 import { formatE164Display, whatsappDigitsForLink } from "../../utils/whatsappNormalize.js";
 import { withContactVisibility } from "./visibility.js";
 import { formatCustomerNameWithCompany } from "../../utils/crmCustomerName.js";
@@ -100,10 +100,6 @@ function formatPhoneDisplay(raw) {
   return formatE164Display(raw);
 }
 
-function whatsappDigits(raw) {
-  return whatsappDigitsForLink(raw) || phoneDigits(raw);
-}
-
 function telHref(raw) {
   const digits = whatsappDigitsForLink(raw) || phoneDigits(raw);
   if (!digits) return "";
@@ -177,11 +173,13 @@ function serializeListItem(row) {
 
 export const contactService = {
   async getPublicContactInfo() {
-    const [whatsappNumber, emailSetting, phoneSetting] = await Promise.all([
-      getWhatsappNumber(),
-      prisma.setting.findUnique({ where: { key: "contact_email" } }),
-      prisma.setting.findUnique({ where: { key: "contact_phone" } }),
-    ]);
+    const [whatsappNumber, emailSetting, phoneSetting, whatsappCta] =
+      await Promise.all([
+        getWhatsappNumber(),
+        prisma.setting.findUnique({ where: { key: "contact_email" } }),
+        prisma.setting.findUnique({ where: { key: "contact_phone" } }),
+        buildWhatsappCta(),
+      ]);
 
     const email =
       settingString(emailSetting?.value, ["email", "address", "value"]) ||
@@ -190,16 +188,13 @@ export const contactService = {
       settingString(phoneSetting?.value, ["number", "phone", "value"]) ||
       env.contactPhone ||
       whatsappNumber;
-    const wa = whatsappDigits(whatsappNumber);
 
     return {
       whatsapp: {
         id: "whatsapp",
         label: "واتساپ",
         value: formatPhoneDisplay(whatsappNumber),
-        href: wa
-          ? `https://wa.me/${wa}?text=${encodeURIComponent("سلام، می‌خواهم درباره خدمات اپیکس مشاوره بگیرم.")}`
-          : "",
+        href: whatsappCta.url || "",
       },
       phone: {
         id: "phone",

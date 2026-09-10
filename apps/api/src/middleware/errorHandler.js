@@ -7,7 +7,11 @@ export function errorHandler(err, req, res, next) {
   if (err instanceof AppError) {
     return res.status(err.status).json({
       success: false,
-      error: { code: err.code, message: err.message, details: err.details },
+      error: {
+        code: err.code,
+        message: err.message,
+        details: env.isProd ? undefined : err.details,
+      },
     });
   }
 
@@ -20,16 +24,15 @@ export function errorHandler(err, req, res, next) {
       error: {
         code: "VALIDATION_ERROR",
         message: field ? `${field}: ${msg}` : msg,
-        details: err.errors,
+        details: env.isProd ? undefined : err.errors,
       },
     });
   }
 
   console.error("[API Error]", err);
-  const message =
-    env.nodeEnv === "production"
-      ? "Internal server error"
-      : err?.message || "Internal server error";
+  const message = env.isProd
+    ? "Internal server error"
+    : err?.message || "Internal server error";
   return res.status(500).json({
     success: false,
     error: { code: "INTERNAL_ERROR", message },
@@ -41,7 +44,7 @@ export function notFoundHandler(req, res) {
     success: false,
     error: {
       code: "NOT_FOUND",
-      message: `Route not found: ${req.method} ${req.path}`,
+      message: "Route not found",
     },
   });
 }

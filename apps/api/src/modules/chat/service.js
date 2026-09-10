@@ -9,6 +9,7 @@ import {
   assertConversationMember,
   assertDirectStillAllowed,
   canUsersCommunicate,
+  canUsersCommunicateMany,
   getOrgSettings,
 } from "./authz.js";
 import {
@@ -137,6 +138,67 @@ async function countUnread(conversationId, userId, lastReadAt) {
   });
 }
 
+/** Exact unread counts for many conversations in two queries instead of N. */
+async function countUnreadByConversations(userId, items) {
+  const counts = new Map(items.map((item) => [item.conversationId, 0]));
+  if (!items.length) return counts;
+
+  const neverRead = items.filter((item) => !item.lastReadAt);
+  const previouslyRead = items.filter((item) => item.lastReadAt);
+
+  const [neverReadGroups, recentMessages] = await Promise.all([
+    neverRead.length
+      ? prisma.chatMessage.groupBy({
+          by: ["conversationId"],
+          where: {
+            conversationId: { in: neverRead.map((item) => item.conversationId) },
+            deletedAt: null,
+            senderId: { not: userId },
+          },
+          _count: { _all: true },
+        })
+      : [],
+    previouslyRead.length
+      ? prisma.chatMessage.findMany({
+          where: {
+            conversationId: {
+              in: previouslyRead.map((item) => item.conversationId),
+            },
+            deletedAt: null,
+            senderId: { not: userId },
+            createdAt: {
+              gt: new Date(
+                Math.min(
+                  ...previouslyRead.map((item) => item.lastReadAt.getTime()),
+                ),
+              ),
+            },
+          },
+          select: { conversationId: true, createdAt: true },
+        })
+      : [],
+  ]);
+
+  for (const row of neverReadGroups) {
+    counts.set(row.conversationId, row._count._all);
+  }
+
+  const lastReadById = new Map(
+    previouslyRead.map((item) => [item.conversationId, item.lastReadAt]),
+  );
+  for (const message of recentMessages) {
+    const lastRead = lastReadById.get(message.conversationId);
+    if (!lastRead || message.createdAt > lastRead) {
+      counts.set(
+        message.conversationId,
+        (counts.get(message.conversationId) || 0) + 1,
+      );
+    }
+  }
+
+  return counts;
+}
+
 async function notifyRecipients({ conversation, message, sender, recipientIds }) {
   const preview = previewFromMessage({
     type: message.type,
@@ -196,13 +258,19 @@ export const chatService = {
       take: 80,
     });
 
-    const settings = await getOrgSettings();
+    const [settings, allowedByTarget] = await Promise.all([
+      getOrgSettings(),
+      canUsersCommunicateMany(
+        auth.userId,
+        users.map((user) => user.id),
+      ),
+    ]);
     const online = presenceProvider.getOnlineUserIds();
     const results = [];
 
     for (const user of users) {
-      const check = await canUsersCommunicate(auth.userId, user.id);
-      if (!check.allowed) continue;
+      const check = allowedByTarget.get(user.id);
+      if (!check?.allowed) continue;
       results.push({
         id: user.id,
         fullName: user.fullName,
@@ -246,6 +314,26 @@ export const chatService = {
     });
 
     const online = presenceProvider.getOnlineUserIds();
+    const directTargetIds = [];
+    for (const row of rows) {
+      if (row.conversation.type !== "DIRECT") continue;
+      const other = row.conversation.participants.find(
+        (p) => p.userId !== auth.userId,
+      );
+      if (other) directTargetIds.push(other.userId);
+    }
+
+    const [allowedByTarget, unreadByConversation] = await Promise.all([
+      canUsersCommunicateMany(auth.userId, directTargetIds),
+      countUnreadByConversations(
+        auth.userId,
+        rows.map((row) => ({
+          conversationId: row.conversation.id,
+          lastReadAt: row.lastReadAt,
+        })),
+      ),
+    ]);
+
     const list = [];
 
     for (const row of rows) {
@@ -253,8 +341,8 @@ export const chatService = {
       if (conv.type === "DIRECT") {
         const other = conv.participants.find((p) => p.userId !== auth.userId);
         if (other) {
-          const check = await canUsersCommunicate(auth.userId, other.userId);
-          if (!check.allowed) continue;
+          const check = allowedByTarget.get(other.userId);
+          if (!check?.allowed) continue;
         }
       }
 
@@ -274,11 +362,7 @@ export const chatService = {
         continue;
       }
 
-      const unreadCount = await countUnread(
-        conv.id,
-        auth.userId,
-        row.lastReadAt,
-      );
+      const unreadCount = unreadByConversation.get(conv.id) || 0;
 
       list.push(
         serializeConversation(

@@ -7,25 +7,20 @@ import {
   type ShowcaseCustomer,
 } from "@/lib/customers";
 import { cn } from "@/lib/utils";
+import { CoverImage } from "@/components/media/cover-image";
 
 function CustomerImage({ src, alt }: { src: string | null; alt: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/20 via-muted to-background">
-        <UserRound className="h-6 w-6 text-brand/70" />
-      </div>
-    );
-  }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <CoverImage
       src={src}
       alt={alt}
-      draggable={false}
-      className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.05]"
-      loading="lazy"
-      onError={() => setFailed(true)}
+      sizes="80px"
+      className="object-center transition-transform duration-500 group-hover:scale-[1.05]"
+      fallback={
+        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/20 via-muted to-background">
+          <UserRound className="h-6 w-6 text-brand/70" />
+        </div>
+      }
     />
   );
 }

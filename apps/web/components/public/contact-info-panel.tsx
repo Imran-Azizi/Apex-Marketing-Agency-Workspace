@@ -1,5 +1,3 @@
-"use client";
-
 import { Mail, MessageCircle, Phone } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";

@@ -1,5 +1,3 @@
-"use client";
-
 import { cn } from "@/lib/utils";
 import type { PublicPortfolioItem } from "@/lib/portfolio";
 import { PortfolioCard } from "./portfolio-card";

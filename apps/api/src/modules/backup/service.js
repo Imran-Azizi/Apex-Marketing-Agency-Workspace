@@ -14,7 +14,6 @@ import { storage } from '../../services/storage.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { sendMail, isEmailConfigured } from '../../services/email.js';
 import { env } from '../../config/env.js';
-import { formatFaDateTime } from '../../utils/datetime.js';
 import {
   saveLocalBackup,
   readLocalBackup,
@@ -22,6 +21,14 @@ import {
   deleteLocalBackup,
   openLocalBackupStream,
 } from '../../services/backupLocalStore.js';
+import {
+  backupEmailDeliveryPlan,
+  buildBackupEmailContent,
+  normalizeBackupRecipientEmail,
+  resolveBackupRecipientEmail,
+  safeEmailErrorMessage,
+  withBackupEmailLock,
+} from './emailDelivery.js';
 
 export const BACKUP_FORMAT = 'apex-backup';
 export const BACKUP_VERSION = 1;
@@ -96,7 +103,7 @@ function prismaDelegate(modelName) {
   const key = modelName.charAt(0).toLowerCase() + modelName.slice(1);
   const delegate = prisma[key];
   if (!delegate?.findMany) {
-    throw new AppError(`مدل ${modelName} برای پشتیبان‌گیری در دسترس نیست`, 500, 'BACKUP_MODEL_MISSING');
+    throw new AppError(`مدل ${modelName} برای بک اپ گیری در دسترس نیست`, 500, 'BACKUP_MODEL_MISSING');
   }
   return delegate;
 }
@@ -249,13 +256,23 @@ export async function getScheduleSettings() {
 }
 
 export async function saveScheduleSettings(value, auth, req) {
+  const emailRaw = String(value?.emailTo ?? '').trim();
+  let emailTo = '';
+  if (emailRaw) {
+    const normalized = normalizeBackupRecipientEmail(emailRaw);
+    if (!normalized) {
+      throw new AppError('آدرس ایمیل دریافت بک اپ نامعتبر است', 400, 'VALIDATION');
+    }
+    emailTo = normalized;
+  }
+
   const next = {
     ...getDefaultSchedule(),
     ...value,
     daily: { ...DEFAULT_SCHEDULE.daily, ...(value?.daily || {}) },
     weekly: { ...DEFAULT_SCHEDULE.weekly, ...(value?.weekly || {}) },
     monthly: { ...DEFAULT_SCHEDULE.monthly, ...(value?.monthly || {}) },
-    emailTo: String(value?.emailTo || '').trim(),
+    emailTo,
   };
 
   const setting = await prisma.setting.upsert({
@@ -362,21 +379,21 @@ function parseBackupBuffer(buffer) {
       raw = buffer.toString('utf8');
     }
   } catch {
-    throw new AppError('فایل پشتیبان قابل خواندن نیست', 400, 'BACKUP_CORRUPT');
+    throw new AppError('فایل بک اپ قابل خواندن نیست', 400, 'BACKUP_CORRUPT');
   }
 
   let payload;
   try {
     payload = JSON.parse(raw);
   } catch {
-    throw new AppError('فرمت فایل پشتیبان نامعتبر است', 400, 'BACKUP_INVALID');
+    throw new AppError('فرمت فایل بک اپ نامعتبر است', 400, 'BACKUP_INVALID');
   }
 
   if (payload.format !== BACKUP_FORMAT || payload.version !== BACKUP_VERSION) {
-    throw new AppError('نسخه فایل پشتیبان پشتیبانی نمی‌شود', 400, 'BACKUP_VERSION');
+    throw new AppError('نسخه فایل بک اپ پشتیبانی نمی‌شود', 400, 'BACKUP_VERSION');
   }
   if (!payload.tables || typeof payload.tables !== 'object') {
-    throw new AppError('ساختار داده پشتیبان ناقص است', 400, 'BACKUP_INVALID');
+    throw new AppError('ساختار داده بک اپ ناقص است', 400, 'BACKUP_INVALID');
   }
 
   const { checksum, ...rest } = payload;
@@ -393,76 +410,129 @@ function parseBackupBuffer(buffer) {
       .update(JSON.stringify(verifyBody))
       .digest('hex');
     if (checksum !== verifyHash) {
-      throw new AppError('اعتبارسنجی فایل پشتیبان ناموفق بود (checksum)', 400, 'BACKUP_CHECKSUM');
+      throw new AppError('اعتبارسنجی فایل بک اپ ناموفق بود (checksum)', 400, 'BACKUP_CHECKSUM');
     }
   }
 
   return payload;
 }
 
-async function emailBackup({ to, fileName, gzip, backupId, type }) {
-  if (!to) return null;
-  if (!isEmailConfigured()) {
-    console.warn('[backup] SMTP not configured — skip email for', backupId);
-    return null;
+async function emailBackup({ to, fileName, gzip, backupId, type, createdAt }) {
+  const plan = backupEmailDeliveryPlan({ emailTo: to, emailSentAt: null });
+  if (!plan.shouldSend) {
+    if (plan.reason === 'smtp_not_configured') {
+      console.warn('[backup] SMTP not configured — skip email for', backupId);
+      return {
+        emailSentAt: null,
+        emailError:
+          'سرویس ایمیل (SMTP) پیکربندی نشده است. فایل بک اپ ذخیره شد اما ارسال نشد.',
+      };
+    }
+    if (plan.reason === 'invalid_recipient') {
+      return {
+        emailSentAt: null,
+        emailError: 'آدرس ایمیل دریافت بک اپ نامعتبر است.',
+      };
+    }
+    return { emailSentAt: null, emailError: null };
   }
 
   const maxAttach = env.backupEmailMaxBytes;
   const attachments = [];
-  let textExtra = '';
+  let oversizedNote = '';
+  let attached = false;
   if (gzip.length <= maxAttach) {
     attachments.push({
       filename: fileName,
       content: gzip,
       contentType: 'application/gzip',
     });
+    attached = true;
   } else {
-    textExtra = `\nحجم فایل (${formatBytes(gzip.length)}) از حد پیوست بیشتر است؛ فایل در فضای ذخیره سیستم نگهداری شد.`;
+    oversizedNote = `File size (${formatBytes(gzip.length)}) exceeds the email attachment limit (${formatBytes(maxAttach)}); the archive remains available for download in Backup & Restore.`;
   }
 
+  const content = buildBackupEmailContent({
+    fileName,
+    backupId,
+    type,
+    sizeLabel: formatBytes(gzip.length),
+    createdAt: createdAt || new Date(),
+    attached,
+    oversizedNote,
+  });
+
   await sendMail({
-    to,
-    subject: `[APEX] پشتیبان سیستم — ${fileName}`,
-    text: [
-      'پشتیبان جدید سیستم اپیکس ایجاد شد.',
-      `شناسه: ${backupId}`,
-      `نوع: ${type}`,
-      `نام فایل: ${fileName}`,
-      `حجم: ${formatBytes(gzip.length)}`,
-      `زمان: ${formatFaDateTime(new Date())}`,
-      textExtra,
-    ].join('\n'),
-    html: `<div dir="rtl" style="font-family:Tahoma,sans-serif">
-      <h2>پشتیبان سیستم اپیکس</h2>
-      <p>یک نسخه پشتیبان جدید با موفقیت ایجاد شد.</p>
-      <ul>
-        <li>شناسه: <code>${backupId}</code></li>
-        <li>نوع: ${type}</li>
-        <li>فایل: ${fileName}</li>
-        <li>حجم: ${formatBytes(gzip.length)}</li>
-      </ul>
-      <p>${textExtra ? textExtra : 'فایل پیوست شده است.'}</p>
-    </div>`,
+    to: plan.recipient,
+    subject: content.subject,
+    text: content.text,
+    html: content.html,
     attachments,
   });
-  return new Date();
+
+  return { emailSentAt: new Date(), emailError: null };
+}
+
+async function persistBackupEmailOutcome(backupId, { emailSentAt, emailError }) {
+  const softEmailError = emailError ? `EMAIL: ${emailError}` : null;
+  await prisma.systemBackup.update({
+    where: { id: backupId },
+    data: {
+      emailSentAt,
+      // Soft delivery failure kept on SUCCESS rows so download/restore stay available.
+      errorMessage: softEmailError,
+    },
+  });
+  try {
+    await prisma.$executeRaw`
+      UPDATE "system_backups"
+      SET "emailError" = ${emailError}
+      WHERE id = ${backupId}
+    `;
+  } catch (err) {
+    console.warn(
+      '[backup] emailError column update skipped:',
+      err?.message || err,
+    );
+  }
+}
+
+function serializeBackupRow(row) {
+  if (!row) return row;
+  const emailError =
+    row.emailError ||
+    (typeof row.errorMessage === 'string' && row.errorMessage.startsWith('EMAIL: ')
+      ? row.errorMessage.slice('EMAIL: '.length)
+      : null);
+  return {
+    ...row,
+    emailError,
+    // Keep backup failure messages; hide soft email markers from generic error text.
+    errorMessage:
+      typeof row.errorMessage === 'string' && row.errorMessage.startsWith('EMAIL: ')
+        ? null
+        : row.errorMessage,
+  };
 }
 
 async function runBackupJob(backupId) {
   const backup = await prisma.systemBackup.findUnique({ where: { id: backupId } });
   if (!backup) return;
+  if (backup.status === 'SUCCESS' || backup.status === 'FAILED') {
+    // Do not re-run completed jobs (prevents duplicate emails on accidental re-entry).
+    return;
+  }
 
   try {
     const built = await buildPayload();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const fileName = `apex-backup-${stamp}.json.gz`;
-    // Local key is always authoritative for download/restore (Cloudinary blocks many raw types)
+    // Local key is always authoritative for download/restore
     const storageKey = `local:backups/${backupId}/${fileName}`;
 
     await saveLocalBackup(backupId, fileName, built.gzip);
 
     // Optional cloud mirror — never required for SUCCESS (local file is authoritative).
-    // CDN delivery of .gz is often 401 (restricted types); reads use Admin private_download.
     let cloudKey = null;
     try {
       const cloudStorageKey = `documents/backups/${fileName}`;
@@ -480,35 +550,56 @@ async function runBackupJob(backupId) {
       );
     }
 
-    let emailSentAt = null;
-    try {
-      emailSentAt = await emailBackup({
-        to: backup.emailTo,
-        fileName,
-        gzip: built.gzip,
-        backupId,
-        type: backup.type,
-      });
-    } catch (mailErr) {
-      console.error('[backup] email failed:', mailErr?.message || mailErr);
-    }
-
     await prisma.systemBackup.update({
       where: { id: backupId },
       data: {
         status: 'SUCCESS',
         fileName,
-        // Prefer local key; keep cloud key as fallback suffix for migration
         storageKey: cloudKey ? `${storageKey}|${cloudKey}` : storageKey,
         sizeBytes: built.gzip.length,
         checksum: built.checksum,
         tableCount: built.tableCount,
         recordCount: built.recordCount,
-        emailSentAt,
         completedAt: new Date(),
         errorMessage: null,
       },
     });
+
+    // Email only after the backup file is successfully persisted.
+    const mailResult = await withBackupEmailLock(backupId, async () => {
+      const fresh = await prisma.systemBackup.findUnique({
+        where: { id: backupId },
+        select: { emailTo: true, emailSentAt: true, type: true, createdAt: true },
+      });
+      if (!fresh) return { emailSentAt: null, emailError: null };
+      if (fresh.emailSentAt) {
+        return { emailSentAt: fresh.emailSentAt, emailError: null };
+      }
+      try {
+        return await emailBackup({
+          to: fresh.emailTo,
+          fileName,
+          gzip: built.gzip,
+          backupId,
+          type: fresh.type || backup.type,
+          createdAt: fresh.createdAt || new Date(),
+        });
+      } catch (mailErr) {
+        console.error(
+          '[backup] email failed for',
+          backupId,
+          safeEmailErrorMessage(mailErr),
+        );
+        return {
+          emailSentAt: null,
+          emailError: safeEmailErrorMessage(mailErr),
+        };
+      }
+    });
+
+    if (mailResult && !mailResult.skipped) {
+      await persistBackupEmailOutcome(backupId, mailResult);
+    }
   } catch (err) {
     console.error('[backup] job failed:', err);
     await prisma.systemBackup.update({
@@ -531,7 +622,7 @@ function parseStorageKeys(storageKey) {
   if (raw.startsWith('local:')) {
     return { localKey: raw, cloudKey: null };
   }
-  // Legacy Cloudinary-only key
+  // Legacy Cloudinary/S3-only key
   return { localKey: null, cloudKey: raw || null };
 }
 
@@ -542,7 +633,7 @@ function parseStorageKeys(storageKey) {
 async function loadBackupBuffer(backup) {
   const fileName = backup.fileName;
   if (!fileName) {
-    throw new AppError('نام فایل پشتیبان موجود نیست', 400, 'BACKUP_NOT_READY');
+    throw new AppError('نام فایل بک اپ موجود نیست', 400, 'BACKUP_NOT_READY');
   }
 
   if (await localBackupExists(backup.id, fileName)) {
@@ -552,7 +643,7 @@ async function loadBackupBuffer(backup) {
   const { cloudKey } = parseStorageKeys(backup.storageKey);
   if (!cloudKey) {
     throw new AppError(
-      'فایل پشتیبان روی دیسک محلی یافت نشد. لطفاً یک پشتیبان جدید ایجاد کنید.',
+      'فایل بک اپ روی دیسک محلی یافت نشد. لطفاً یک بک اپ جدید ایجاد کنید.',
       404,
       'BACKUP_FILE_MISSING',
     );
@@ -570,7 +661,7 @@ async function loadBackupBuffer(backup) {
   } catch (err) {
     console.error('[backup] cloud read failed:', err?.message || err);
     throw new AppError(
-      'خواندن فایل پشتیبان از فضای ابری ناموفق بود. یک پشتیبان جدید ایجاد کنید (ذخیره محلی).',
+      'خواندن فایل بک اپ از فضای ابری ناموفق بود. یک بک اپ جدید ایجاد کنید (ذخیره محلی).',
       502,
       'BACKUP_CLOUD_READ',
     );
@@ -599,7 +690,7 @@ export const backupService = {
       schedule,
       nextRuns: computeNextRuns(schedule),
       emailConfigured: isEmailConfigured(),
-      latest,
+      latest: serializeBackupRow(latest),
       stats: {
         total: Object.values(statusMap).reduce((a, b) => a + b, 0),
         success: statusMap.SUCCESS || 0,
@@ -637,7 +728,7 @@ export const backupService = {
     ]);
 
     return {
-      items,
+      items: items.map(serializeBackupRow),
       total,
       page: Math.max(1, Number(page) || 1),
       pageSize: take,
@@ -652,18 +743,31 @@ export const backupService = {
         createdBy: { select: { id: true, fullName: true, email: true } },
       },
     });
-    if (!row) throw new AppError('پشتیبان یافت نشد', 404, 'NOT_FOUND');
-    return row;
+    if (!row) throw new AppError('بک اپ یافت نشد', 404, 'NOT_FOUND');
+    try {
+      const extras = await prisma.$queryRaw`
+        SELECT "emailError" FROM "system_backups" WHERE id = ${id} LIMIT 1
+      `;
+      if (Array.isArray(extras) && extras[0]?.emailError != null) {
+        row.emailError = extras[0].emailError;
+      }
+    } catch {
+      /* column may be pending migrate; serializeBackupRow still reads EMAIL: prefix */
+    }
+    return serializeBackupRow(row);
   },
 
   async create({ type = 'MANUAL', auth, req } = {}) {
     const schedule = await getScheduleSettings();
-    const emailTo =
-      schedule.emailTo ||
-      env.backupEmailTo ||
-      auth?.user?.email ||
-      env.defaultManagerEmail ||
-      null;
+    const recipient = resolveBackupRecipientEmail(schedule);
+    if (recipient === null) {
+      throw new AppError(
+        'آدرس ایمیل دریافت بک اپ نامعتبر است. ابتدا ایمیل را در تنظیمات بک اپ اصلاح کنید.',
+        400,
+        'VALIDATION',
+      );
+    }
+    const emailTo = recipient || null;
 
     const backup = await prisma.systemBackup.create({
       data: {
@@ -690,7 +794,7 @@ export const backupService = {
       );
     });
 
-    return backup;
+    return serializeBackupRow(backup);
   },
 
   async createAutomatic(trigger = 'scheduler') {
@@ -700,7 +804,7 @@ export const backupService = {
   async download(id, auth, req) {
     const backup = await this.get(id);
     if (backup.status !== 'SUCCESS' || !backup.fileName) {
-      throw new AppError('فایل پشتیبان آماده نیست', 400, 'BACKUP_NOT_READY');
+      throw new AppError('فایل بک اپ آماده نیست', 400, 'BACKUP_NOT_READY');
     }
 
     await writeAudit({
@@ -747,7 +851,7 @@ export const backupService = {
     }
     const backup = await this.get(id);
     if (backup.status !== 'SUCCESS' || !backup.fileName) {
-      throw new AppError('پشتیبان برای بازگردانی آماده نیست', 400, 'BACKUP_NOT_READY');
+      throw new AppError('بک اپ برای بازگردانی آماده نیست', 400, 'BACKUP_NOT_READY');
     }
 
     const buffer = await loadBackupBuffer(backup);
@@ -758,7 +862,7 @@ export const backupService = {
   async openDownloadStream(id) {
     const backup = await this.get(id);
     if (backup.status !== 'SUCCESS' || !backup.fileName) {
-      throw new AppError('فایل پشتیبان آماده نیست', 400, 'BACKUP_NOT_READY');
+      throw new AppError('فایل بک اپ آماده نیست', 400, 'BACKUP_NOT_READY');
     }
     const localStream = openLocalBackupStream(backup.id, backup.fileName);
     if (localStream) {

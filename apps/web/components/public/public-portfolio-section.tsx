@@ -17,7 +17,13 @@ import { PublicSection } from "@/components/public/public-section";
 import { PortfolioCategoryTabs } from "@/components/public/portfolio/portfolio-category-tabs";
 import { PortfolioGrid } from "@/components/public/portfolio/portfolio-grid";
 
-export function PublicPortfolioSection() {
+export function PublicPortfolioSection({
+  initialTabs,
+  initialList,
+}: {
+  initialTabs?: PublicPortfolioTabs | null;
+  initialList?: PublicPortfolioList | null;
+}) {
   const [category, setCategory] = useState(MIXED_SLUG);
   const [expanded, setExpanded] = useState(false);
 
@@ -25,6 +31,7 @@ export function PublicPortfolioSection() {
     queryKey: ["public-portfolio-tabs"],
     queryFn: () => apiGet<PublicPortfolioTabs>("/public/portfolio/categories"),
     staleTime: 60_000,
+    initialData: initialTabs ?? undefined,
     refetchOnWindowFocus: false,
   });
 
@@ -35,6 +42,8 @@ export function PublicPortfolioSection() {
         `/public/portfolio?category=${encodeURIComponent(category)}`,
       ),
     staleTime: 60_000,
+    initialData:
+      category === MIXED_SLUG ? (initialList ?? undefined) : undefined,
     refetchOnWindowFocus: false,
   });
 

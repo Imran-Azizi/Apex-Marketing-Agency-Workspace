@@ -30,6 +30,15 @@ test("toCloudinaryPublicId strips last extension only", () => {
   );
 });
 
+test("resolveMediaKind distinguishes audio from video", async () => {
+  const { resolveMediaKind } = await import(
+    "../../src/services/storage/resource-type.js"
+  );
+  assert.equal(resolveMediaKind({ contentType: "audio/mpeg" }), "audio");
+  assert.equal(resolveMediaKind({ filename: "clip.mp4" }), "video");
+  assert.equal(resolveMediaKind({ filename: "brief.pdf" }), "document");
+});
+
 test("resolveCloudinaryResourceType maps mime and extensions", () => {
   assert.equal(
     resolveCloudinaryResourceType({ contentType: "image/png" }),

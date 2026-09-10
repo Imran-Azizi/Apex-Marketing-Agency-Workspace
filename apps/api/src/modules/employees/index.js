@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.js';
+import { parsePagination } from '../../utils/pagination.js';
 import { requireInternal, requirePermission } from '../../middleware/rbac.js';
 import { requireCsrf } from '../../middleware/csrf.js';
 import { validate } from '../../middleware/validate.js';
@@ -17,16 +18,17 @@ router.use(requireAuth, requireInternal);
 
 router.get('/', requirePermission('employees.view'), async (req, res, next) => {
   try {
+    const { page, pageSize } = parsePagination(req.query, { defaultPageSize: 20 });
     ok(
       res,
       await employeesService.list({
         q: req.query.q,
         role: req.query.role,
         status: req.query.status,
-        page: Number(req.query.page || 1),
-        pageSize: Number(req.query.pageSize || 20),
+        page,
+        pageSize,
       }),
-      { page: Number(req.query.page || 1) },
+      { page },
     );
   } catch (e) {
     next(e);

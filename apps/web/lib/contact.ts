@@ -46,6 +46,31 @@ export function configuredContactChannels(
   );
 }
 
+/**
+ * Only allow sanitized WhatsApp deep links from our public contact API.
+ * Prevents accidental rendering of arbitrary / injected href values.
+ */
+export function isSafeWhatsAppHref(
+  href: string | null | undefined,
+): href is string {
+  if (!href?.trim()) return false;
+  try {
+    const url = new URL(href.trim());
+    if (url.protocol !== "https:") return false;
+    if (url.hostname === "wa.me") {
+      return /^\d{8,15}$/.test(url.pathname.replace(/^\//, ""));
+    }
+    if (url.hostname === "api.whatsapp.com") {
+      if (url.pathname !== "/send") return false;
+      const phone = url.searchParams.get("phone");
+      return Boolean(phone && /^\d{8,15}$/.test(phone));
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export type ContactFormValues = {
   name: string;
   email: string;

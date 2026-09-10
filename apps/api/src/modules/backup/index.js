@@ -24,7 +24,7 @@ function acceptBackupUpload(req, res, next) {
     if (err instanceof AppError) return next(err);
     if (err instanceof multer.MulterError) {
       return next(
-        new AppError(err.message || 'آپلود فایل پشتیبان ناموفق بود', 400, 'UPLOAD_FAILED'),
+        new AppError(err.message || 'آپلود فایل بک اپ ناموفق بود', 400, 'UPLOAD_FAILED'),
       );
     }
     return next(err);
@@ -32,7 +32,9 @@ function acceptBackupUpload(req, res, next) {
 }
 
 const scheduleSchema = z.object({
-  emailTo: z.union([z.string().email(), z.literal('')]).optional(),
+  emailTo: z
+    .union([z.string().trim().email(), z.literal('')])
+    .optional(),
   daily: z
     .object({
       enabled: z.boolean(),
@@ -140,7 +142,7 @@ router.get('/:id/download', requirePermission('backup.download'), async (req, re
     stream.on('error', (err) => {
       console.error('[backup] download stream error:', err?.message || err);
       if (!res.headersSent) {
-        next(new AppError('خطا در دریافت فایل پشتیبان', 502, 'BACKUP_STREAM'));
+        next(new AppError('خطا در دریافت فایل بک اپ', 502, 'BACKUP_STREAM'));
       } else {
         res.destroy(err);
       }
@@ -178,7 +180,7 @@ router.post(
   async (req, res, next) => {
     try {
       if (!req.file?.buffer) {
-        throw new AppError('فایل پشتیبان الزامی است', 400, 'FILE_REQUIRED');
+        throw new AppError('فایل بک اپ الزامی است', 400, 'FILE_REQUIRED');
       }
       ok(res, backupService.validateUploadBuffer(req.file.buffer));
     } catch (e) {
@@ -195,7 +197,7 @@ router.post(
   async (req, res, next) => {
     try {
       if (!req.file?.buffer) {
-        throw new AppError('فایل پشتیبان الزامی است', 400, 'FILE_REQUIRED');
+        throw new AppError('فایل بک اپ الزامی است', 400, 'FILE_REQUIRED');
       }
       ok(
         res,

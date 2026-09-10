@@ -48,6 +48,7 @@ export type StorageMeta = {
   publicId?: string | null;
   folder?: string | null;
   folderPath?: string | null;
+  storageFolder?: string | null;
   cloudinaryFolder?: string | null;
   resourceType?: string | null;
   url?: string | null;
@@ -198,7 +199,7 @@ export type MediaLibraryGroup = {
   }>;
 };
 
-/** Group assets by Cloudinary media category for library views. */
+/** Group assets by media category for library views. */
 export function groupAssetsByMediaCategory<
   T extends {
     id: string;

@@ -13,8 +13,10 @@ import {
   portfolioService,
   streamPortfolioVideo,
 } from '../portfolio/service.js';
+import { createTtlCache } from '../../utils/ttlCache.js';
 
 const router = Router();
+const originCache = createTtlCache();
 
 function cachePublic(seconds = 60) {
   return (_req, res, next) => {
@@ -23,10 +25,19 @@ function cachePublic(seconds = 60) {
   };
 }
 
+function remember(key, ttlMs, factory) {
+  return originCache.getOrSet(key, ttlMs, factory);
+}
+
 router.get('/hero', cachePublic(30), async (req, res, next) => {
   try {
-    const { heroService } = await import('../hero/service.js');
-    ok(res, await heroService.listPublic());
+    ok(
+      res,
+      await remember('hero', 30_000, async () => {
+        const { heroService } = await import('../hero/service.js');
+        return heroService.listPublic();
+      }),
+    );
   } catch (e) {
     next(e);
   }
@@ -34,15 +45,25 @@ router.get('/hero', cachePublic(30), async (req, res, next) => {
 
 router.get('/services', cachePublic(60), async (req, res, next) => {
   try {
-    const { servicesService } = await import('../services/service.js');
-    ok(res, await servicesService.listPublic());
+    ok(
+      res,
+      await remember('services', 60_000, async () => {
+        const { servicesService } = await import('../services/service.js');
+        return servicesService.listPublic();
+      }),
+    );
   } catch (e) { next(e); }
 });
 
 router.get('/customers', cachePublic(30), async (req, res, next) => {
   try {
-    const { customersService } = await import('../customers/service.js');
-    ok(res, await customersService.listPublic());
+    ok(
+      res,
+      await remember('customers', 30_000, async () => {
+        const { customersService } = await import('../customers/service.js');
+        return customersService.listPublic();
+      }),
+    );
   } catch (e) {
     next(e);
   }
@@ -50,8 +71,13 @@ router.get('/customers', cachePublic(30), async (req, res, next) => {
 
 router.get('/portfolio/categories', cachePublic(30), async (req, res, next) => {
   try {
-    const { listCategoriesPublic } = await import('../portfolio/showcase.js');
-    ok(res, await listCategoriesPublic());
+    ok(
+      res,
+      await remember('portfolio-categories', 30_000, async () => {
+        const { listCategoriesPublic } = await import('../portfolio/showcase.js');
+        return listCategoriesPublic();
+      }),
+    );
   } catch (e) {
     next(e);
   }
@@ -59,7 +85,13 @@ router.get('/portfolio/categories', cachePublic(30), async (req, res, next) => {
 
 router.get('/portfolio', cachePublic(30), async (req, res, next) => {
   try {
-    ok(res, await portfolioService.listPublic(req.query || {}));
+    const category = String(req.query?.category || 'mixed');
+    ok(
+      res,
+      await remember(`portfolio:${category}`, 30_000, () =>
+        portfolioService.listPublic(req.query || {}),
+      ),
+    );
   } catch (e) {
     next(e);
   }
@@ -77,7 +109,12 @@ router.get('/portfolio/:id/stream', async (req, res, next) => {
 
 router.get('/portfolio/:slug', cachePublic(60), async (req, res, next) => {
   try {
-    ok(res, await portfolioService.getPublicBySlug(req.params.slug));
+    ok(
+      res,
+      await remember(`portfolio-slug:${req.params.slug}`, 60_000, () =>
+        portfolioService.getPublicBySlug(req.params.slug),
+      ),
+    );
   } catch (e) {
     next(e);
   }
@@ -85,7 +122,12 @@ router.get('/portfolio/:slug', cachePublic(60), async (req, res, next) => {
 
 router.get('/contact-info', cachePublic(30), async (req, res, next) => {
   try {
-    ok(res, await contactService.getPublicContactInfo());
+    ok(
+      res,
+      await remember('contact-info', 30_000, () =>
+        contactService.getPublicContactInfo(),
+      ),
+    );
   } catch (e) {
     next(e);
   }
@@ -116,7 +158,12 @@ router.get('/whatsapp-cta', cachePublic(60), async (req, res, next) => {
 });
 
 router.get('/formats', cachePublic(300), async (req, res, next) => {
-  try { ok(res, await prisma.format.findMany()); } catch (e) { next(e); }
+  try {
+    ok(
+      res,
+      await remember('formats', 300_000, () => prisma.format.findMany()),
+    );
+  } catch (e) { next(e); }
 });
 
 export default router;

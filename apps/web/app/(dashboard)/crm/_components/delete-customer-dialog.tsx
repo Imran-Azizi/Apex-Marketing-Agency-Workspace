@@ -19,12 +19,14 @@ interface DeleteCustomerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   customer: CrmCustomer | null;
+  onDeleted?: (id: string) => void;
 }
 
 export function DeleteCustomerDialog({
   open,
   onOpenChange,
   customer,
+  onDeleted,
 }: DeleteCustomerDialogProps) {
   const queryClient = useQueryClient();
 
@@ -37,6 +39,7 @@ export function DeleteCustomerDialog({
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      if (customer?.id) onDeleted?.(customer.id);
       onOpenChange(false);
     },
     onError: (err) => {

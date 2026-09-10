@@ -1,10 +1,4 @@
-export type DatePreset = "today" | "week" | "month" | "year" | "custom" | "all";
-
-export interface DateRange {
-  preset: DatePreset;
-  from: Date | null;
-  to: Date | null;
-}
+export type { DatePreset, DateRange } from "@/lib/date-range";
 
 export interface DashboardSummary {
   projectStatusCounts: Array<{ status: string; _count: number }>;

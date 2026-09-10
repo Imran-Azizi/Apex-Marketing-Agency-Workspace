@@ -278,15 +278,23 @@ function projectListMetrics(project, projectPayments) {
   };
 }
 
-async function buildEmployeeSalaryRows() {
-  const profiles = await prisma.teamProfile.findMany({
-    where: { deletedAt: null, status: { not: "INACTIVE" } },
-    include: {
-      user: {
-        select: { id: true, fullName: true, email: true, isActive: true },
-      },
-      compensationProfile: true,
-      employeePayables: {
+async function buildEmployeeSalaryRows({ lean = false } = {}) {
+  const payableInclude = lean
+    ? {
+        where: { status: { in: ["ESTIMATED", "CONFIRMED", "PAID"] } },
+        select: {
+          id: true,
+          projectId: true,
+          amount: true,
+          status: true,
+          roleLabel: true,
+          paidAt: true,
+          paymentMethod: true,
+          project: { select: { status: true } },
+        },
+        orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+      }
+    : {
         where: { status: { in: ["ESTIMATED", "CONFIRMED", "PAID"] } },
         include: {
           project: {
@@ -317,9 +325,22 @@ async function buildEmployeeSalaryRows() {
           },
         },
         orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+      };
+
+  const profiles = await prisma.teamProfile.findMany({
+    where: { deletedAt: null, status: { not: "INACTIVE" } },
+    include: {
+      user: {
+        select: { id: true, fullName: true, email: true, isActive: true },
       },
-      salaryPayments: { orderBy: { paidAt: "desc" } },
-      salaryAdvances: { orderBy: { paidAt: "desc" } },
+      compensationProfile: true,
+      employeePayables: payableInclude,
+      salaryPayments: lean
+        ? { select: { id: true, amount: true, paidAt: true, method: true, notes: true }, orderBy: { paidAt: "desc" } }
+        : { orderBy: { paidAt: "desc" } },
+      salaryAdvances: lean
+        ? { select: { id: true, amount: true, paidAt: true, method: true, status: true, notes: true, settledAt: true }, orderBy: { paidAt: "desc" } }
+        : { orderBy: { paidAt: "desc" } },
     },
     orderBy: { displayName: "asc" },
   });
@@ -358,7 +379,9 @@ async function buildEmployeeSalaryRows() {
       openAdvances,
     });
 
-    const projectHistory = p.employeePayables.map((row) => {
+    const projectHistory = lean
+      ? []
+      : p.employeePayables.map((row) => {
       const amount = dec(row.amount);
       const isPaid = row.status === "PAID";
       const projectPrice = dec(
@@ -464,7 +487,7 @@ export const financeService = {
 
     const [kpis, salaryRows] = await Promise.all([
       computeFinanceKpis({ from, to }),
-      buildEmployeeSalaryRows(),
+      buildEmployeeSalaryRows({ lean: true }),
     ]);
 
     const salariesPayable = roundMoney(

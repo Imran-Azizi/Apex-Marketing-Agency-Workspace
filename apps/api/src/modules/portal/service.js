@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
+import { strongPasswordSchema } from "../../utils/passwords.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../utils/response.js";
 import { getCustomerPersonName } from "../../utils/crmCustomerName.js";
@@ -34,6 +35,14 @@ import {
   createProjectGraph,
   resolveAgreedPrice,
 } from "../projects/createProjectCore.js";
+import {
+  findProjectByCreateKey,
+  findProjectForOpportunity,
+  isIdempotencyUniqueConflict,
+  lockOpportunityRow,
+  normalizeIdempotencyKey,
+  withProjectCreateLock,
+} from "../projects/projectCreateGuard.js";
 
 async function getValidInvite(token) {
   const invite = await prisma.portalInvite.findUnique({
@@ -103,6 +112,11 @@ export const portalService = {
 
     // Plaintext OTP is returned when PORTAL_EXPOSE_OTP is enabled (default)
     // so registration works without an automated WhatsApp/SMS provider.
+    if (env.portalExposeOtp && env.isProd) {
+      console.warn(
+        "[security] PORTAL_EXPOSE_OTP is enabled in production. Set PORTAL_EXPOSE_OTP=false after WhatsApp/SMS delivery is configured.",
+      );
+    }
     return {
       message: "کد یک‌بارمصرف تولید شد. آن را وارد کنید یا از طریق واتساپ دریافت کنید.",
       otpDev: env.portalExposeOtp ? otp : undefined,
@@ -229,15 +243,45 @@ export const portalService = {
 
   async dashboard(auth) {
     const where = customerProjectWhere(auth);
-    const [projects, invoices, pendingBriefsCount, pendingApprovals] =
+    const recentTake = 8;
+
+    const [statusGroups, financeRows, recentProjects, invoices, pendingBriefsCount, pendingApprovals] =
       await Promise.all([
+        prisma.project.groupBy({
+          by: ["customerFacingStatus"],
+          where,
+          _count: { _all: true },
+        }),
         prisma.project.findMany({
           where,
-          include: {
-            finance: true,
-            assetRefs: { include: { clientAsset: true }, take: 5 },
+          select: {
+            id: true,
+            finance: {
+              select: { finalProjectPrice: true, received: true },
+            },
+          },
+        }),
+        prisma.project.findMany({
+          where,
+          select: {
+            id: true,
+            code: true,
+            title: true,
+            status: true,
+            customerFacingStatus: true,
+            createdAt: true,
+            updatedAt: true,
+            deadlineAt: true,
+            finance: {
+              select: { finalProjectPrice: true, received: true },
+            },
+            assetRefs: {
+              include: { clientAsset: true },
+              take: 5,
+            },
           },
           orderBy: { updatedAt: "desc" },
+          take: recentTake,
         }),
         prisma.invoice.findMany({
           where: {
@@ -264,20 +308,24 @@ export const portalService = {
       ]);
 
     const stats = {
-      total: projects.length,
-      active: projects.filter((p) => p.customerFacingStatus !== "COMPLETED")
-        .length,
-      completed: projects.filter((p) => p.customerFacingStatus === "COMPLETED")
-        .length,
-      pending: projects.filter((p) =>
-        ["INFO_RECEIVED", "PREPARING_CONTENT"].includes(p.customerFacingStatus),
-      ).length,
-      underReview: projects.filter((p) =>
-        ["WAITING_YOUR_APPROVAL", "FINAL_REVIEW"].includes(
-          p.customerFacingStatus,
-        ),
-      ).length,
+      total: 0,
+      active: 0,
+      completed: 0,
+      pending: 0,
+      underReview: 0,
     };
+    for (const row of statusGroups) {
+      const n = row._count._all;
+      stats.total += n;
+      if (row.customerFacingStatus === "COMPLETED") stats.completed += n;
+      else stats.active += n;
+      if (["INFO_RECEIVED", "PREPARING_CONTENT"].includes(row.customerFacingStatus)) {
+        stats.pending += n;
+      }
+      if (["WAITING_YOUR_APPROVAL", "FINAL_REVIEW"].includes(row.customerFacingStatus)) {
+        stats.underReview += n;
+      }
+    }
 
     let totalDue = 0;
     let totalPaid = 0;
@@ -291,8 +339,7 @@ export const portalService = {
       }
     }
 
-    // Batch live finance for all projects (2 payment queries) instead of N+1 syncs.
-    const projectIds = projects.map((p) => p.id);
+    const projectIds = financeRows.map((p) => p.id);
     if (projectIds.length) {
       const opportunities = await prisma.opportunity.findMany({
         where: { projectId: { in: projectIds }, deletedAt: null },
@@ -305,17 +352,17 @@ export const portalService = {
       });
       await hydrateProjectsFinanceFromOpportunities(
         prisma,
-        projects,
+        [...financeRows, ...recentProjects],
         opportunities,
       );
     }
 
-    const summaries = projects.map(serializePortalProjectSummary);
-    const totalProjectValue = projects.reduce(
+    const summaries = recentProjects.map(serializePortalProjectSummary);
+    const totalProjectValue = financeRows.reduce(
       (sum, p) => sum + Number(p.finance?.finalProjectPrice || 0),
       0,
     );
-    const projectReceived = projects.reduce(
+    const projectReceived = financeRows.reduce(
       (sum, p) => sum + Number(p.finance?.received || 0),
       0,
     );
@@ -679,68 +726,116 @@ export const portalService = {
     if (!opportunityId)
       throw new AppError("opportunityId لازم است", 400, "VALIDATION");
 
-    const opp = await prisma.opportunity.findFirst({
-      where: {
-        id: opportunityId,
-        crmCustomerId: auth.customerId,
-        deletedAt: null,
-      },
-      include: {
-        crmCustomer: { include: { portalAccount: true, clientAssets: true } },
-        invoices: { include: { payments: true } },
-        service: true,
-      },
-    });
-    if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
-    if (opp.projectId)
-      throw new AppError("پروژه قبلاً ایجاد شده", 409, "PROJECT_EXISTS");
+    const idempotencyKey = normalizeIdempotencyKey(brief.idempotencyKey);
 
-    const manager = await prisma.user.findFirst({
-      where: { role: { code: "MANAGER" }, isActive: true, deletedAt: null },
-    });
-    if (!manager)
-      throw new AppError("مدیر سیستم تعریف نشده", 500, "NO_MANAGER");
-
-    const agreed = resolveAgreedPrice(opp, null);
-    const financeSnap = await buildProjectFinanceSnapshot(prisma, {
-      crmCustomerId: auth.customerId,
-      opportunityId: opp.id,
-      agreedPrice: agreed,
-    });
-
-    const { project } = await prisma.$transaction(async (tx) => {
-      const customerWithWhatsapp = await syncCustomerWhatsappFromBrief(
-        tx,
-        opp.crmCustomer,
-        brief.whatsapp,
+    const replayIfExists = async () => {
+      const byKey = await findProjectByCreateKey(
+        prisma,
+        idempotencyKey,
+        auth.customerId,
       );
+      if (byKey) return byKey;
+      const byOpp = await findProjectForOpportunity(prisma, opportunityId);
+      if (byOpp && byOpp.crmCustomerId === auth.customerId) return byOpp;
+      return null;
+    };
 
-      return createProjectGraph(tx, {
-        opportunity: opp,
-        customer: customerWithWhatsapp,
-        manager,
-        brief,
-        source: "PORTAL",
-        actorId: auth.portalAccountId,
-        portalAccountId: auth.portalAccountId,
-        service: opp.service,
-        agreedPrice: agreed,
-        financeSnap,
-        projectFiles: brief.files || [],
-        timelineBody: "فرم اطلاعات پروژه ارسال شد",
-        notifyPortal: true,
-      });
+    const existing = await replayIfExists();
+    if (existing) return existing;
+
+    return withProjectCreateLock(idempotencyKey, async () => {
+      const lockedExisting = await replayIfExists();
+      if (lockedExisting) return lockedExisting;
+
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          await lockOpportunityRow(tx, opportunityId);
+
+          const opp = await tx.opportunity.findFirst({
+            where: {
+              id: opportunityId,
+              crmCustomerId: auth.customerId,
+              deletedAt: null,
+            },
+            include: {
+              crmCustomer: {
+                include: { portalAccount: true, clientAssets: true },
+              },
+              invoices: { include: { payments: true } },
+              service: true,
+            },
+          });
+          if (!opp) throw new AppError("فرصت یافت نشد", 404, "NOT_FOUND");
+          if (opp.projectId) {
+            const existingProject = await tx.project.findFirst({
+              where: { id: opp.projectId, deletedAt: null },
+            });
+            if (existingProject) {
+              return { project: existingProject, replayed: true };
+            }
+          }
+
+          const manager = await tx.user.findFirst({
+            where: {
+              role: { code: "MANAGER" },
+              isActive: true,
+              deletedAt: null,
+            },
+          });
+          if (!manager)
+            throw new AppError("مدیر سیستم تعریف نشده", 500, "NO_MANAGER");
+
+          const agreed = resolveAgreedPrice(opp, null);
+          const financeSnap = await buildProjectFinanceSnapshot(tx, {
+            crmCustomerId: auth.customerId,
+            opportunityId: opp.id,
+            agreedPrice: agreed,
+          });
+
+          const customerWithWhatsapp = await syncCustomerWhatsappFromBrief(
+            tx,
+            opp.crmCustomer,
+            brief.whatsapp,
+          );
+
+          const created = await createProjectGraph(tx, {
+            opportunity: opp,
+            customer: customerWithWhatsapp,
+            manager,
+            brief,
+            source: "PORTAL",
+            actorId: auth.portalAccountId,
+            portalAccountId: auth.portalAccountId,
+            service: opp.service,
+            agreedPrice: agreed,
+            financeSnap,
+            projectFiles: brief.files || [],
+            timelineBody: "فرم اطلاعات پروژه ارسال شد",
+            notifyPortal: true,
+            createIdempotencyKey: idempotencyKey,
+          });
+          return { ...created, replayed: false };
+        });
+
+        if (!result.replayed) {
+          await writeAudit({
+            action: "PROJECT_AUTO_CREATE",
+            entityType: "Project",
+            entityId: result.project.id,
+            after: { code: result.project.code, opportunityId },
+            req,
+          });
+        }
+
+        return result.project;
+      } catch (err) {
+        if (isIdempotencyUniqueConflict(err)) {
+          const replayed = await replayIfExists();
+          if (replayed) return replayed;
+        }
+        throw err;
+      }
     });
-
-    await writeAudit({
-      action: "PROJECT_AUTO_CREATE",
-      entityType: "Project",
-      entityId: project.id,
-      after: { code: project.code, opportunityId },
-      req,
-    });
-
-    return project;
   },
 
   async approveContent(versionId, auth, req) {
@@ -1776,7 +1871,7 @@ export const portalService = {
 };
 
 export const registerSchema = z.object({
-  password: z.string().min(8),
+  password: strongPasswordSchema(),
   otp: z.string().length(6),
   whatsapp: z.string().min(8).optional(),
 });
@@ -1833,4 +1928,5 @@ export const briefSchema = z.object({
     .optional(),
   title: z.string().optional(),
   serviceId: z.string().optional(),
+  idempotencyKey: z.string().trim().min(8).max(80).optional(),
 });

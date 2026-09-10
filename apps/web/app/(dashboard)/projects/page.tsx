@@ -51,9 +51,11 @@ import {
   getProjectStatusLabel,
 } from "@/lib/project-status";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
+import { TablePagination } from "@/components/shared/table-pagination";
 import type { ProjectProgress } from "@/lib/project-progress";
 
 const ALL = "ALL";
+const PAGE_SIZE = 15;
 
 const DATE_PRESET_OPTIONS = [
   { value: ALL, label: "همه تاریخ‌ها" },
@@ -83,6 +85,14 @@ interface Project {
     companyName: string | null;
   };
   assignments?: AssignmentRecord[];
+}
+
+interface ProjectListResponse {
+  items: Project[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }
 
 interface ProjectFilterOptions {
@@ -139,16 +149,20 @@ export default function ProjectsPage() {
   const [createdPreset, setCreatedPreset] = useState(ALL);
   const [createdFrom, setCreatedFrom] = useState("");
   const [createdTo, setCreatedTo] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearch(toEnglishDigits(searchInput).trim());
+      setPage(1);
     }, 400);
     return () => clearTimeout(timer);
   }, [searchInput]);
 
   const listParams = useMemo(() => {
     const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("pageSize", String(PAGE_SIZE));
     if (search) params.set("q", search);
     if (customerId !== ALL) params.set("customerId", customerId);
     if (editorId !== ALL) params.set("editorId", editorId);
@@ -160,6 +174,7 @@ export default function ProjectsPage() {
     }
     return params.toString();
   }, [
+    page,
     search,
     customerId,
     editorId,
@@ -178,6 +193,8 @@ export default function ProjectsPage() {
       createdPreset,
       createdFrom,
       createdTo,
+      page,
+      pageSize: PAGE_SIZE,
     }),
     [
       search,
@@ -187,15 +204,28 @@ export default function ProjectsPage() {
       createdPreset,
       createdFrom,
       createdTo,
+      page,
     ],
   );
 
   const { data, isLoading, isFetching, error } = useQuery({
     queryKey: ["projects", filterKey],
-    queryFn: () =>
-      apiGet<Project[]>(listParams ? `/projects?${listParams}` : "/projects"),
+    queryFn: () => apiGet<ProjectListResponse>(`/projects?${listParams}`),
     placeholderData: keepPreviousData,
   });
+
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const pageSize = data?.pageSize || PAGE_SIZE;
+  const totalPages = data
+    ? data.totalPages || Math.max(1, Math.ceil(total / pageSize))
+    : 1;
+
+  // After delete/filter, avoid staying on an empty trailing page.
+  useEffect(() => {
+    if (!data) return;
+    if (page > totalPages) setPage(totalPages);
+  }, [data, page, totalPages]);
 
   const { data: filterOptions } = useQuery({
     queryKey: ["projects", "filter-options"],
@@ -272,6 +302,7 @@ export default function ProjectsPage() {
     setCreatedPreset(ALL);
     setCreatedFrom("");
     setCreatedTo("");
+    setPage(1);
   };
 
   const clearDropdownFilters = () => {
@@ -281,6 +312,31 @@ export default function ProjectsPage() {
     setCreatedPreset(ALL);
     setCreatedFrom("");
     setCreatedTo("");
+    setPage(1);
+  };
+
+  const setCustomerFilter = (value: string) => {
+    setCustomerId(value);
+    setPage(1);
+  };
+
+  const setEditorFilter = (value: string) => {
+    setEditorId(value);
+    setPage(1);
+  };
+
+  const setDeliveryFilter = (value: string) => {
+    setDeliveryStatus(value);
+    setPage(1);
+  };
+
+  const setCreatedPresetFilter = (value: string) => {
+    setCreatedPreset(value);
+    setPage(1);
+    if (value !== "custom") {
+      setCreatedFrom("");
+      setCreatedTo("");
+    }
   };
 
   const selectedCustomer = filterOptions?.customers.find(
@@ -300,6 +356,7 @@ export default function ProjectsPage() {
         onClear: () => {
           setSearchInput("");
           setSearch("");
+          setPage(1);
         },
       });
     }
@@ -307,33 +364,33 @@ export default function ProjectsPage() {
       chips.push({
         key: "customer",
         label: `مشتری: ${selectedCustomer.personName}`,
-        onClear: () => setCustomerId(ALL),
+        onClear: () => setCustomerFilter(ALL),
       });
     } else if (customerId !== ALL) {
       chips.push({
         key: "customer",
         label: "مشتری: انتخاب‌شده",
-        onClear: () => setCustomerId(ALL),
+        onClear: () => setCustomerFilter(ALL),
       });
     }
     if (editorId !== ALL && selectedEditor) {
       chips.push({
         key: "editor",
         label: `ویرایشگر: ${selectedEditor.fullName}`,
-        onClear: () => setEditorId(ALL),
+        onClear: () => setEditorFilter(ALL),
       });
     } else if (editorId !== ALL) {
       chips.push({
         key: "editor",
         label: "ویرایشگر: انتخاب‌شده",
-        onClear: () => setEditorId(ALL),
+        onClear: () => setEditorFilter(ALL),
       });
     }
     if (deliveryStatus !== ALL) {
       chips.push({
         key: "delivery",
         label: `تحویل: ${getDeliveryStatusLabel(deliveryStatus)}`,
-        onClear: () => setDeliveryStatus(ALL),
+        onClear: () => setDeliveryFilter(ALL),
       });
     }
     if (createdPreset !== ALL) {
@@ -346,11 +403,7 @@ export default function ProjectsPage() {
       chips.push({
         key: "created",
         label: `ایجاد: ${dateLabel}`,
-        onClear: () => {
-          setCreatedPreset(ALL);
-          setCreatedFrom("");
-          setCreatedTo("");
-        },
+        onClear: () => setCreatedPresetFilter(ALL),
       });
     }
     return chips;
@@ -376,9 +429,9 @@ export default function ProjectsPage() {
     router.push(`/projects/${projectId}`);
   };
 
-  const resultCount = data?.length ?? 0;
-  const showEmptyCatalog = Boolean(data && data.length === 0 && !hasActiveFilters);
-  const showEmptyFiltered = Boolean(data && data.length === 0 && hasActiveFilters);
+  const resultCount = total;
+  const showEmptyCatalog = Boolean(data && total === 0 && !hasActiveFilters);
+  const showEmptyFiltered = Boolean(data && total === 0 && hasActiveFilters);
 
   return (
     <div className="min-w-0">
@@ -456,6 +509,7 @@ export default function ProjectsPage() {
                   onClick={() => {
                     setSearchInput("");
                     setSearch("");
+                    setPage(1);
                   }}
                   className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   title="پاک کردن جستجو"
@@ -466,7 +520,7 @@ export default function ProjectsPage() {
               )}
             </div>
 
-            <Select value={customerId} onValueChange={setCustomerId}>
+            <Select value={customerId} onValueChange={setCustomerFilter}>
               <SelectTrigger
                 className="h-10 w-[10.5rem] shrink-0"
                 aria-label="فیلتر مشتری"
@@ -483,7 +537,7 @@ export default function ProjectsPage() {
               </SelectContent>
             </Select>
 
-            <Select value={editorId} onValueChange={setEditorId}>
+            <Select value={editorId} onValueChange={setEditorFilter}>
               <SelectTrigger
                 className="h-10 w-[10rem] shrink-0"
                 aria-label="فیلتر ویرایشگر"
@@ -500,7 +554,7 @@ export default function ProjectsPage() {
               </SelectContent>
             </Select>
 
-            <Select value={deliveryStatus} onValueChange={setDeliveryStatus}>
+            <Select value={deliveryStatus} onValueChange={setDeliveryFilter}>
               <SelectTrigger
                 className="h-10 w-[10rem] shrink-0"
                 aria-label="فیلتر وضعیت تحویل"
@@ -517,16 +571,7 @@ export default function ProjectsPage() {
               </SelectContent>
             </Select>
 
-            <Select
-              value={createdPreset}
-              onValueChange={(value) => {
-                setCreatedPreset(value);
-                if (value !== "custom") {
-                  setCreatedFrom("");
-                  setCreatedTo("");
-                }
-              }}
-            >
+            <Select value={createdPreset} onValueChange={setCreatedPresetFilter}>
               <SelectTrigger
                 className="h-10 w-[9.5rem] shrink-0"
                 aria-label="فیلتر تاریخ ایجاد"
@@ -547,7 +592,10 @@ export default function ProjectsPage() {
                 <Input
                   type="date"
                   value={createdFrom}
-                  onChange={(e) => setCreatedFrom(e.target.value)}
+                  onChange={(e) => {
+                    setCreatedFrom(e.target.value);
+                    setPage(1);
+                  }}
                   className="h-10 w-[9.5rem] shrink-0"
                   dir="ltr"
                   aria-label="از تاریخ"
@@ -555,7 +603,10 @@ export default function ProjectsPage() {
                 <Input
                   type="date"
                   value={createdTo}
-                  onChange={(e) => setCreatedTo(e.target.value)}
+                  onChange={(e) => {
+                    setCreatedTo(e.target.value);
+                    setPage(1);
+                  }}
                   className="h-10 w-[9.5rem] shrink-0"
                   dir="ltr"
                   aria-label="تا تاریخ"
@@ -659,45 +710,46 @@ export default function ProjectsPage() {
           />
         )}
 
-        {data && data.length > 0 && (
-          <HorizontalScroll
-            className={
-              isFetching ? "opacity-70 transition-opacity" : undefined
-            }
-          >
-            <Table className="min-w-[48rem]">
-              <TableHeader>
-                <TableRow className="bg-muted/40 hover:bg-muted/40">
-                  <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    کد
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    عنوان
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    مشتری
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    ادیتور
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    نریتور
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    وضعیت
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                    پیشرفت پروژه
-                  </TableHead>
-                  {canDeleteProject && (
-                    <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-                      عملیات
+        {data && items.length > 0 && (
+          <>
+            <HorizontalScroll
+              className={
+                isFetching ? "opacity-70 transition-opacity" : undefined
+              }
+            >
+              <Table className="min-w-[48rem]">
+                <TableHeader>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      کد
                     </TableHead>
-                  )}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.map((project) => (
+                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      عنوان
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      مشتری
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      ادیتور
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      نریتور
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      وضعیت
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      پیشرفت پروژه
+                    </TableHead>
+                    {canDeleteProject && (
+                      <TableHead className="sticky top-0 z-[1] w-14 bg-muted/95 text-center backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                        عملیات
+                      </TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {items.map((project) => (
                   <TableRow
                     key={project.id}
                     role="link"
@@ -829,9 +881,18 @@ export default function ProjectsPage() {
                     )}
                   </TableRow>
                 ))}
-              </TableBody>
-            </Table>
-          </HorizontalScroll>
+                </TableBody>
+              </Table>
+            </HorizontalScroll>
+
+            <TablePagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={setPage}
+              isFetching={isFetching}
+            />
+          </>
         )}
       </div>
     </div>

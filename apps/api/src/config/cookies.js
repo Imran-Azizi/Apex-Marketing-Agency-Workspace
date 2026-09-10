@@ -147,10 +147,19 @@ export function readAccessToken(req) {
   if (panel) {
     const token = req.cookies?.[accessCookieName(panel)];
     if (token) return { token, panel };
+    const legacy = req.cookies?.[COOKIE.access];
+    if (legacy) return { token: legacy, panel };
+    return null;
+  }
+
+  // Media <img>/<video> requests often omit X-APEX-Panel; try any live panel cookie.
+  for (const candidate of AUTH_PANELS) {
+    const token = req.cookies?.[accessCookieName(candidate)];
+    if (token) return { token, panel: candidate };
   }
 
   const legacy = req.cookies?.[COOKIE.access];
-  if (legacy) return { token: legacy, panel: panel || null };
+  if (legacy) return { token: legacy, panel: null };
 
   return null;
 }

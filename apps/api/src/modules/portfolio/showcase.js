@@ -272,24 +272,20 @@ export async function listCategoriesPublic() {
     select: { id: true, name: true, slug: true, sortOrder: true },
   });
 
-  const [mixedCount, counts] = await Promise.all([
+  const [mixedCount, countRows] = await Promise.all([
     prisma.mixedPortfolioItem.count({
       where: { item: publicItemWhere },
     }),
-    Promise.all(
-      categories.map(async (category) => ({
-        id: category.id,
-        count: await prisma.portfolioItemCategory.count({
-          where: {
-            categoryId: category.id,
-            item: publicItemWhere,
-          },
-        }),
-      })),
-    ),
+    prisma.portfolioItemCategory.groupBy({
+      by: ["categoryId"],
+      where: { item: publicItemWhere },
+      _count: { _all: true },
+    }),
   ]);
 
-  const countMap = new Map(counts.map((row) => [row.id, row.count]));
+  const countMap = new Map(
+    countRows.map((row) => [row.categoryId, row._count._all]),
+  );
 
   return {
     tabs: [
