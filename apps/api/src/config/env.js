@@ -106,9 +106,11 @@ if (isProd) {
       "SIGNED_URL_SECRET is missing or too weak for production (min 32 chars, no defaults)",
     );
   }
-  if (/localhost|127\.0\.0\.1/i.test(databaseUrl)) {
+  // Hostinger/same-box VPS uses Postgres on 127.0.0.1 — that is expected.
+  // Reject only clearly unfinished placeholder URLs, not local sockets.
+  if (/CHANGE_ME|apex_secret|user:password/i.test(databaseUrl)) {
     throw new Error(
-      "DATABASE_URL must point to production Postgres (not localhost)",
+      "DATABASE_URL still contains a placeholder password — set the real VPS Postgres credentials",
     );
   }
 
