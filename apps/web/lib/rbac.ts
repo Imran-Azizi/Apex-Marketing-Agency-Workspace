@@ -6,7 +6,6 @@ import {
   Settings,
   Clapperboard,
   UserCog,
-  MessageSquare,
   Mic2,
   HardDrive,
   Images,
@@ -129,11 +128,6 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
   SALES: [
     { href: "/crm-sales", label: "CRM و فروش", icon: Kanban },
     { href: "/crm", label: "مدیریت مشتریان", icon: Users },
-    {
-      href: "/sales/interactions",
-      label: "تعاملات مشتری",
-      icon: MessageSquare,
-    },
     { href: "/sales/messages", label: "پیام‌های تماس", icon: Inbox },
   ],
   FINANCE: [
@@ -251,7 +245,6 @@ export function getHomePath(role: string | null | undefined): string {
 const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
   { prefix: "/business-assistant", permission: "business_assistant.view" },
   { prefix: "/sales-assistant", permission: "sales_assistant.view" },
-  { prefix: "/sales/interactions", permission: "crm.view" },
   { prefix: "/sales/messages", permission: "contact.view" },
   { prefix: "/manager/messages", permission: "contact.view" },
   { prefix: "/manager/customers", permission: "customers.view" },

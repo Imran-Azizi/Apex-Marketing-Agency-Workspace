@@ -6,8 +6,10 @@ import { cn } from "@/lib/utils";
 export function HeroControls({
   index,
   total,
-  progress,
+  durationMs,
+  running,
   paused,
+  complete = false,
   onPrev,
   onNext,
   onGoTo,
@@ -15,8 +17,10 @@ export function HeroControls({
 }: {
   index: number;
   total: number;
-  progress: number;
+  durationMs: number;
+  running: boolean;
   paused: boolean;
+  complete?: boolean;
   onPrev: () => void;
   onNext: () => void;
   onGoTo: (next: number) => void;
@@ -27,7 +31,7 @@ export function HeroControls({
   const count = String(total).padStart(2, "0");
 
   return (
-    <div className="relative z-[2] mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 pb-6 pt-2 sm:px-6 sm:pb-8 lg:px-8">
+    <div className="relative z-[2] mx-auto flex w-full max-w-7xl items-center justify-between gap-2 px-4 pb-4 pt-1.5 sm:gap-3 sm:px-6 sm:pb-8 sm:pt-2 lg:px-8">
       <p
         className="font-semibold tabular-nums tracking-[0.18em] text-white/90 [text-shadow:0_1px_2px_rgb(0_0_0_/_0.45),0_6px_16px_rgb(0_0_0_/_0.35)]"
         aria-hidden
@@ -50,13 +54,26 @@ export function HeroControls({
               className={cn(
                 "relative h-1.5 overflow-hidden rounded-full transition-all duration-300",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/70",
-                active ? "w-10 bg-brand/35 sm:w-14" : "w-2.5 bg-white/35 hover:bg-white/55",
+                active
+                  ? "w-8 bg-brand/35 sm:w-14"
+                  : "w-2 bg-white/35 hover:bg-white/55 sm:w-2.5",
               )}
             >
               {active ? (
                 <span
-                  className="absolute inset-y-0 start-0 rounded-full bg-brand"
-                  style={{ width: `${Math.min(100, progress * 100)}%` }}
+                  key={index}
+                  className={cn(
+                    "absolute inset-y-0 start-0 rounded-full bg-brand",
+                    complete ? "w-full" : "hero-progress-fill",
+                  )}
+                  style={
+                    complete
+                      ? undefined
+                      : {
+                          animationDuration: `${Math.max(200, durationMs)}ms`,
+                          animationPlayState: running ? "running" : "paused",
+                        }
+                  }
                 />
               ) : null}
             </button>

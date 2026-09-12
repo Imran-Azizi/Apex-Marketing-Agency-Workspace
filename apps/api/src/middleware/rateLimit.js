@@ -10,7 +10,12 @@ export const globalLimiter = rateLimit({
   max: SECURITY.rateLimit.global.max,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => String(req.originalUrl || req.url || "").startsWith("/files/"),
+  skip: (req) => {
+    const url = String(req.originalUrl || req.url || "");
+    return (
+      url.startsWith("/files/") || url.includes("/webhooks/whatsapp")
+    );
+  },
 });
 
 export const authLimiter = rateLimit({

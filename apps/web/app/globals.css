@@ -298,8 +298,20 @@
 
   @keyframes hero-kenburns {
     from {
-      transform: scale(1.06);
-      opacity: 0.72;
+      transform: scale(1.03);
+      opacity: 0.82;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  /* Softer zoom on small screens so less of the banner is cropped. */
+  @keyframes hero-kenburns-mobile {
+    from {
+      transform: scale(1.015);
+      opacity: 0.88;
     }
     to {
       transform: scale(1);
@@ -319,21 +331,35 @@
   }
 
   .hero-slide-visual-active {
-    animation: hero-kenburns 1.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+    will-change: transform, opacity;
+    animation: hero-kenburns-mobile 1.15s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @media (min-width: 1024px) {
+    .hero-slide-visual-active {
+      animation-name: hero-kenburns;
+    }
+  }
+
+  /* Landscape phones: keep 16:9 but never taller than the viewport. */
+  @media (orientation: landscape) and (max-height: 500px) {
+    .hero-stage {
+      max-height: 100svh !important;
+    }
   }
 
   .hero-slide-copy-title {
     color: #ffffff;
     text-shadow:
-      0 1px 2px rgb(0 0 0 / 0.42),
-      0 10px 28px rgb(0 0 0 / 0.4);
+      0 1px 2px rgb(0 0 0 / 0.48),
+      0 12px 30px rgb(0 0 0 / 0.42);
   }
 
   .hero-slide-copy-body {
-    color: rgb(255 255 255 / 0.86);
+    color: rgb(255 255 255 / 0.92);
     text-shadow:
-      0 1px 2px rgb(0 0 0 / 0.38),
-      0 8px 22px rgb(0 0 0 / 0.32);
+      0 1px 2px rgb(0 0 0 / 0.42),
+      0 8px 22px rgb(0 0 0 / 0.34);
   }
 
   .hero-slide-copy-active > :nth-child(1) {
@@ -348,6 +374,23 @@
     animation: hero-copy-enter 0.7s cubic-bezier(0.22, 1, 0.36, 1) 170ms both;
   }
 
+  @keyframes hero-progress-fill {
+    from {
+      width: 0%;
+    }
+    to {
+      width: 100%;
+    }
+  }
+
+  .hero-progress-fill {
+    width: 0%;
+    animation-name: hero-progress-fill;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+    will-change: width;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .animate-public-fade,
     .animate-public-fade-delay,
@@ -357,13 +400,18 @@
     .hero-slide-visual-active,
     .hero-slide-copy-active > :nth-child(1),
     .hero-slide-copy-active > :nth-child(2),
-    .hero-slide-copy-active > :nth-child(3) {
+    .hero-slide-copy-active > :nth-child(3),
+    .hero-progress-fill {
       animation: none !important;
     }
 
     .hero-enter {
       opacity: 1;
       transform: none;
+    }
+
+    .hero-progress-fill {
+      width: 100%;
     }
 
     html {
@@ -374,11 +422,18 @@
 
 .whatsapp-phone-input {
   direction: ltr;
+  display: flex;
+  align-items: stretch;
+  min-height: 2.75rem;
+  overflow: hidden;
+  border-radius: 0.75rem;
 }
 
 .whatsapp-phone-input .PhoneInputCountry {
   margin: 0;
   align-self: stretch;
+  height: auto;
+  min-height: 2.75rem;
   border-inline-end: 1px solid hsl(var(--border) / 0.7);
 }
 
@@ -390,6 +445,7 @@
 .whatsapp-phone-input .PhoneInputInput {
   flex: 1;
   min-width: 0;
+  height: 2.75rem;
   background: transparent;
   border: 0 !important;
   box-shadow: none !important;
@@ -399,4 +455,9 @@
 .whatsapp-phone-input .PhoneInputCountryIcon--border {
   box-shadow: none;
   background: transparent;
+}
+
+/* Nested Radix country menu above dialogs/sheets */
+[data-phone-country-menu] {
+  z-index: 200 !important;
 }

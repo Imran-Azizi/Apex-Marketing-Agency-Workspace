@@ -16,6 +16,7 @@ import {
   catalogCodesSet,
   diffPermissionSets,
 } from "../../services/permissions/effective.js";
+import { profileImageUrlFor } from "../../utils/profileImageUrl.js";
 
 const STAFF_ROLES = [
   "MANAGER",
@@ -121,6 +122,7 @@ function summarize(user, actor) {
     fullName: user.fullName,
     phone: user.phone,
     profileImage: user.profileImage,
+    profileImageUrl: profileImageUrlFor(user.profileImage),
     isActive: user.isActive,
     lastLoginAt: user.lastLoginAt,
     createdAt: user.createdAt,
@@ -228,6 +230,7 @@ export const permissionsService = {
         fullName: user.fullName,
         phone: user.phone,
         profileImage: user.profileImage,
+        profileImageUrl: profileImageUrlFor(user.profileImage),
         isActive: user.isActive,
         role: { id: user.role.id, code: user.role.code, name: user.role.name },
       },

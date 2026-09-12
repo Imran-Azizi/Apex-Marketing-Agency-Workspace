@@ -465,6 +465,7 @@ model CrmCustomer {
   payments        Payment[]
   activities      CrmActivity[]
   contactMessages ContactMessage[]
+  whatsappInboundEvents WhatsAppInboundEvent[]
   salesAssistantRecommendations SalesAssistantRecommendation[]
   posters         ProjectPoster[]
 
@@ -477,7 +478,35 @@ model CrmCustomer {
   @@index([convertedAt])
   @@index([lastContactAt])
   @@index([deletedAt, updatedAt])
+  @@index([source])
   @@map("crm_customers")
+}
+
+/// Idempotent WhatsApp Cloud API inbound webhook events (Meta wamid).
+model WhatsAppInboundEvent {
+  id            String       @id @default(cuid())
+  /// Meta WhatsApp message id (wamid.*) — unique for retry/idempotency.
+  providerMsgId String       @unique
+  fromWaId      String
+  normalizedWa  String?
+  displayName   String?
+  /// Stored truncated for CRM linking; not full conversation archive.
+  textPreview   String?      @db.VarChar(280)
+  sourceHint    String?
+  status        String       @default("RECEIVED")
+  crmCustomerId String?
+  crmCustomer   CrmCustomer? @relation(fields: [crmCustomerId], references: [id], onDelete: SetNull)
+  errorCode     String?
+  errorMessage  String?
+  createdAt     DateTime     @default(now())
+  processedAt   DateTime?
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status, createdAt])
+  @@index([normalizedWa])
+  @@index([crmCustomerId])
+  @@index([createdAt])
+  @@map("whatsapp_inbound_events")
 }
 
 /// Immutable CRM activity / status / interaction timeline
@@ -652,6 +681,7 @@ model Service {
   opportunities Opportunity[]
   projects      Project[]
 
+  @@index([isPublished, deletedAt, sortOrder])
   @@map("services")
 }
 
@@ -966,6 +996,7 @@ model PortfolioItem {
   @@index([projectId])
   @@index([videoFileId])
   @@index([deletedAt])
+  @@index([deletedAt, status])
   @@index([sortOrder])
   @@map("portfolio_items")
 }
@@ -1588,17 +1619,24 @@ model Notification {
 
 /// Public website Hero slideshow slides (manager CMS)
 model HeroSlide {
-  id               String    @id @default(cuid())
-  title            String
-  description      String?   @db.Text
-  imageKey         String
-  altText          String?
-  durationSeconds  Int       @default(5)
-  sortOrder        Int       @default(0)
-  isPublished      Boolean   @default(true)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  deletedAt        DateTime?
+  id                String    @id @default(cuid())
+  title             String
+  description       String?   @db.Text
+  imageKey          String
+  altText           String?
+  durationSeconds   Int       @default(5)
+  sortOrder         Int       @default(0)
+  isPublished       Boolean   @default(true)
+  /// When true, show a CTA button on this slide on the public site.
+  buttonEnabled     Boolean   @default(false)
+  buttonText        String?
+  /// Public section id (home/about/services/…) or "external".
+  buttonDestination String?
+  /// Required when buttonDestination = "external".
+  buttonUrl         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   @@index([isPublished, sortOrder])
   @@index([deletedAt])

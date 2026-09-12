@@ -11,12 +11,15 @@ interface VideoPlayerProps {
   className?: string;
   title?: string;
   autoPlay?: boolean;
+  /** MIME type hint for the browser (defaults to video/mp4). */
+  type?: string;
 }
 
 /**
  * Professional HTML5 video player with loading / error states.
- * Native controls cover play/pause, volume, progress, fullscreen.
- * Uses authenticated stream URLs (cookies) with Range seeking support.
+ * `src` is attached only when the player is near the viewport so large
+ * files do not download on first paint. preload=metadata keeps bandwidth
+ * low until the user presses play.
  */
 export function VideoPlayer({
   src,
@@ -24,15 +27,43 @@ export function VideoPlayer({
   className,
   title,
   autoPlay = false,
+  type = "video/mp4",
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [loading, setLoading] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [armed, setArmed] = useState(autoPlay);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const waitingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    setLoading(true);
     setError(null);
-  }, [src]);
+    if (autoPlay) setArmed(true);
+    return () => {
+      if (waitingTimer.current) clearTimeout(waitingTimer.current);
+    };
+  }, [src, autoPlay]);
+
+  useEffect(() => {
+    if (armed || autoPlay) return;
+    const el = containerRef.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setArmed(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setArmed(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px 0px", threshold: 0.01 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [armed, autoPlay]);
 
   if (!src) {
     return (
@@ -50,13 +81,18 @@ export function VideoPlayer({
     );
   }
 
+  const mediaSrc = armed ? src : undefined;
+
   return (
-    <div className={cn("relative overflow-hidden rounded-xl bg-black", className)}>
+    <div
+      ref={containerRef}
+      className={cn("relative overflow-hidden rounded-xl bg-black", className)}
+    >
       {loading && !error && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/50">
           <div className="flex flex-col items-center gap-2 text-white">
             <Loader2 className="h-8 w-8 animate-spin" />
-            <span className="text-xs">در حال بارگذاری ویدیو…</span>
+            <span className="text-xs">در حال آماده‌سازی ویدیو…</span>
           </div>
         </div>
       )}
@@ -73,28 +109,38 @@ export function VideoPlayer({
 
       <video
         ref={videoRef}
-        key={src}
-        src={src}
+        key={armed ? src : "poster"}
+        src={mediaSrc}
         poster={poster}
         title={title}
         controls
         playsInline
-        preload="metadata"
+        preload={autoPlay ? "auto" : "none"}
         autoPlay={autoPlay}
-        className="aspect-video w-full bg-black"
+        className="aspect-video w-full max-w-full bg-black object-contain"
         onLoadStart={() => {
+          if (!armed) return;
           setLoading(true);
           setError(null);
         }}
+        onLoadedMetadata={() => setLoading(false)}
         onLoadedData={() => setLoading(false)}
         onCanPlay={() => setLoading(false)}
-        onWaiting={() => setLoading(true)}
-        onPlaying={() => setLoading(false)}
-        onError={() => {
+        onWaiting={() => {
+          if (waitingTimer.current) clearTimeout(waitingTimer.current);
+          waitingTimer.current = setTimeout(() => setLoading(true), 400);
+        }}
+        onPlaying={() => {
+          if (waitingTimer.current) clearTimeout(waitingTimer.current);
           setLoading(false);
-          setError("فایل ویدیو در دسترس نیست یا دسترسی محدود شده است.");
+        }}
+        onError={() => {
+          if (!armed) return;
+          setLoading(false);
+          setError("فایل ویدیو در دسترس نیست یا فرمت آن پشتیبانی نمی‌شود.");
         }}
       >
+        {mediaSrc ? <source src={mediaSrc} type={type} /> : null}
         مرورگر شما از پخش ویدیو پشتیبانی نمی‌کند.
       </video>
     </div>

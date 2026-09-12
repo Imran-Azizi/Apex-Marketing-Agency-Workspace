@@ -3,6 +3,13 @@ import { prisma } from "../../db/prisma.js";
 import { AppError } from "../../utils/response.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { storage } from "../../services/storage.js";
+import { invalidatePublicHeroCache } from "../public/cache.js";
+import { notifyWebHeroRevalidate } from "../../services/web-revalidate.js";
+import {
+  HERO_BUTTON_DESTINATION_IDS,
+  HERO_BUTTON_EXTERNAL,
+  normalizeHeroButtonFields,
+} from "./destinations.js";
 
 const DEFAULT_DURATION_SECONDS = 5;
 
@@ -30,7 +37,16 @@ const durationSecondsField = z.coerce
   .optional()
   .nullable();
 
-const heroSlideFields = z.object({
+const buttonDestinationField = z
+  .union([
+    z.enum(HERO_BUTTON_DESTINATION_IDS),
+    z.literal(""),
+    z.null(),
+  ])
+  .optional()
+  .transform((v) => (v ? v : null));
+
+const heroSlideObject = z.object({
   title: z.string().trim().min(2, "عنوان اسلاید الزامی است").max(160),
   description: optionalText(600, "توضیحات نباید بیشتر از ۶۰۰ کاراکتر باشد"),
   imageKey: z.string().trim().min(1, "تصویر اسلاید الزامی است").max(500),
@@ -38,11 +54,56 @@ const heroSlideFields = z.object({
   durationSeconds: durationSecondsField,
   isPublished: z.boolean().optional().default(true),
   sortOrder: z.coerce.number().int().min(0).max(9999).optional().nullable(),
+  buttonEnabled: z.boolean().optional().default(false),
+  buttonText: optionalText(80, "متن دکمه نباید بیشتر از ۸۰ کاراکتر باشد"),
+  buttonDestination: buttonDestinationField,
+  buttonUrl: optionalText(500, "آدرس دکمه نباید بیشتر از ۵۰۰ کاراکتر باشد"),
 });
 
-export const createHeroSlideSchema = heroSlideFields;
+function refineHeroButton(data, ctx) {
+  if (!data.buttonEnabled) return;
+  if (!data.buttonText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["buttonText"],
+      message: "متن دکمه الزامی است",
+    });
+  }
+  if (!data.buttonDestination) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["buttonDestination"],
+      message: "مقصد دکمه را انتخاب کنید",
+    });
+  }
+  if (data.buttonDestination === HERO_BUTTON_EXTERNAL) {
+    const url = String(data.buttonUrl || "").trim();
+    if (!url) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["buttonUrl"],
+        message: "آدرس لینک خارجی الزامی است",
+      });
+    } else {
+      try {
+        const parsed = new URL(url);
+        if (!["http:", "https:"].includes(parsed.protocol)) {
+          throw new Error("bad protocol");
+        }
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["buttonUrl"],
+          message: "آدرس لینک معتبر نیست",
+        });
+      }
+    }
+  }
+}
 
-export const updateHeroSlideSchema = heroSlideFields
+export const createHeroSlideSchema = heroSlideObject.superRefine(refineHeroButton);
+
+export const updateHeroSlideSchema = heroSlideObject
   .omit({ imageKey: true })
   .partial()
   .extend({
@@ -50,6 +111,19 @@ export const updateHeroSlideSchema = heroSlideFields
       .union([z.string().trim().max(500), z.literal(""), z.null()])
       .optional()
       .transform((v) => (v ? v : undefined)),
+    buttonEnabled: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.buttonEnabled !== true) return;
+    refineHeroButton(
+      {
+        buttonEnabled: true,
+        buttonText: data.buttonText,
+        buttonDestination: data.buttonDestination,
+        buttonUrl: data.buttonUrl,
+      },
+      ctx,
+    );
   });
 
 export const reorderHeroSlidesSchema = z.object({
@@ -70,15 +144,22 @@ function imageUrlFor(key) {
 
 async function tryDeleteMedia(key) {
   if (!key) return;
-  try {
-    await storage.deleteObject(key);
-  } catch (err) {
-    console.warn("[hero] media cleanup failed:", key, err?.message || err);
-  }
+  await storage.tryDeleteStoredObject(key, { logTag: "hero" });
+}
+
+async function afterHeroMutation() {
+  invalidatePublicHeroCache();
+  void notifyWebHeroRevalidate();
 }
 
 export function serializeHeroSlide(row, { publicView = false } = {}) {
   if (!row) return null;
+  const buttons = normalizeHeroButtonFields({
+    buttonEnabled: row.buttonEnabled,
+    buttonText: row.buttonText,
+    buttonDestination: row.buttonDestination,
+    buttonUrl: row.buttonUrl,
+  });
   const payload = {
     id: row.id,
     title: row.title,
@@ -90,6 +171,7 @@ export function serializeHeroSlide(row, { publicView = false } = {}) {
     ),
     sortOrder: row.sortOrder ?? 0,
     isPublished: row.isPublished === true,
+    ...buttons,
   };
   if (publicView) return payload;
   return {
@@ -148,6 +230,20 @@ export const heroService = {
     const rows = await prisma.heroSlide.findMany({
       where: { isPublished: true, deletedAt: null },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        imageKey: true,
+        altText: true,
+        durationSeconds: true,
+        sortOrder: true,
+        isPublished: true,
+        buttonEnabled: true,
+        buttonText: true,
+        buttonDestination: true,
+        buttonUrl: true,
+      },
     });
     return rows.map((row) => serializeHeroSlide(row, { publicView: true }));
   },
@@ -162,6 +258,7 @@ export const heroService = {
 
   async create(body, auth, req) {
     const data = createHeroSlideSchema.parse(body);
+    const buttons = normalizeHeroButtonFields(data);
 
     let sortOrder = data.sortOrder;
     if (sortOrder == null) {
@@ -182,6 +279,7 @@ export const heroService = {
         durationSeconds: data.durationSeconds ?? DEFAULT_DURATION_SECONDS,
         isPublished: data.isPublished ?? true,
         sortOrder,
+        ...buttons,
       },
     });
 
@@ -195,10 +293,13 @@ export const heroService = {
         isPublished: row.isPublished,
         sortOrder: row.sortOrder,
         durationSeconds: row.durationSeconds,
+        buttonEnabled: row.buttonEnabled,
+        buttonDestination: row.buttonDestination,
       },
       req,
     });
 
+    await afterHeroMutation();
     return serializeHeroSlide(row);
   },
 
@@ -214,21 +315,50 @@ export const heroService = {
       await tryDeleteMedia(existing.imageKey);
     }
 
+    const patch = {
+      ...(data.title != null ? { title: data.title } : {}),
+      ...(data.description !== undefined
+        ? { description: data.description }
+        : {}),
+      ...(data.imageKey ? { imageKey: data.imageKey } : {}),
+      ...(data.altText !== undefined ? { altText: data.altText } : {}),
+      ...(data.durationSeconds != null
+        ? { durationSeconds: data.durationSeconds }
+        : {}),
+      ...(data.isPublished != null ? { isPublished: data.isPublished } : {}),
+      ...(data.sortOrder != null ? { sortOrder: data.sortOrder } : {}),
+    };
+
+    if (
+      data.buttonEnabled !== undefined ||
+      data.buttonText !== undefined ||
+      data.buttonDestination !== undefined ||
+      data.buttonUrl !== undefined
+    ) {
+      Object.assign(
+        patch,
+        normalizeHeroButtonFields({
+          buttonEnabled:
+            data.buttonEnabled !== undefined
+              ? data.buttonEnabled
+              : existing.buttonEnabled,
+          buttonText:
+            data.buttonText !== undefined
+              ? data.buttonText
+              : existing.buttonText,
+          buttonDestination:
+            data.buttonDestination !== undefined
+              ? data.buttonDestination
+              : existing.buttonDestination,
+          buttonUrl:
+            data.buttonUrl !== undefined ? data.buttonUrl : existing.buttonUrl,
+        }),
+      );
+    }
+
     const row = await prisma.heroSlide.update({
       where: { id },
-      data: {
-        ...(data.title != null ? { title: data.title } : {}),
-        ...(data.description !== undefined
-          ? { description: data.description }
-          : {}),
-        ...(data.imageKey ? { imageKey: data.imageKey } : {}),
-        ...(data.altText !== undefined ? { altText: data.altText } : {}),
-        ...(data.durationSeconds != null
-          ? { durationSeconds: data.durationSeconds }
-          : {}),
-        ...(data.isPublished != null ? { isPublished: data.isPublished } : {}),
-        ...(data.sortOrder != null ? { sortOrder: data.sortOrder } : {}),
-      },
+      data: patch,
     });
 
     await writeAudit({
@@ -242,6 +372,7 @@ export const heroService = {
         sortOrder: existing.sortOrder,
         imageKey: existing.imageKey,
         durationSeconds: existing.durationSeconds,
+        buttonEnabled: existing.buttonEnabled,
       },
       after: {
         title: row.title,
@@ -249,10 +380,13 @@ export const heroService = {
         sortOrder: row.sortOrder,
         imageKey: row.imageKey,
         durationSeconds: row.durationSeconds,
+        buttonEnabled: row.buttonEnabled,
+        buttonDestination: row.buttonDestination,
       },
       req,
     });
 
+    await afterHeroMutation();
     return serializeHeroSlide(row);
   },
 
@@ -288,6 +422,7 @@ export const heroService = {
       req,
     });
 
+    await afterHeroMutation();
     return this.list({ pageSize: 100 });
   },
 
@@ -297,12 +432,15 @@ export const heroService = {
     });
     if (!existing) throw new AppError("اسلاید یافت نشد", 404, "NOT_FOUND");
 
+    await storage.deleteStoredObject(existing.imageKey, {
+      required: true,
+      logTag: "hero",
+    });
+
     await prisma.heroSlide.update({
       where: { id },
       data: { deletedAt: new Date(), isPublished: false },
     });
-
-    await tryDeleteMedia(existing.imageKey);
 
     await writeAudit({
       userId: auth?.userId,
@@ -313,6 +451,7 @@ export const heroService = {
       req,
     });
 
+    await afterHeroMutation();
     return { id, deleted: true };
   },
 };

@@ -58,6 +58,8 @@ import {
   assertSalesCustomerListOwnerFilter,
   salesCustomerListFilter,
 } from "./salesAccess.js";
+import { hasAnyPermission } from "../../services/permissions/effective.js";
+import { storage } from "../../services/storage.js";
 import { ingestWhatsAppMessage } from "./ingestion.js";
 import {
   assertPaymentWithinRemaining,
@@ -1904,6 +1906,11 @@ export const crmService = {
     });
     if (!existing) throw new AppError("پرداخت یافت نشد", 404, "NOT_FOUND");
 
+    await storage.deleteStoredObject(existing.attachmentKey, {
+      required: true,
+      logTag: "crm-payment",
+    });
+
     const opportunityId = existing.invoice?.opportunityId || null;
 
     const result = await prisma.$transaction(async (tx) => {
@@ -2775,6 +2782,11 @@ export const crmService = {
     });
     if (!asset) throw new AppError("فایل یافت نشد", 404, "NOT_FOUND");
 
+    await storage.deleteStoredObject(asset.storageKey, {
+      required: true,
+      logTag: "crm-client-asset",
+    });
+
     const updated = await prisma.clientAsset.update({
       where: { id: assetId },
       data: { deletedAt: new Date() },
@@ -2793,6 +2805,14 @@ export const crmService = {
   },
 
   async softDeleteCustomer(id, auth, req) {
+    if (!hasAnyPermission(auth?.permissions, ["crm.delete"], auth?.roleCode)) {
+      throw new AppError(
+        "شما اجازه دسترسی به این منبع را ندارید",
+        403,
+        "FORBIDDEN",
+      );
+    }
+
     const customer = await this.getCustomer(id, { auth });
     const liveProjects = customer.projects || [];
 
@@ -2810,6 +2830,46 @@ export const crmService = {
 
     const deletedAt = new Date();
     const tombstone = (value) => `deleted:${id}:${value}`.slice(0, 190);
+
+    const [clientAssets, projectFiles, paymentsWithFiles, expensesWithFiles, portfolioItems] =
+      await Promise.all([
+        prisma.clientAsset.findMany({
+          where: { crmCustomerId: id, deletedAt: null },
+          select: { storageKey: true },
+        }),
+        prisma.projectFile.findMany({
+          where: { project: { crmCustomerId: id }, deletedAt: null },
+          select: { storageKey: true },
+        }),
+        prisma.payment.findMany({
+          where: { crmCustomerId: id, attachmentKey: { not: null } },
+          select: { attachmentKey: true },
+        }),
+        prisma.expense.findMany({
+          where: {
+            project: { crmCustomerId: id },
+            receiptKey: { not: null },
+          },
+          select: { receiptKey: true },
+        }),
+        prisma.portfolioItem.findMany({
+          where: { project: { crmCustomerId: id }, deletedAt: null },
+          select: { storageKey: true, thumbnailKey: true },
+        }),
+      ]);
+
+    const storageKeys = storage.collectStorageKeys(
+      clientAssets.map((a) => a.storageKey),
+      projectFiles.map((f) => f.storageKey),
+      paymentsWithFiles.map((p) => p.attachmentKey),
+      expensesWithFiles.map((e) => e.receiptKey),
+      portfolioItems.flatMap((p) => [p.storageKey, p.thumbnailKey]),
+    );
+
+    await storage.deleteStoredObjects(storageKeys, {
+      required: true,
+      logTag: "crm-customer-purge",
+    });
 
     const result = await prisma.$transaction(async (tx) => {
       const portal = await tx.portalAccount.findFirst({
@@ -2892,6 +2952,16 @@ export const crmService = {
         await tx.project.updateMany({
           where: { id: { in: projectIds } },
           data: { deletedAt, portalAccountId: null },
+        });
+
+        await tx.projectFile.updateMany({
+          where: { projectId: { in: projectIds }, deletedAt: null },
+          data: { deletedAt },
+        });
+
+        await tx.portfolioItem.updateMany({
+          where: { projectId: { in: projectIds }, deletedAt: null },
+          data: { deletedAt, status: "UNPUBLISHED" },
         });
       }
 
@@ -3471,28 +3541,14 @@ export const crmService = {
         code: "NOT_FOUND",
       };
     }
-    if (
-      auth?.roleCode === "SALES" &&
-      row.salesOwnerId &&
-      row.salesOwnerId !== auth.userId
-    ) {
-      return {
-        outcome: "failed",
-        id: customerId,
-        personName: row.personName,
-        customerCode: row.customerCode,
-        message: "اجازه انتقال این سرنخ را ندارید",
-        status: 403,
-        code: "FORBIDDEN",
-      };
-    }
+    const stage = canonicalizeStage(row.pipelineStage);
     if (row.convertedAt) {
+      // Idempotent: already in management (or delivered after prior transfer).
       return {
         outcome: "already_transferred",
         customer: await this.getCustomer(customerId, { auth }),
       };
     }
-    const stage = canonicalizeStage(row.pipelineStage);
     if (stage === "DELIVERED") {
       return {
         outcome: "skipped",
@@ -3516,29 +3572,9 @@ export const crmService = {
       };
     }
 
-    const duplicate = await prisma.crmCustomer.findFirst({
-      where: {
-        id: { not: customerId },
-        deletedAt: null,
-        convertedAt: { not: null },
-        OR: [
-          { normalizedWhatsapp: row.normalizedWhatsapp },
-          ...(row.email ? [{ email: row.email }] : []),
-        ],
-      },
-      select: { id: true, customerCode: true, personName: true },
-    });
-    if (duplicate) {
-      return {
-        outcome: "skipped",
-        id: customerId,
-        personName: row.personName,
-        customerCode: row.customerCode,
-        message: `این مشتری قبلاً با شناسه ${duplicate.customerCode || duplicate.id} در مدیریت مشتریان ثبت شده است`,
-        status: 409,
-        code: "DUPLICATE_CUSTOMER",
-      };
-    }
+    // WhatsApp is unique per CrmCustomer — cross-row identity collisions are not
+    // expected. Do not block transfer on shared email (common for company inboxes).
+    // Repeated transfer of the same id is handled above via convertedAt.
 
     await prisma.$transaction(async (tx) => {
       await applyCrmEvent(tx, {
@@ -3551,32 +3587,73 @@ export const crmService = {
         note: "مشتری از CRM و فروش به مدیریت مشتریان منتقل شد",
         notify: false,
       });
+
+      // Hard guarantee: persist membership in مدیریت مشتریان even if event
+      // side-effects change. convertedAt is the sole management-list gate.
+      const ensured = await tx.crmCustomer.updateMany({
+        where: { id: customerId, deletedAt: null, convertedAt: null },
+        data: { convertedAt: new Date() },
+      });
+      if (ensured.count === 0) {
+        const current = await tx.crmCustomer.findFirst({
+          where: { id: customerId, deletedAt: null },
+          select: { convertedAt: true },
+        });
+        if (!current?.convertedAt) {
+          throw new AppError(
+            "ثبت انتقال در پایگاه داده انجام نشد",
+            500,
+            "TRANSFER_PERSIST_FAILED",
+          );
+        }
+      }
     });
 
     const actorName = auth?.user?.fullName || null;
-    await notifyManagersOnce(
-      buildCustomerConvertedNotification({
-        customerId,
+    try {
+      await notifyManagersOnce(
+        buildCustomerConvertedNotification({
+          customerId,
+          personName: row.personName,
+          customerCode: row.customerCode,
+          companyName: row.companyName,
+          actorName,
+          transferredAt: new Date(),
+        }),
+      );
+    } catch {
+      // Notification failure must not roll back a persisted transfer.
+    }
+
+    try {
+      await writeAudit({
+        userId: auth.userId,
+        action: "CRM_CUSTOMER_CONVERT",
+        entityType: "CrmCustomer",
+        entityId: customerId,
+        after: { customerCode: row.customerCode, transferred: true },
+        req,
+      });
+    } catch {
+      // Audit failure must not mark a successful transfer as failed.
+    }
+
+    const customer = await this.getCustomer(customerId, { auth });
+    if (!customer?.convertedAt && !customer?.isConverted) {
+      return {
+        outcome: "failed",
+        id: customerId,
         personName: row.personName,
         customerCode: row.customerCode,
-        companyName: row.companyName,
-        actorName,
-        transferredAt: new Date(),
-      }),
-    );
-
-    await writeAudit({
-      userId: auth.userId,
-      action: "CRM_CUSTOMER_CONVERT",
-      entityType: "CrmCustomer",
-      entityId: customerId,
-      after: { customerCode: row.customerCode, transferred: true },
-      req,
-    });
+        message: "انتقال ذخیره نشد. لطفاً دوباره تلاش کنید.",
+        status: 500,
+        code: "TRANSFER_PERSIST_FAILED",
+      };
+    }
 
     return {
       outcome: "transferred",
-      customer: await this.getCustomer(customerId, { auth }),
+      customer,
     };
   },
 
@@ -3589,7 +3666,10 @@ export const crmService = {
         : "CRM_WHATSAPP_INTERACTION",
       entityType: "CrmCustomer",
       entityId: result.customer.id,
-      after: { source: "WHATSAPP", created: result.created },
+      after: {
+        source: result.customer.source || "WHATSAPP",
+        created: result.created,
+      },
       req,
     });
     return {
@@ -3597,6 +3677,7 @@ export const crmService = {
       duplicate: result.duplicate,
       customerId: result.customer.id,
       customerCode: result.customer.customerCode,
+      source: result.customer.source,
     };
   },
 };

@@ -7,8 +7,11 @@ import { toast } from "sonner";
 import { apiPatch, apiPost, ensureCsrf } from "@/lib/api";
 import {
   DEFAULT_HERO_DURATION_SECONDS,
+  HERO_BUTTON_DESTINATIONS,
+  HERO_BUTTON_EXTERNAL,
   HERO_DURATION_OPTIONS,
   normalizeHeroDurationSeconds,
+  type HeroButtonDestinationId,
   type HeroSlide,
 } from "@/lib/hero";
 import { Button } from "@/components/ui/button";
@@ -41,6 +44,10 @@ type FormState = {
   isPublished: boolean;
   imageKey: string | null;
   imageUrl: string | null;
+  buttonEnabled: boolean;
+  buttonText: string;
+  buttonDestination: HeroButtonDestinationId | "";
+  buttonUrl: string;
 };
 
 function emptyForm(): FormState {
@@ -52,10 +59,16 @@ function emptyForm(): FormState {
     isPublished: true,
     imageKey: null,
     imageUrl: null,
+    buttonEnabled: false,
+    buttonText: "",
+    buttonDestination: "portfolio",
+    buttonUrl: "",
   };
 }
 
 function fromSlide(slide: HeroSlide): FormState {
+  const destination = (slide.buttonDestination ||
+    "portfolio") as HeroButtonDestinationId | "";
   return {
     title: slide.title || "",
     description: slide.description || "",
@@ -66,6 +79,10 @@ function fromSlide(slide: HeroSlide): FormState {
     isPublished: slide.isPublished ?? true,
     imageKey: slide.imageKey || null,
     imageUrl: slide.imageUrl || null,
+    buttonEnabled: slide.buttonEnabled === true,
+    buttonText: slide.buttonText || "",
+    buttonDestination: destination || "portfolio",
+    buttonUrl: slide.buttonUrl || "",
   };
 }
 
@@ -94,6 +111,20 @@ export function HeroSlideForm({
       const title = form.title.trim();
       if (title.length < 2) throw new Error("عنوان اسلاید الزامی است");
       if (!form.imageKey) throw new Error("تصویر اسلاید الزامی است");
+      if (form.buttonEnabled) {
+        if (!form.buttonText.trim()) {
+          throw new Error("متن دکمه الزامی است");
+        }
+        if (!form.buttonDestination) {
+          throw new Error("مقصد دکمه را انتخاب کنید");
+        }
+        if (
+          form.buttonDestination === HERO_BUTTON_EXTERNAL &&
+          !form.buttonUrl.trim()
+        ) {
+          throw new Error("آدرس لینک خارجی الزامی است");
+        }
+      }
       const payload = {
         title,
         description: form.description.trim() || null,
@@ -103,6 +134,16 @@ export function HeroSlideForm({
         ),
         sortOrder: form.sortOrder.trim() ? Number(form.sortOrder) : undefined,
         isPublished: form.isPublished,
+        buttonEnabled: form.buttonEnabled,
+        buttonText: form.buttonEnabled ? form.buttonText.trim() : null,
+        buttonDestination: form.buttonEnabled
+          ? form.buttonDestination || null
+          : null,
+        buttonUrl:
+          form.buttonEnabled &&
+          form.buttonDestination === HERO_BUTTON_EXTERNAL
+            ? form.buttonUrl.trim()
+            : null,
       };
       if (editing && slide) {
         return apiPatch<HeroSlide>(`/hero/${slide.id}`, payload);
@@ -129,7 +170,7 @@ export function HeroSlideForm({
             {editing ? "ویرایش اسلاید" : "افزودن اسلاید"}
           </DialogTitle>
           <DialogDescription className="leading-6">
-            تصویر و محتوای اسلاید را وارد کنید. فقط اسلایدهای فعال در وب‌سایت
+            تصویر، متن و دکمهٔ اسلاید را تنظیم کنید. فقط اسلایدهای فعال در وب‌سایت
             عمومی نمایش داده می‌شوند.
           </DialogDescription>
         </DialogHeader>
@@ -137,6 +178,11 @@ export function HeroSlideForm({
         <div className="space-y-5">
           <div className="space-y-2">
             <Label>تصویر اسلاید</Label>
+            <p className="text-xs leading-5 text-muted-foreground">
+              اندازه پیشنهادی:{" "}
+              <span className="font-medium text-foreground">۱۹۲۰×۱۰۸۰</span>{" "}
+              پیکسل (نسبت ۱۶:۹) برای بهترین نمایش در همه دستگاه‌ها.
+            </p>
             <HeroSlideUploader
               imageKey={form.imageKey}
               imageUrl={form.imageUrl}
@@ -209,6 +255,97 @@ export function HeroSlideForm({
                 disabled={saveMut.isPending}
               />
             </div>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-border/70 bg-muted/15 p-3 sm:p-4">
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="hero-button-enabled"
+                checked={form.buttonEnabled}
+                onCheckedChange={(v) =>
+                  setForm((p) => ({ ...p, buttonEnabled: v === true }))
+                }
+                disabled={saveMut.isPending}
+              />
+              <div className="space-y-1">
+                <Label
+                  htmlFor="hero-button-enabled"
+                  className="text-sm font-medium"
+                >
+                  نمایش دکمه روی این اسلاید
+                </Label>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  می‌توانید برای هر اسلاید دکمه جداگانه با متن و مقصد دلخواه
+                  تعریف کنید.
+                </p>
+              </div>
+            </div>
+
+            {form.buttonEnabled ? (
+              <div className="space-y-3 border-t border-border/60 pt-3">
+                <div className="space-y-2">
+                  <Label htmlFor="hero-button-text">متن دکمه</Label>
+                  <Input
+                    id="hero-button-text"
+                    value={form.buttonText}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, buttonText: e.target.value }))
+                    }
+                    placeholder="مثال: مشاهده نمونه‌کارها"
+                    disabled={saveMut.isPending}
+                    maxLength={80}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="hero-button-destination">مقصد دکمه</Label>
+                  <Select
+                    value={form.buttonDestination || undefined}
+                    onValueChange={(v) =>
+                      setForm((p) => ({
+                        ...p,
+                        buttonDestination: v as HeroButtonDestinationId,
+                      }))
+                    }
+                    disabled={saveMut.isPending}
+                  >
+                    <SelectTrigger
+                      id="hero-button-destination"
+                      dir="rtl"
+                      className="w-full"
+                    >
+                      <SelectValue placeholder="انتخاب بخش سایت" />
+                    </SelectTrigger>
+                    <SelectContent dir="rtl">
+                      {HERO_BUTTON_DESTINATIONS.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={HERO_BUTTON_EXTERNAL}>
+                        لینک خارجی
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {form.buttonDestination === HERO_BUTTON_EXTERNAL ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="hero-button-url">آدرس لینک خارجی</Label>
+                    <Input
+                      id="hero-button-url"
+                      dir="ltr"
+                      className="text-start"
+                      value={form.buttonUrl}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, buttonUrl: e.target.value }))
+                      }
+                      placeholder="https://example.com"
+                      disabled={saveMut.isPending}
+                      maxLength={500}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-start gap-3 rounded-xl border border-border/70 bg-muted/20 px-3 py-3">

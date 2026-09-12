@@ -41,7 +41,7 @@ export function useCustomerTransfer(customer: CrmCustomer, canTransfer = false) 
 
       if (transferred > 0) {
         toast.success(crmSalesText("transferSuccess"));
-      } else if (already > 0) {
+      } else if (already > 0 && skipped === 0 && failed === 0) {
         toast.success(crmSalesText("transferAlready", { count: 1 }));
       } else if (skipped > 0) {
         const reason = result.skipped[0]?.reason;
@@ -57,6 +57,16 @@ export function useCustomerTransfer(customer: CrmCustomer, canTransfer = false) 
         qc.invalidateQueries({ queryKey: ["crm-customers"] }),
         qc.invalidateQueries({ queryKey: ["crm-dashboard"] }),
         qc.invalidateQueries({ queryKey: ["notifications"] }),
+      ]);
+      await Promise.all([
+        qc.refetchQueries({
+          queryKey: ["crm-customers", "management"],
+          type: "all",
+        }),
+        qc.refetchQueries({
+          queryKey: ["crm-customers", "pipeline"],
+          type: "active",
+        }),
       ]);
     },
     onError: (err) => {

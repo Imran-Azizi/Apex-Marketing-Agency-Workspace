@@ -54,12 +54,14 @@ test('staff cannot escalate beyond their own permissions', () => {
   assert.equal(grantable.has('finance.approve'), false);
 });
 
-test('sales defaults include CRM write but not projects, finance, or finance approve', () => {
+test('sales defaults include CRM write but not delete, projects, or finance', () => {
   const codes = computeEffectivePermissions({
     roleCode: 'SALES',
     rolePermissionCodes: ROLE_DEFAULT_PERMISSIONS.SALES,
   });
   assert.equal(permissionSatisfied(codes, 'crm.create', 'SALES'), true);
+  assert.equal(permissionSatisfied(codes, 'crm.edit', 'SALES'), true);
+  assert.equal(permissionSatisfied(codes, 'crm.delete', 'SALES'), false);
   assert.equal(permissionSatisfied(codes, 'crm.invite', 'SALES'), true);
   assert.equal(permissionSatisfied(codes, 'crm.portal_credentials', 'SALES'), false);
   assert.equal(permissionSatisfied(codes, 'employees.credentials', 'SALES'), false);
@@ -75,10 +77,20 @@ test('sales defaults include CRM write but not projects, finance, or finance app
   assert.equal(permissionSatisfied(codes, 'crm.opportunity', 'SALES'), true);
 });
 
-test('user grants and revokes override role defaults', () => {
+test('manager can grant crm.delete to sales via user override', () => {
   const codes = computeEffectivePermissions({
     roleCode: 'SALES',
     rolePermissionCodes: ROLE_DEFAULT_PERMISSIONS.SALES,
+    overrides: [{ code: 'crm.delete', granted: true }],
+  });
+  assert.equal(permissionSatisfied(codes, 'crm.delete', 'SALES'), true);
+  assert.equal(permissionSatisfied(codes, 'crm.create', 'SALES'), true);
+});
+
+test('user grants and revokes override role defaults', () => {
+  const codes = computeEffectivePermissions({
+    roleCode: 'SALES',
+    rolePermissionCodes: [...ROLE_DEFAULT_PERMISSIONS.SALES, 'crm.delete'],
     overrides: [
       { code: 'projects.delete', granted: true },
       { code: 'crm.delete', granted: false },
@@ -87,6 +99,16 @@ test('user grants and revokes override role defaults', () => {
   assert.equal(permissionSatisfied(codes, 'projects.delete', 'SALES'), true);
   assert.equal(permissionSatisfied(codes, 'crm.delete', 'SALES'), false);
   assert.equal(permissionSatisfied(codes, 'crm.view', 'SALES'), true);
+});
+
+test('legacy crm:write does not grant crm.delete', () => {
+  const codes = computeEffectivePermissions({
+    roleCode: 'SALES',
+    rolePermissionCodes: ['crm:write', 'crm:read'],
+  });
+  assert.equal(permissionSatisfied(codes, 'crm.create', 'SALES'), true);
+  assert.equal(permissionSatisfied(codes, 'crm.edit', 'SALES'), true);
+  assert.equal(permissionSatisfied(codes, 'crm.delete', 'SALES'), false);
 });
 
 test('editor project:read legacy does not unlock manager projects.view', () => {
@@ -182,7 +204,7 @@ test('narrator defaults keep voice upload only', () => {
   assert.equal(hasAnyPermission(codes, ['projects.view'], 'NARRATOR'), false);
 });
 
-test('finance defaults exclude CRM and projects but keep finance modules', () => {
+test('finance defaults exclude CRM, projects, and expense delete', () => {
   const codes = computeEffectivePermissions({
     roleCode: 'FINANCE',
     rolePermissionCodes: ROLE_DEFAULT_PERMISSIONS.FINANCE,
@@ -190,11 +212,31 @@ test('finance defaults exclude CRM and projects but keep finance modules', () =>
   assert.equal(permissionSatisfied(codes, 'finance.view', 'FINANCE'), true);
   assert.equal(permissionSatisfied(codes, 'finance.create', 'FINANCE'), true);
   assert.equal(permissionSatisfied(codes, 'finance.edit', 'FINANCE'), true);
-  assert.equal(permissionSatisfied(codes, 'finance.delete', 'FINANCE'), true);
+  assert.equal(permissionSatisfied(codes, 'finance.delete', 'FINANCE'), false);
   assert.equal(permissionSatisfied(codes, 'delivery.view', 'FINANCE'), true);
   assert.equal(permissionSatisfied(codes, 'audit.view', 'FINANCE'), true);
   assert.equal(permissionSatisfied(codes, 'crm.view', 'FINANCE'), false);
   assert.equal(permissionSatisfied(codes, 'projects.view', 'FINANCE'), false);
+});
+
+test('manager can grant finance.delete to finance via user override', () => {
+  const codes = computeEffectivePermissions({
+    roleCode: 'FINANCE',
+    rolePermissionCodes: ROLE_DEFAULT_PERMISSIONS.FINANCE,
+    overrides: [{ code: 'finance.delete', granted: true }],
+  });
+  assert.equal(permissionSatisfied(codes, 'finance.delete', 'FINANCE'), true);
+  assert.equal(permissionSatisfied(codes, 'finance.create', 'FINANCE'), true);
+});
+
+test('legacy finance:write does not grant finance.delete', () => {
+  const codes = computeEffectivePermissions({
+    roleCode: 'FINANCE',
+    rolePermissionCodes: ['finance:write', 'finance:read'],
+  });
+  assert.equal(permissionSatisfied(codes, 'finance.create', 'FINANCE'), true);
+  assert.equal(permissionSatisfied(codes, 'finance.edit', 'FINANCE'), true);
+  assert.equal(permissionSatisfied(codes, 'finance.delete', 'FINANCE'), false);
 });
 
 test('finance legacy crm:read and project:read do not expand to module access', () => {

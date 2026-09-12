@@ -1,17 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { submitContactSchema } from "../../src/modules/contact/service.js";
+import {
+  DEFAULT_CONTACT_SUBJECT,
+  submitContactSchema,
+} from "../../src/modules/contact/service.js";
 
-test("contact schema accepts a valid payload", () => {
+test("contact schema accepts a valid payload without subject", () => {
   const parsed = submitContactSchema.parse({
     name: "علی رضایی",
     email: "ali@example.com",
     phone: "0700123456",
     company: "شرکت نمونه",
-    subject: "CONSULTATION",
     message: "سلام، برای تولید ویدیو تبلیغاتی مشاوره می‌خواهم.",
   });
   assert.equal(parsed.email, "ali@example.com");
+  assert.equal(parsed.subject, undefined);
+  assert.equal(DEFAULT_CONTACT_SUBJECT, "GENERAL");
+});
+
+test("contact schema still accepts legacy subject when provided", () => {
+  const parsed = submitContactSchema.parse({
+    name: "علی رضایی",
+    email: "ali@example.com",
+    phone: "0700123456",
+    subject: "CONSULTATION",
+    message: "سلام، برای تولید ویدیو تبلیغاتی مشاوره می‌خواهم.",
+  });
   assert.equal(parsed.subject, "CONSULTATION");
 });
 
@@ -20,7 +34,6 @@ test("contact schema rejects invalid email and short message", () => {
     name: "علی",
     email: "not-an-email",
     phone: "0700123456",
-    subject: "QUOTE",
     message: "این یک پیام معتبر برای تست است",
   });
   assert.equal(email.success, false);
@@ -29,7 +42,6 @@ test("contact schema rejects invalid email and short message", () => {
     name: "علی",
     email: "ali@example.com",
     phone: "0700123456",
-    subject: "QUOTE",
     message: "کوتاه",
   });
   assert.equal(message.success, false);
@@ -40,7 +52,6 @@ test("contact schema rejects invalid phone", () => {
     name: "علی رضایی",
     email: "ali@example.com",
     phone: "123",
-    subject: "SUPPORT",
     message: "لطفاً درباره پشتیبانی پروژه راهنمایی کنید.",
   });
   assert.equal(parsed.success, false);

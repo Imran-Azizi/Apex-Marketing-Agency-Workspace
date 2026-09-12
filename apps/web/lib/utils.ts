@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from "clsx";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
@@ -110,9 +111,23 @@ export function formatPhoneDisplay(value: string | null | undefined): string {
   if (!value?.trim()) return "—";
 
   const raw = toEnglishDigits(value.trim());
-  if (raw.startsWith("+")) return raw;
-
   const digits = raw.replace(/\D/g, "");
+  const asE164 = raw.startsWith("+")
+    ? raw
+    : /^\d{8,15}$/.test(digits)
+      ? `+${digits}`
+      : raw.startsWith("0")
+        ? raw
+        : raw;
+
+  const parsed =
+    parsePhoneNumberFromString(asE164) ||
+    (/^07\d{8}$/.test(digits)
+      ? parsePhoneNumberFromString(digits, "AF")
+      : undefined);
+  if (parsed?.isValid()) return parsed.formatInternational();
+
+  if (raw.startsWith("+")) return raw;
   if (/^07\d{8}$/.test(digits)) {
     return `${digits.slice(0, 4)} ${digits.slice(4, 7)} ${digits.slice(7)}`;
   }

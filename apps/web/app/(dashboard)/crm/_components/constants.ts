@@ -2,13 +2,16 @@ export const LEAD_SOURCE_LABELS: Record<string, string> = {
   INSTAGRAM: "اینستاگرام",
   FACEBOOK: "فیسبوک",
   WHATSAPP: "واتساپ",
+  WHATSAPP_WEBSITE: "واتساپ / وب‌سایت عمومی",
   TELEGRAM: "تلگرام",
   WEBSITE: "وب‌سایت",
+  WEBSITE_CONTACT: "فرم تماس وب‌سایت",
   GOOGLE_SEARCH: "جستجوی گوگل",
   REFERRAL: "معرفی",
   WALK_IN: "مراجعه حضوری",
   PHONE_CALL: "تماس تلفنی",
   ADVERTISEMENT: "تبلیغات",
+  MANUAL: "ورود دستی",
   OTHER: "سایر",
 };
 
@@ -22,6 +25,10 @@ export function formatLeadSource(source: string | null | undefined): string {
     return detail ? `سایر: ${detail}` : LEAD_SOURCE_LABELS.OTHER;
   }
   return LEAD_SOURCE_LABELS[source] || source;
+}
+
+export function isWhatsAppLeadSource(source: string | null | undefined): boolean {
+  return source === "WHATSAPP" || source === "WHATSAPP_WEBSITE";
 }
 
 /** Parse stored source into form fields */

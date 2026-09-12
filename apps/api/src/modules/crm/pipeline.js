@@ -289,22 +289,13 @@ export function canTransferToManagement(customer) {
   return !TRANSFER_BLOCKED_STAGES.has(canonicalizeStage(customer?.pipelineStage));
 }
 
+/**
+ * Active on مدیریت مشتریان: transferred (convertedAt) and not delivered.
+ * Kept separate from OUR_CUSTOMERS category (verified-payment badge).
+ */
 export function isActiveInManagement(customer) {
-  if (!customer) return false;
-  const hasVerifiedPayment =
-    Boolean(customer.hasVerifiedPayment) ||
-    (Array.isArray(customer.payments) &&
-      customer.payments.some(
-        (p) => String(p?.verification || '').toUpperCase() === 'VERIFIED',
-      ));
-  return (
-    deriveCategory({
-      pipelineStage: customer.pipelineStage,
-      hasVerifiedPayment,
-      hasProject: customer.hasProject,
-      hasPayment: customer.hasPayment,
-    }) === 'OUR_CUSTOMERS'
-  );
+  if (!customer?.convertedAt) return false;
+  return !MANAGEMENT_INACTIVE_STAGE_SET.has(canonicalizeStage(customer.pipelineStage));
 }
 
 export function isManagerRole(roleCode) {
@@ -551,6 +542,7 @@ export function getAllowedActions(customer, auth = {}, extras = {}) {
   const perms = new Set(auth?.permissions || []);
   const canEdit = manager || perms.has('crm.edit');
   const canCreate = manager || perms.has('crm.create');
+  const canDelete = manager || perms.has('crm.delete');
   const canInvite = manager || perms.has('crm.invite');
   const canFinance = manager || perms.has('finance.create') || perms.has('crm.opportunity');
   const canViewFinance = manager || perms.has('finance.view') || perms.has('crm.view');
@@ -563,6 +555,7 @@ export function getAllowedActions(customer, auth = {}, extras = {}) {
   return {
     view: true,
     edit: canEdit && !closed,
+    delete: canDelete,
     recordCustomerInfo: canEdit && !closed,
     addNote: canEdit,
     addInteraction: canEdit && !closed,

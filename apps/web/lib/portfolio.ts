@@ -34,7 +34,7 @@ export async function fetchPublicPortfolioDetail(
   }
   const res = await fetch(
     `${base}/public/portfolio/${encodeURIComponent(decoded)}`,
-    { next: { revalidate: 60 } },
+    { next: { revalidate: 60, tags: ["public-portfolio"] } },
   );
   if (res.status === 404) return null;
   if (!res.ok) {
@@ -79,6 +79,8 @@ export type PublicPortfolioItem = {
   video: {
     mimeType: string;
     streamPath: string;
+    /** Direct Bunny CDN URL when the object is under a public prefix. */
+    playbackUrl?: string | null;
   };
 };
 

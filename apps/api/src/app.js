@@ -41,6 +41,7 @@ import { storage } from "./services/storage.js";
 import {
   isCleanFinalStorageKey,
   isPublicStorageKey,
+  stripStoragePrefix,
 } from "./services/storage/media-manager.js";
 import { assertRawStorageAccess } from "./modules/files/rawAccess.js";
 
@@ -107,7 +108,18 @@ export function createApp() {
     });
   });
 
-  app.use(express.json({ limit: SECURITY.request.jsonLimit }));
+  app.use(
+    express.json({
+      limit: SECURITY.request.jsonLimit,
+      verify: (req, _res, buf) => {
+        // Meta WhatsApp signature verification needs the raw body bytes.
+        const path = String(req.originalUrl || req.url || "");
+        if (path.includes("/webhooks/whatsapp")) {
+          req.rawBody = Buffer.from(buf);
+        }
+      },
+    }),
+  );
   app.use(
     express.urlencoded({
       extended: true,
@@ -184,7 +196,18 @@ export function createApp() {
         }
       })();
 
-      if (url && !selfFiles && isPublicStorageKey(decoded)) {
+      const unprefixed = stripStoragePrefix(decoded);
+      const isStaffAvatarKey =
+        unprefixed.startsWith("users/") ||
+        unprefixed.startsWith("profile-images/");
+
+      // Public marketing + staff avatars: redirect to CDN after ACL (avoids
+      // cross-origin cookie issues on <img src="/files/...">).
+      if (
+        url &&
+        !selfFiles &&
+        (isPublicStorageKey(decoded) || isStaffAvatarKey)
+      ) {
         res.setHeader("Cache-Control", "private, max-age=300");
         res.redirect(302, url);
         return;

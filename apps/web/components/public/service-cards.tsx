@@ -66,6 +66,7 @@ export function ServiceCard({
         "group flex h-full flex-col overflow-hidden rounded-3xl border border-border/70 bg-card shadow-sm",
         "transition-all duration-300 hover:-translate-y-1 hover:border-brand/35 hover:shadow-lg hover:shadow-brand/5",
         "animate-public-fade",
+        "motion-reduce:animate-none",
       )}
       style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
     >

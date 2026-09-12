@@ -3,6 +3,7 @@ import { prisma } from "../../db/prisma.js";
 import { AppError } from "../../utils/response.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { storage } from "../../services/storage.js";
+import { afterPublicServicesMutation } from "./public-invalidate.js";
 
 export const createServiceSchema = z.object({
   name: z.string().trim().min(2, "عنوان خدمت الزامی است").max(200),
@@ -152,10 +153,33 @@ export const servicesService = {
     const rows = await prisma.service.findMany({
       where: { isPublished: true, deletedAt: null },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        imageKey: true,
+        startingPrice: true,
+        isPublished: true,
+        sortOrder: true,
+        ctaLabel: true,
+        ctaHref: true,
+      },
     });
     return rows.map((row) => {
-      const { revisionCount: _revisionCount, ...item } = serializeService(row);
-      return item;
+      const item = serializeService(row);
+      return {
+        id: item.id,
+        name: item.name,
+        title: item.title,
+        slug: item.slug,
+        description: item.description,
+        imageUrl: item.imageUrl,
+        startingPrice: item.startingPrice,
+        sortOrder: item.sortOrder,
+        ctaLabel: item.ctaLabel,
+        ctaHref: item.ctaHref,
+      };
     });
   },
 
@@ -202,6 +226,7 @@ export const servicesService = {
       req,
     });
 
+    await afterPublicServicesMutation();
     return serializeService(row);
   },
 
@@ -216,6 +241,21 @@ export const servicesService = {
       data.slug != null
         ? await uniqueSlug(data.slug || data.name || existing.name, id)
         : undefined;
+
+    if (
+      data.imageKey !== undefined &&
+      data.imageKey &&
+      data.imageKey !== existing.imageKey
+    ) {
+      await storage.tryDeleteStoredObject(existing.imageKey, {
+        logTag: "services",
+      });
+    } else if (data.imageKey === null && existing.imageKey) {
+      await storage.deleteStoredObject(existing.imageKey, {
+        required: true,
+        logTag: "services",
+      });
+    }
 
     const row = await prisma.service.update({
       where: { id },
@@ -253,6 +293,7 @@ export const servicesService = {
       req,
     });
 
+    await afterPublicServicesMutation();
     return serializeService(row);
   },
 
@@ -288,6 +329,7 @@ export const servicesService = {
       req,
     });
 
+    await afterPublicServicesMutation();
     return this.list({ pageSize: 100 });
   },
 
@@ -296,6 +338,11 @@ export const servicesService = {
       where: { id, deletedAt: null },
     });
     if (!existing) throw new AppError("خدمت یافت نشد", 404, "NOT_FOUND");
+
+    await storage.deleteStoredObject(existing.imageKey, {
+      required: true,
+      logTag: "services",
+    });
 
     await prisma.service.update({
       where: { id },
@@ -311,6 +358,7 @@ export const servicesService = {
       req,
     });
 
+    await afterPublicServicesMutation();
     return { id, deleted: true };
   },
 };

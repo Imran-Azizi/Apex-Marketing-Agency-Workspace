@@ -15,17 +15,16 @@ import {
 import { apiPost, apiPatch, ApiError } from "@/lib/api";
 import {
   uploadFileWithProgress,
-  filePreviewUrl,
   formatFileSize,
 } from "@/lib/upload";
 import { UPLOAD_PURPOSE } from "@/lib/media-manager";
 import { UploadProgress } from "@/components/loading/upload-progress";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -159,6 +158,8 @@ export function EmployeeFormDialog({
   const [cvUploading, setCvUploading] = useState(false);
   const [cvUploadPct, setCvUploadPct] = useState(0);
   const [cvUploadName, setCvUploadName] = useState("");
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
 
   const {
     register,
@@ -191,6 +192,11 @@ export function EmployeeFormDialog({
 
   useEffect(() => {
     if (!open) return;
+    setPendingImageFile(null);
+    setLocalPreviewUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return null;
+    });
     reset(
       employee
         ? {
@@ -228,6 +234,14 @@ export function EmployeeFormDialog({
     );
   }, [open, employee, reset]);
 
+  useEffect(() => {
+    return () => {
+      if (localPreviewUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(localPreviewUrl);
+      }
+    };
+  }, [localPreviewUrl]);
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["employees"] });
     if (employee) {
@@ -236,7 +250,7 @@ export function EmployeeFormDialog({
   };
 
   const mutation = useMutation({
-    mutationFn: (values: FormValues) => {
+    mutationFn: async (values: FormValues) => {
       const cvPayload = {
         cvStorageKey: values.cvStorageKey || null,
         cvFileName: values.cvFileName || null,
@@ -253,12 +267,40 @@ export function EmployeeFormDialog({
           ...cvPayload,
         });
       }
-      return apiPost("/employees", {
+
+      // Create first, then upload profile under the new user id (correct Bunny path).
+      const created = await apiPost<Employee>("/employees", {
         ...values,
         phone: values.phone || null,
-        profileImage: values.profileImage || null,
+        profileImage: null,
         ...cvPayload,
       });
+
+      if (pendingImageFile && created?.id) {
+        setUploading(true);
+        setUploadPct(0);
+        setUploadName(pendingImageFile.name);
+        try {
+          const uploaded = await uploadFileWithProgress(
+            pendingImageFile,
+            {
+              purpose: UPLOAD_PURPOSE.EMPLOYEE_PROFILE,
+              userId: created.id,
+            },
+            (percent) => setUploadPct(percent),
+          );
+          setUploadPct(100);
+          await apiPatch(`/employees/${created.id}`, {
+            profileImage: uploaded.key,
+          });
+        } finally {
+          setUploading(false);
+          setUploadPct(0);
+          setUploadName("");
+        }
+      }
+
+      return created;
     },
     onSuccess: () => {
       toast.success(
@@ -278,6 +320,14 @@ export function EmployeeFormDialog({
     },
   });
 
+  const clearLocalPreview = () => {
+    setPendingImageFile(null);
+    setLocalPreviewUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
   const onPickImage = async (file: File | undefined) => {
     if (!file) return;
     const allowed = new Set([
@@ -294,6 +344,21 @@ export function EmployeeFormDialog({
       toast.error("حجم تصویر نباید بیشتر از ۵ مگابایت باشد");
       return;
     }
+
+    const blobUrl = URL.createObjectURL(file);
+    setLocalPreviewUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return blobUrl;
+    });
+
+    // Create flow: keep file local until employee id exists.
+    if (!isEdit || !employee?.id) {
+      setPendingImageFile(file);
+      setValue("profileImage", "__pending__", { shouldDirty: true });
+      toast.success("پیش‌نمایش تصویر آماده است — با ذخیره کارمند آپلود می‌شود");
+      return;
+    }
+
     try {
       setUploading(true);
       setUploadPct(0);
@@ -302,14 +367,16 @@ export function EmployeeFormDialog({
         file,
         {
           purpose: UPLOAD_PURPOSE.EMPLOYEE_PROFILE,
-          userId: employee?.id,
+          userId: employee.id,
         },
         (percent) => setUploadPct(percent),
       );
       setValue("profileImage", uploaded.key, { shouldDirty: true });
+      setPendingImageFile(null);
       setUploadPct(100);
       toast.success("تصویر پروفایل آپلود شد");
     } catch (err) {
+      clearLocalPreview();
       toast.error(
         err instanceof Error ? err.message : "آپلود تصویر ناموفق بود",
       );
@@ -374,13 +441,9 @@ export function EmployeeFormDialog({
   };
 
   const fullNameValue = watch("fullName");
-  const initials = (fullNameValue || "?")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0])
-    .join("");
-
+  const hasProfileImage =
+    Boolean(localPreviewUrl) ||
+    Boolean(profileImage && profileImage !== "__pending__");
   const anyUploading = uploading || cvUploading;
 
   return (
@@ -413,18 +476,18 @@ export function EmployeeFormDialog({
               <div className="grid gap-4 lg:grid-cols-[11.5rem_minmax(0,1fr)] lg:items-start">
                 <div className="flex flex-col items-center gap-3 rounded-2xl border border-border/60 bg-muted/15 p-4 text-center">
                   <div className="relative">
-                    <Avatar className="h-24 w-24 border-2 border-background shadow-md ring-1 ring-border/50">
-                      {profileImage ? (
-                        <AvatarImage
-                          src={filePreviewUrl(profileImage) || undefined}
-                          alt=""
-                          className="object-cover"
-                        />
-                      ) : null}
-                      <AvatarFallback className="bg-brand/10 text-xl font-semibold text-brand">
-                        {initials || "?"}
-                      </AvatarFallback>
-                    </Avatar>
+                    <UserAvatar
+                      name={fullNameValue || "?"}
+                      profileImage={
+                        profileImage && profileImage !== "__pending__"
+                          ? profileImage
+                          : null
+                      }
+                      profileImageUrl={employee?.profileImageUrl}
+                      previewUrl={localPreviewUrl}
+                      className="h-24 w-24 border-2 border-background shadow-md ring-1 ring-border/50"
+                      fallbackClassName="bg-brand/10 text-xl font-semibold text-brand"
+                    />
                     <button
                       type="button"
                       disabled={uploading}
@@ -465,18 +528,19 @@ export function EmployeeFormDialog({
                       onClick={() => fileRef.current?.click()}
                     >
                       <Camera className="h-3.5 w-3.5" />
-                      {profileImage ? "تغییر" : "انتخاب"}
+                      {hasProfileImage ? "تغییر" : "انتخاب"}
                     </Button>
-                    {profileImage ? (
+                    {hasProfileImage ? (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         className="h-8 rounded-full px-3 text-xs text-muted-foreground hover:text-destructive"
                         disabled={uploading}
-                        onClick={() =>
-                          setValue("profileImage", null, { shouldDirty: true })
-                        }
+                        onClick={() => {
+                          clearLocalPreview();
+                          setValue("profileImage", null, { shouldDirty: true });
+                        }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         حذف

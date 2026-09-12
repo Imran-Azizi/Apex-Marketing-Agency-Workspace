@@ -3,6 +3,7 @@ import { prisma } from "../../db/prisma.js";
 import { AppError } from "../../utils/response.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { storage } from "../../services/storage.js";
+import { afterPublicCustomersMutation } from "./public-invalidate.js";
 
 const DESCRIPTION_MAX = 280;
 
@@ -54,11 +55,7 @@ function imageUrlFor(key) {
 
 async function tryDeleteMedia(key) {
   if (!key) return;
-  try {
-    await storage.deleteObject(key);
-  } catch (err) {
-    console.warn("[customers] media cleanup failed:", key, err?.message || err);
-  }
+  await storage.tryDeleteStoredObject(key, { logTag: "customers" });
 }
 
 export function serializeCustomer(row, { publicView = false } = {}) {
@@ -139,6 +136,14 @@ export const customersService = {
     const rows = await prisma.showcaseCustomer.findMany({
       where: { isPublished: true, deletedAt: null },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        companyName: true,
+        description: true,
+        imageKey: true,
+        sortOrder: true,
+      },
     });
     return rows.map((row) => serializeCustomer(row, { publicView: true }));
   },
@@ -189,6 +194,7 @@ export const customersService = {
       req,
     });
 
+    await afterPublicCustomersMutation();
     return serializeCustomer(row);
   },
 
@@ -240,6 +246,7 @@ export const customersService = {
       req,
     });
 
+    await afterPublicCustomersMutation();
     return serializeCustomer(row);
   },
 
@@ -275,6 +282,7 @@ export const customersService = {
       req,
     });
 
+    await afterPublicCustomersMutation();
     return this.list({ pageSize: 100 });
   },
 
@@ -284,12 +292,15 @@ export const customersService = {
     });
     if (!existing) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
 
+    await storage.deleteStoredObject(existing.imageKey, {
+      required: true,
+      logTag: "customers",
+    });
+
     await prisma.showcaseCustomer.update({
       where: { id },
       data: { deletedAt: new Date(), isPublished: false },
     });
-
-    await tryDeleteMedia(existing.imageKey);
 
     await writeAudit({
       userId: auth?.userId,
@@ -304,6 +315,7 @@ export const customersService = {
       req,
     });
 
+    await afterPublicCustomersMutation();
     return { id, deleted: true };
   },
 };

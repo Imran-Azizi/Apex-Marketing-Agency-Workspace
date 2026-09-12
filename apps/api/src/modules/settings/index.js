@@ -6,6 +6,12 @@ import { requireCsrf } from '../../middleware/csrf.js';
 import { validate } from '../../middleware/validate.js';
 import { ok, created } from '../../utils/response.js';
 import { prisma } from '../../db/prisma.js';
+import { afterPublicServicesMutation } from '../services/public-invalidate.js';
+import {
+  isPublicCopyKey,
+  normalizePublicCopyInput,
+  afterPublicCopyMutation,
+} from './public-copy.js';
 
 const router = Router();
 router.use(requireAuth, requireInternal);
@@ -46,7 +52,7 @@ router.post(
   validate(createServiceSchema),
   async (req, res, next) => {
     try {
-      created(res, await prisma.service.create({
+      const row = await prisma.service.create({
         data: {
           name: req.body.name,
           slug: req.body.slug,
@@ -61,7 +67,9 @@ router.post(
           ctaLabel: req.body.ctaLabel || null,
           ctaHref: req.body.ctaHref || null,
         },
-      }));
+      });
+      await afterPublicServicesMutation();
+      created(res, row);
     } catch (e) { next(e); }
   },
 );
@@ -88,11 +96,17 @@ router.put(
   async (req, res, next) => {
     try {
       const key = settingKeySchema.parse(req.params.key);
+      const value = isPublicCopyKey(key)
+        ? normalizePublicCopyInput(req.body.value)
+        : req.body.value;
       const setting = await prisma.setting.upsert({
         where: { key },
-        create: { key, value: req.body.value },
-        update: { value: req.body.value },
+        create: { key, value },
+        update: { value },
       });
+      if (isPublicCopyKey(key)) {
+        await afterPublicCopyMutation();
+      }
       ok(res, setting);
     } catch (e) {
       next(e);

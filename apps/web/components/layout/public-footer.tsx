@@ -1,17 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
 import { Mail, MessageCircle, Phone } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { PUBLIC_NAV_ITEMS } from "@/components/public/use-active-section";
 import { usePublicSectionNav } from "@/components/public/use-public-nav";
-import { apiGet } from "@/lib/api";
-import {
-  COMPANY_INTRO_DESCRIPTION,
-  COMPANY_INTRO_TITLE,
-} from "@/lib/company";
+import { COMPANY_INTRO_TITLE } from "@/lib/company";
 import {
   configuredContactChannels,
   CONTACT_HOURS_TEXT,
@@ -64,32 +59,20 @@ function ChannelIconButton({ channel }: { channel: ContactChannel }) {
 export function PublicFooter({
   initialServices,
   initialContact,
+  companyDescription,
 }: {
   initialServices?: PublicService[] | null;
   initialContact?: PublicContactInfo | null;
+  companyDescription?: string | null;
 }) {
   const year = new Date().getFullYear();
   const { goToSection } = usePublicSectionNav();
-
-  const { data: services, isPending: servicesPending } = useQuery({
-    queryKey: ["public-services"],
-    queryFn: () => apiGet<PublicService[]>("/public/services"),
-    staleTime: 10 * 60_000,
-    initialData: initialServices ?? undefined,
-    refetchOnWindowFocus: false,
-  });
-
-  const { data: contact, isPending: contactPending } = useQuery({
-    queryKey: ["public-contact-info"],
-    queryFn: () => apiGet<PublicContactInfo>("/public/contact-info"),
-    staleTime: 10 * 60_000,
-    initialData: initialContact ?? undefined,
-    refetchOnWindowFocus: false,
-  });
-
-  const publishedServices = (services || []).slice(0, SERVICE_PREVIEW_LIMIT);
-  const hasMoreServices = (services?.length || 0) > SERVICE_PREVIEW_LIMIT;
+  const services = initialServices || [];
+  const contact = initialContact || undefined;
+  const publishedServices = services.slice(0, SERVICE_PREVIEW_LIMIT);
+  const hasMoreServices = services.length > SERVICE_PREVIEW_LIMIT;
   const channels = configuredContactChannels(contact);
+  const aboutText = String(companyDescription || "").trim();
 
   return (
     <footer
@@ -111,9 +94,11 @@ export function PublicFooter({
             <p className="mt-4 text-sm font-semibold tracking-tight text-foreground">
               {COMPANY_INTRO_TITLE}
             </p>
-            <p className="mt-3 text-sm leading-8 text-muted-foreground">
-              {COMPANY_INTRO_DESCRIPTION}
-            </p>
+            {aboutText ? (
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-8 text-muted-foreground">
+                {aboutText}
+              </p>
+            ) : null}
           </div>
 
           <div className="grid flex-1 gap-10 sm:grid-cols-2 lg:grid-cols-3">
@@ -136,16 +121,7 @@ export function PublicFooter({
 
             <nav aria-label="خدمات">
               <FooterHeading>خدمات</FooterHeading>
-              {servicesPending ? (
-                <ul className="space-y-2" aria-hidden>
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <li
-                      key={index}
-                      className="h-5 w-28 max-w-full animate-pulse rounded-md bg-muted"
-                    />
-                  ))}
-                </ul>
-              ) : publishedServices.length > 0 ? (
+              {publishedServices.length > 0 ? (
                 <>
                   <ul className="space-y-1">
                     {publishedServices.map((service) => (
@@ -183,16 +159,7 @@ export function PublicFooter({
 
             <div>
               <FooterHeading>تماس با ما</FooterHeading>
-              {contactPending ? (
-                <ul className="space-y-3" aria-hidden>
-                  {Array.from({ length: 2 }).map((_, index) => (
-                    <li key={index} className="flex items-center gap-3">
-                      <span className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-muted" />
-                      <span className="h-8 w-32 max-w-full animate-pulse rounded-md bg-muted" />
-                    </li>
-                  ))}
-                </ul>
-              ) : channels.length > 0 ? (
+              {channels.length > 0 ? (
                 <ul className="space-y-3">
                   {channels.map((channel) => {
                     const Icon = CHANNEL_ICONS[channel.id];

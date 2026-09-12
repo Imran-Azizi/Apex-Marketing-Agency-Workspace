@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { prisma } from "../../db/prisma.js";
 import { AppError } from "../../utils/response.js";
+import { hasAnyPermission } from "../../services/permissions/effective.js";
+import { storage } from "../../services/storage.js";
 import { APPROVED_PAYMENT_VERIFICATIONS } from "../crm/paymentFinance.js";
 import { formatPaymentMethod } from "../crm/paymentMethods.js";
 import {
@@ -660,11 +662,25 @@ export const financeService = {
     return serializeExpense(row);
   },
 
-  async deleteExpense(id) {
+  async deleteExpense(id, auth) {
+    if (!hasAnyPermission(auth?.permissions, ["finance.delete"], auth?.roleCode)) {
+      throw new AppError(
+        "شما اجازه دسترسی به این منبع را ندارید",
+        403,
+        "FORBIDDEN",
+      );
+    }
+
     const existing = await prisma.expense.findUnique({ where: { id } });
     if (!existing || existing.category !== "COMPANY_GENERAL") {
       throw new AppError("مصرف یافت نشد", 404, "NOT_FOUND");
     }
+
+    await storage.deleteStoredObject(existing.receiptKey, {
+      required: true,
+      logTag: "finance-expense",
+    });
+
     await prisma.expense.delete({ where: { id } });
     return { id, deleted: true };
   },

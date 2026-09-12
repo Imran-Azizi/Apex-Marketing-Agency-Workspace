@@ -139,7 +139,7 @@ export function HeroSlideUploader({
               تصویر را بکشید و رها کنید یا انتخاب کنید
             </span>
             <span className="text-xs text-muted-foreground">
-              JPG، PNG، WEBP — نسبت پیشنهادی ۱۶:۹ — حداکثر{" "}
+              JPG، PNG، WEBP — ۱۹۲۰×۱۰۸۰ (۱۶:۹) — حداکثر{" "}
               {formatFileSize(MAX_IMAGE_BYTES)}
             </span>
           </button>

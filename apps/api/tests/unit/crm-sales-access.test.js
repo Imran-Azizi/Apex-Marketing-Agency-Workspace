@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AppError } from '../../src/utils/response.js';
 import {
   assertSalesCustomerAccess,
   assertSalesCustomerListOwnerFilter,
@@ -11,31 +10,25 @@ test('salesCustomerListFilter is null for managers', () => {
   assert.equal(salesCustomerListFilter({ roleCode: 'MANAGER', userId: 'm1' }), null);
 });
 
-test('salesCustomerListFilter scopes to own and unassigned leads', () => {
-  assert.deepEqual(salesCustomerListFilter({ roleCode: 'SALES', userId: 's1' }), {
-    OR: [{ salesOwnerId: 's1' }, { salesOwnerId: null }],
-  });
+test('salesCustomerListFilter does not restrict Sales users', () => {
+  assert.equal(salesCustomerListFilter({ roleCode: 'SALES', userId: 's1' }), null);
 });
 
-test('assertSalesCustomerListOwnerFilter blocks other reps', () => {
-  assert.throws(
-    () =>
-      assertSalesCustomerListOwnerFilter('other-rep', {
-        roleCode: 'SALES',
-        userId: 's1',
-      }),
-    (err) => err instanceof AppError && err.code === 'FORBIDDEN',
+test('assertSalesCustomerListOwnerFilter allows any owner for Sales', () => {
+  assert.doesNotThrow(() =>
+    assertSalesCustomerListOwnerFilter('other-rep', {
+      roleCode: 'SALES',
+      userId: 's1',
+    }),
   );
 });
 
-test('assertSalesCustomerAccess blocks other reps customers', () => {
-  assert.throws(
-    () =>
-      assertSalesCustomerAccess({ salesOwnerId: 'other-rep' }, {
-        roleCode: 'SALES',
-        userId: 's1',
-      }),
-    (err) => err instanceof AppError && err.code === 'FORBIDDEN',
+test('assertSalesCustomerAccess allows other reps customers for Sales', () => {
+  assert.doesNotThrow(() =>
+    assertSalesCustomerAccess({ salesOwnerId: 'other-rep' }, {
+      roleCode: 'SALES',
+      userId: 's1',
+    }),
   );
 });
 

@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Sheet,
   SheetContent,
@@ -13,18 +12,19 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { getNavItems, getRoleLabel } from "@/lib/rbac";
-import { filePreviewUrl } from "@/lib/upload";
 import { Badge } from "@/components/ui/badge";
 import { NotificationCenter } from "@/components/notifications/notification-center";
 import { MessageInboxButton } from "@/components/contact/message-inbox-button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Logo } from "@/components/brand/logo";
 import { DashboardNav } from "@/components/layout/dashboard-nav";
+import { UserAvatar } from "@/components/shared/user-avatar";
 
 interface DashboardTopbarProps {
   userName?: string;
   role?: string | null;
   profileImage?: string | null;
+  profileImageUrl?: string | null;
   permissions?: string[] | null;
 }
 
@@ -32,22 +32,12 @@ export function DashboardTopbar({
   userName,
   role,
   profileImage,
+  profileImageUrl,
   permissions,
 }: DashboardTopbarProps) {
   const pathname = usePathname();
   const navItems = getNavItems(role, permissions);
-  const initials = userName
-    ?.split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2);
-  const imageUrl = profileImage ? filePreviewUrl(profileImage) : null;
-  const [imageFailed, setImageFailed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    setImageFailed(false);
-  }, [imageUrl]);
 
   // Close the mobile drawer after route changes (covers nested/dynamic links).
   useEffect(() => {
@@ -109,21 +99,14 @@ export function DashboardTopbar({
         <NotificationCenter />
         <MessageInboxButton />
         <div className="flex items-center gap-2">
-          <Avatar className="h-8 w-8 ring-1 ring-border/50">
-            {imageUrl && !imageFailed ? (
-              <AvatarImage
-                src={imageUrl}
-                alt={userName || "کاربر"}
-                className="object-cover"
-                onLoadingStatusChange={(status) => {
-                  if (status === "error") setImageFailed(true);
-                }}
-              />
-            ) : null}
-            <AvatarFallback className="bg-brand-muted text-xs text-brand">
-              {initials || "ک"}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatar
+            name={userName || "ک"}
+            profileImage={profileImage}
+            profileImageUrl={profileImageUrl}
+            className="h-8 w-8 ring-1 ring-border/50"
+            fallbackClassName="bg-brand-muted text-xs text-brand"
+            alt={userName || "کاربر"}
+          />
           {userName && (
             <span className="hidden text-sm font-medium sm:inline">
               {userName}

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { HeroSlideView } from "@/components/public/hero-slide";
 import { HeroControls } from "@/components/public/hero-controls";
-import { heroDurationMs, heroImageSrc, type HeroSlide } from "@/lib/hero";
+import { HERO_STAGE_CLASSNAME, heroDurationMs, type HeroSlide } from "@/lib/hero";
 import { cn } from "@/lib/utils";
 
 function usePrefersReducedMotion() {
@@ -18,6 +18,8 @@ function usePrefersReducedMotion() {
   return reduced;
 }
 
+export { HERO_STAGE_CLASSNAME };
+
 export function HeroSlideshow({
   slides,
   className,
@@ -29,9 +31,9 @@ export function HeroSlideshow({
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const [docHidden, setDocHidden] = useState(false);
-  const [progress, setProgress] = useState(0);
   const liveId = useId();
   const regionRef = useRef<HTMLElement>(null);
+  const remainingRef = useRef(0);
 
   const total = slides.length;
   const safeIndex = total ? index % total : 0;
@@ -43,7 +45,6 @@ export function HeroSlideshow({
     (next: number) => {
       if (!total) return;
       setIndex(((next % total) + total) % total);
-      setProgress(0);
     },
     [total],
   );
@@ -56,21 +57,18 @@ export function HeroSlideshow({
   }, [safeIndex, total]);
 
   useEffect(() => {
+    remainingRef.current = duration;
+  }, [duration, safeIndex]);
+
+  useEffect(() => {
     if (!autoplay) return;
     const started = performance.now();
-    let frame = 0;
-    const tick = (now: number) => {
-      const t = (now - started) / duration;
-      if (t >= 1) {
-        setProgress(1);
-        goNext();
-        return;
-      }
-      setProgress(t);
-      frame = requestAnimationFrame(tick);
+    const remain = remainingRef.current || duration;
+    const id = window.setTimeout(goNext, remain);
+    return () => {
+      window.clearTimeout(id);
+      remainingRef.current = Math.max(0, remain - (performance.now() - started));
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
   }, [autoplay, duration, safeIndex, goNext]);
 
   useEffect(() => {
@@ -106,7 +104,6 @@ export function HeroSlideshow({
 
   if (!current) return null;
 
-  const firstSrc = heroImageSrc(slides[0]);
   const nearby = new Set(
     [safeIndex, (safeIndex + 1) % total, (safeIndex - 1 + total) % total].filter(
       (i) => i >= 0,
@@ -125,14 +122,7 @@ export function HeroSlideshow({
         className,
       )}
     >
-      {firstSrc ? (
-        <link rel="preload" as="image" href={firstSrc} />
-      ) : null}
-
-      <div
-        className="relative min-h-[32rem] sm:min-h-[38rem] lg:min-h-[min(88vh,46rem)]"
-        aria-live="off"
-      >
+      <div className={HERO_STAGE_CLASSNAME} aria-live="off">
         {slides.map((slide, i) =>
           nearby.has(i) || i === 0 ? (
             <HeroSlideView
@@ -149,7 +139,9 @@ export function HeroSlideshow({
             <HeroControls
               index={safeIndex}
               total={total}
-              progress={reducedMotion || total < 2 ? 1 : progress}
+              durationMs={duration}
+              running={autoplay}
+              complete={reducedMotion || total < 2}
               paused={paused || reducedMotion}
               onPrev={goPrev}
               onNext={goNext}

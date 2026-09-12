@@ -58,6 +58,7 @@ import { InvoiceCreateDialog } from "./_components/invoice-create-dialog";
 import { CrmInvoicesDialog } from "./_components/crm-invoices-dialog";
 import {
   formatLeadSource,
+  isWhatsAppLeadSource,
   STAGE_LABELS,
   CATEGORY_LABELS,
   categoryBadgeVariant,
@@ -218,25 +219,49 @@ export default function CrmPage() {
         );
       }
       if (skipped) {
+        const first = result.skipped[0]?.reason;
         parts.push(
-          crmSalesText("transferSkipped", {
-            count: skipped.toLocaleString("fa-AF", { numberingSystem: "latn" }),
-          }),
+          first ||
+            crmSalesText("transferSkipped", {
+              count: skipped.toLocaleString("fa-AF", {
+                numberingSystem: "latn",
+              }),
+            }),
         );
       }
       if (failed) {
         const first = result.failed[0]?.message;
         parts.push(first || crmSalesText("transferFailed"));
       }
-      if (transferred || already) toast.success(parts.join(" "));
-      else toast.error(parts.join(" ") || crmSalesText("transferFailed"));
 
-      clearSelection();
-      setTransferOpen(false);
+      // Success only when a customer was newly transferred, or was already in
+      // management with no skips/failures. Otherwise show a clear error.
+      if (transferred > 0) {
+        toast.success(parts.join(" "));
+        clearSelection();
+        setTransferOpen(false);
+      } else if (already > 0 && skipped === 0 && failed === 0) {
+        toast.success(parts.join(" "));
+        clearSelection();
+        setTransferOpen(false);
+      } else {
+        toast.error(parts.join(" ") || crmSalesText("transferFailed"));
+      }
+
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["crm-customers"] }),
         queryClient.invalidateQueries({ queryKey: ["crm-dashboard"] }),
         queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+      ]);
+      await Promise.all([
+        queryClient.refetchQueries({
+          queryKey: ["crm-customers", "management"],
+          type: "all",
+        }),
+        queryClient.refetchQueries({
+          queryKey: ["crm-customers", "pipeline"],
+          type: "active",
+        }),
       ]);
     },
     onError: (err) => {
@@ -822,7 +847,20 @@ export default function CrmPage() {
                         )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
-                        {formatLeadSource(customer.source)}
+                        {customer.source ? (
+                          <Badge
+                            variant={
+                              isWhatsAppLeadSource(customer.source)
+                                ? "success"
+                                : "outline"
+                            }
+                            className="font-normal"
+                          >
+                            {formatLeadSource(customer.source)}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
                         {customer.salesOwner?.fullName || "—"}

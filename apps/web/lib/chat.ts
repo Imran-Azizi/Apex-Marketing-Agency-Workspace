@@ -21,6 +21,7 @@ export type ChatUser = {
   id: string;
   fullName: string;
   profileImage?: string | null;
+  profileImageUrl?: string | null;
   roleCode?: string | null;
   teamKind?: string | null;
   isOnline?: boolean;

@@ -8,6 +8,8 @@ import {
   serializePublicItem,
   uniqueSlug,
 } from "./service.js";
+import { afterPublicPortfolioMutation } from "./public-invalidate.js";
+import { preparePortfolioVideoForWeb } from "../../services/video/optimize-web-mp4.js";
 
 export const MIXED_SLUG = "mixed";
 export const MIXED_LABEL = "کتگوری مختلط";
@@ -124,10 +126,21 @@ async function uniqueCategorySlug(base, excludeId = null) {
   }
 }
 
+/**
+ * Item has a playable video: direct storageKey or linked project file.
+ * Use `gt: ""` (not `{ not: "" }`) — Prisma 6 rejects empty-string `not` filters.
+ */
 export const playableVideoWhere = {
   OR: [
-    { storageKey: { startsWith: "" } },
-    { videoFile: { is: { deletedAt: null } } },
+    { storageKey: { gt: "" } },
+    {
+      videoFile: {
+        is: {
+          deletedAt: null,
+          storageKey: { gt: "" },
+        },
+      },
+    },
   ],
 };
 
@@ -138,11 +151,11 @@ export const publicItemWhere = {
 };
 
 export const publicItemInclude = {
-  project: {
-    select: { service: { select: { name: true } } },
-  },
   videoFile: {
-    select: { id: true, mimeType: true, name: true, deletedAt: true },
+    select: {
+      mimeType: true,
+      storageKey: true,
+    },
   },
   categories: {
     where: { category: { deletedAt: null, isActive: true } },
@@ -214,7 +227,7 @@ export async function listPublicShowcase(query = {}) {
         name: MIXED_LABEL,
         kind: "mixed",
       },
-      items: rows.map((row) => serializePublicItem(row.item)),
+      items: rows.map((row) => serializePublicItem(row.item, { compact: true })),
       total: rows.length,
     };
   }
@@ -246,7 +259,7 @@ export async function listPublicShowcase(query = {}) {
       name: cat.name,
       kind: "category",
     },
-    items: rows.map((row) => serializePublicItem(row.item)),
+    items: rows.map((row) => serializePublicItem(row.item, { compact: true })),
     total: rows.length,
   };
 }
@@ -357,6 +370,7 @@ export async function createCategory(body, actor, req) {
     after: { name, slug },
     req,
   });
+  await afterPublicPortfolioMutation();
   return category;
 }
 
@@ -392,6 +406,7 @@ export async function updateCategory(id, body, actor, req) {
     },
     req,
   });
+  await afterPublicPortfolioMutation();
   return category;
 }
 
@@ -399,20 +414,46 @@ export async function createItem(body, actor, req) {
   const title = body.title.trim();
   const now = new Date();
   const status = body.status || "PUBLISHED";
-  const item = await prisma.portfolioItem.create({
-    data: {
-      title,
-      description: body.description || null,
-      successStory: body.successStory || null,
-      slug: await uniqueSlug(title),
-      storageKey: body.storageKey,
-      thumbnailKey: body.thumbnailKey || null,
-      status,
-      sortOrder: body.sortOrder ?? 0,
-      publishedAt: status === "PUBLISHED" ? now : null,
-      publishedById: status === "PUBLISHED" ? actor.userId : null,
-    },
-  });
+
+  const prepared = await preparePortfolioVideoForWeb(body.storageKey);
+
+  let item;
+  try {
+    item = await prisma.portfolioItem.create({
+      data: {
+        title,
+        description: body.description || null,
+        successStory: body.successStory || null,
+        slug: await uniqueSlug(title),
+        storageKey: prepared.storageKey,
+        thumbnailKey: body.thumbnailKey || null,
+        status,
+        sortOrder: body.sortOrder ?? 0,
+        publishedAt: status === "PUBLISHED" ? now : null,
+        publishedById: status === "PUBLISHED" ? actor.userId : null,
+      },
+    });
+  } catch (err) {
+    if (err?.code === "P2002" && err?.meta?.target?.includes?.("slug")) {
+      // Rare race: another write took the slug between check and insert.
+      item = await prisma.portfolioItem.create({
+        data: {
+          title,
+          description: body.description || null,
+          successStory: body.successStory || null,
+          slug: await uniqueSlug(`${title}-${Date.now().toString(36)}`),
+          storageKey: prepared.storageKey,
+          thumbnailKey: body.thumbnailKey || null,
+          status,
+          sortOrder: body.sortOrder ?? 0,
+          publishedAt: status === "PUBLISHED" ? now : null,
+          publishedById: status === "PUBLISHED" ? actor.userId : null,
+        },
+      });
+    } else {
+      throw err;
+    }
+  }
   await syncItemCategories(item.id, body.categoryIds || []);
   const created = await loadAdminItem(item.id);
   await writeAudit({
@@ -423,11 +464,13 @@ export async function createItem(body, actor, req) {
     after: {
       title: created.title,
       status: created.status,
-      storageKey: body.storageKey,
+      storageKey: prepared.storageKey,
+      optimized: prepared.optimized,
       categoryIds: body.categoryIds || [],
     },
     req,
   });
+  await afterPublicPortfolioMutation({ slug: created.slug });
   return created;
 }
 
@@ -479,6 +522,7 @@ export async function setMixed(orderedIds, actor, req) {
     req,
   });
 
+  await afterPublicPortfolioMutation();
   return listMixedAdmin();
 }
 
@@ -524,6 +568,7 @@ export async function reorderPortfolio(body, actor, req) {
       after: { orderedIds },
       req,
     });
+    await afterPublicPortfolioMutation();
     return { ok: true, orderedIds };
   }
 
@@ -543,6 +588,7 @@ export async function reorderPortfolio(body, actor, req) {
     after: { orderedIds },
     req,
   });
+  await afterPublicPortfolioMutation();
   return { ok: true, orderedIds };
 }
 

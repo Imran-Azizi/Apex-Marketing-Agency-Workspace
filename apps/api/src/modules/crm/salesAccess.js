@@ -1,27 +1,19 @@
-import { AppError } from '../../utils/response.js';
+/**
+ * Sales CRM access helpers.
+ *
+ * Business rule: Sales users with CRM permissions may list and open all
+ * non-deleted CRM customers (same pool as managers for visibility).
+ * Write/transfer actions remain gated by crm.* permissions.
+ */
 
-/** Prisma filter: SALES users see their own leads plus unassigned pool. */
-export function salesCustomerListFilter(auth) {
-  if (String(auth?.roleCode || '').toUpperCase() !== 'SALES') return null;
-  return {
-    OR: [{ salesOwnerId: auth.userId }, { salesOwnerId: null }],
-  };
+export function salesCustomerListFilter(_auth) {
+  return null;
 }
 
-export function assertSalesCustomerListOwnerFilter(salesOwnerId, auth) {
-  if (String(auth?.roleCode || '').toUpperCase() !== 'SALES') return;
-  if (salesOwnerId && salesOwnerId !== auth.userId) {
-    throw new AppError(
-      'فقط سرنخ‌های اختصاص‌یافته به شما قابل مشاهده است',
-      403,
-      'FORBIDDEN',
-    );
-  }
+export function assertSalesCustomerListOwnerFilter(_salesOwnerId, _auth) {
+  // Sales may filter by any owner; no ownership restriction.
 }
 
-export function assertSalesCustomerAccess(customer, auth) {
-  if (String(auth?.roleCode || '').toUpperCase() !== 'SALES') return;
-  if (customer?.salesOwnerId && customer.salesOwnerId !== auth.userId) {
-    throw new AppError('دسترسی به این مشتری مجاز نیست', 403, 'FORBIDDEN');
-  }
+export function assertSalesCustomerAccess(_customer, _auth) {
+  // Sales may open any CRM customer they can list.
 }

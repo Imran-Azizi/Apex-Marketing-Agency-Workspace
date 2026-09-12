@@ -24,6 +24,7 @@ const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 const HEAD_TIMEOUT_MS = 30 * 1000;
 const UPLOAD_RETRY_ATTEMPTS = 4;
+const DELETE_RETRY_ATTEMPTS = 4;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -333,6 +334,55 @@ async function putObjectWithRetry(opts, { attempts = UPLOAD_RETRY_ATTEMPTS, file
   throw lastErr || new Error("Bunny upload failed");
 }
 
+async function deleteObjectOnce(storageKey) {
+  ensureConfigured();
+  const url = storageApiUrl(storageKey);
+  const { res } = await requestOnce(url, {
+    method: "DELETE",
+    headers: authHeaders(),
+    timeoutMs: HEAD_TIMEOUT_MS,
+  });
+  await readResponseBuffer(res, { maxBytes: 64 * 1024 });
+  if (
+    res.statusCode === 404 ||
+    res.statusCode === 200 ||
+    res.statusCode === 204
+  ) {
+    return;
+  }
+  if (res.statusCode >= 400) {
+    const err = new Error(`Bunny delete failed (${res.statusCode})`);
+    err.statusCode = res.statusCode;
+    throw err;
+  }
+}
+
+async function deleteObjectWithRetry(storageKey, { attempts = DELETE_RETRY_ATTEMPTS } = {}) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await deleteObjectOnce(storageKey);
+      return;
+    } catch (err) {
+      lastErr = err;
+      const status = Number(err?.statusCode || err?.status || 0);
+      // 404 is success (already deleted) — surface via wrap only if unexpected
+      if (status === 404) return;
+      const retryable =
+        isTransientNetworkError(err) || status === 429 || status >= 500;
+      console.warn(
+        `[bunny] delete attempt ${i + 1}/${attempts} failed:`,
+        sanitizeErrorText(err?.message || err),
+        `(key=${storageKey})`,
+        retryable ? "(retrying)" : "(not retrying)",
+      );
+      if (!retryable || i === attempts - 1) break;
+      await sleep(Math.min(8000, 1000 * 2 ** i));
+    }
+  }
+  throw lastErr || new Error("Bunny delete failed");
+}
+
 function parseContentRangeSize(contentRange, fallback) {
   const match = /\/(\d+)\s*$/.exec(String(contentRange || ""));
   if (match) return Number(match[1]);
@@ -582,26 +632,11 @@ export const bunnyDriver = {
 
   async deleteObject(storageKey) {
     ensureConfigured();
-    const url = storageApiUrl(storageKey);
     try {
-      const { res } = await requestOnce(url, {
-        method: "DELETE",
-        headers: authHeaders(),
-        timeoutMs: HEAD_TIMEOUT_MS,
-      });
-      await readResponseBuffer(res, { maxBytes: 64 * 1024 });
-      if (res.statusCode === 404 || res.statusCode === 200 || res.statusCode === 204) {
-        return;
-      }
-      if (res.statusCode >= 400) {
-        throw wrapBunnyError({
-          statusCode: res.statusCode,
-          message: `Bunny delete failed (${res.statusCode})`,
-        });
-      }
+      await deleteObjectWithRetry(storageKey);
     } catch (err) {
       if (err instanceof AppError) throw err;
-      throw wrapBunnyError(err);
+      throw wrapBunnyError(err, "Failed to delete Bunny asset");
     }
   },
 

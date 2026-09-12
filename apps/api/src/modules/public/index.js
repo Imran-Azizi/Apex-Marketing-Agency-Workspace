@@ -13,10 +13,15 @@ import {
   portfolioService,
   streamPortfolioVideo,
 } from '../portfolio/service.js';
-import { createTtlCache } from '../../utils/ttlCache.js';
+import {
+  publicOriginCache,
+  invalidatePublicPortfolioCache,
+  invalidatePublicServicesCache,
+  invalidatePublicCustomersCache,
+} from './cache.js';
+import whatsappWebhookRoutes from '../whatsapp-webhook/index.js';
 
 const router = Router();
-const originCache = createTtlCache();
 
 function cachePublic(seconds = 60) {
   return (_req, res, next) => {
@@ -25,15 +30,19 @@ function cachePublic(seconds = 60) {
   };
 }
 
+const PUBLIC_TTL_MS = 60_000;
+
 function remember(key, ttlMs, factory) {
-  return originCache.getOrSet(key, ttlMs, factory);
+  return publicOriginCache.getOrSet(key, ttlMs, factory);
 }
 
-router.get('/hero', cachePublic(30), async (req, res, next) => {
+export { invalidatePublicPortfolioCache, invalidatePublicServicesCache, invalidatePublicCustomersCache };
+
+router.get('/hero', cachePublic(60), async (req, res, next) => {
   try {
     ok(
       res,
-      await remember('hero', 30_000, async () => {
+      await remember('hero', PUBLIC_TTL_MS, async () => {
         const { heroService } = await import('../hero/service.js');
         return heroService.listPublic();
       }),
@@ -47,7 +56,7 @@ router.get('/services', cachePublic(60), async (req, res, next) => {
   try {
     ok(
       res,
-      await remember('services', 60_000, async () => {
+      await remember('services', PUBLIC_TTL_MS, async () => {
         const { servicesService } = await import('../services/service.js');
         return servicesService.listPublic();
       }),
@@ -55,11 +64,11 @@ router.get('/services', cachePublic(60), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.get('/customers', cachePublic(30), async (req, res, next) => {
+router.get('/customers', cachePublic(60), async (req, res, next) => {
   try {
     ok(
       res,
-      await remember('customers', 30_000, async () => {
+      await remember('customers', PUBLIC_TTL_MS, async () => {
         const { customersService } = await import('../customers/service.js');
         return customersService.listPublic();
       }),
@@ -69,11 +78,11 @@ router.get('/customers', cachePublic(30), async (req, res, next) => {
   }
 });
 
-router.get('/portfolio/categories', cachePublic(30), async (req, res, next) => {
+router.get('/portfolio/categories', cachePublic(60), async (req, res, next) => {
   try {
     ok(
       res,
-      await remember('portfolio-categories', 30_000, async () => {
+      await remember('portfolio-categories', PUBLIC_TTL_MS, async () => {
         const { listCategoriesPublic } = await import('../portfolio/showcase.js');
         return listCategoriesPublic();
       }),
@@ -83,12 +92,12 @@ router.get('/portfolio/categories', cachePublic(30), async (req, res, next) => {
   }
 });
 
-router.get('/portfolio', cachePublic(30), async (req, res, next) => {
+router.get('/portfolio', cachePublic(60), async (req, res, next) => {
   try {
     const category = String(req.query?.category || 'mixed');
     ok(
       res,
-      await remember(`portfolio:${category}`, 30_000, () =>
+      await remember(`portfolio:${category}`, PUBLIC_TTL_MS, () =>
         portfolioService.listPublic(req.query || {}),
       ),
     );
@@ -111,7 +120,7 @@ router.get('/portfolio/:slug', cachePublic(60), async (req, res, next) => {
   try {
     ok(
       res,
-      await remember(`portfolio-slug:${req.params.slug}`, 60_000, () =>
+      await remember(`portfolio-slug:${req.params.slug}`, PUBLIC_TTL_MS, () =>
         portfolioService.getPublicBySlug(req.params.slug),
       ),
     );
@@ -120,13 +129,27 @@ router.get('/portfolio/:slug', cachePublic(60), async (req, res, next) => {
   }
 });
 
-router.get('/contact-info', cachePublic(30), async (req, res, next) => {
+router.get('/contact-info', cachePublic(60), async (req, res, next) => {
   try {
     ok(
       res,
-      await remember('contact-info', 30_000, () =>
+      await remember('contact-info', PUBLIC_TTL_MS, () =>
         contactService.getPublicContactInfo(),
       ),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/site-copy', cachePublic(60), async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await remember('site-copy', PUBLIC_TTL_MS, async () => {
+        const { getPublicSiteCopy } = await import('../settings/public-copy.js');
+        return getPublicSiteCopy();
+      }),
     );
   } catch (e) {
     next(e);
@@ -152,10 +175,13 @@ router.get('/whatsapp-cta', cachePublic(60), async (req, res, next) => {
     const cta = await buildWhatsappCta({
       message: req.query.message,
       serviceId: req.query.serviceId,
+      fromPublicWebsite: true,
     });
     ok(res, cta);
   } catch (e) { next(e); }
 });
+
+router.use('/webhooks/whatsapp', whatsappWebhookRoutes);
 
 router.get('/formats', cachePublic(300), async (req, res, next) => {
   try {

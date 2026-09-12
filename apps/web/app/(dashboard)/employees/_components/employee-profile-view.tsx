@@ -22,10 +22,10 @@ import {
   formatPhoneDisplay,
   cn,
 } from "@/lib/utils";
-import { filePreviewUrl, uploadFileWithProgress } from "@/lib/upload";
+import { uploadFileWithProgress } from "@/lib/upload";
 import { UPLOAD_PURPOSE } from "@/lib/media-manager";
 import { UploadProgress } from "@/components/loading/upload-progress";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -55,13 +55,6 @@ const ALLOWED_IMAGE_TYPES = new Set([
 ]);
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2);
-  return `${parts[0][0]}${parts[parts.length - 1][0]}`;
-}
-
 interface EmployeeProfileViewProps {
   employee: Employee;
   currentUserId?: string | null;
@@ -82,15 +75,11 @@ export function EmployeeProfileView({
   const roleCode = employee.role.code as StaffRole;
   const roleLabel =
     ROLE_LABELS_FA[roleCode] || employee.role.name || employee.role.code;
-  const initials = getInitials(employee.fullName);
   const teamKindLabel = employee.teamProfile?.kind
     ? TEAM_KIND_LABELS[employee.teamProfile.kind] || employee.teamProfile.kind
     : null;
 
-  const storedImageUrl = employee.profileImage
-    ? filePreviewUrl(employee.profileImage)
-    : null;
-  const displayImageUrl = previewUrl || storedImageUrl;
+  const displayPreview = previewUrl;
 
   useEffect(() => {
     return () => {
@@ -209,18 +198,15 @@ export function EmployeeProfileView({
           <div className="-mt-14 flex flex-col gap-5 sm:-mt-16">
             <div className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:items-end">
               <div className="relative shrink-0">
-                <Avatar className="h-28 w-28 border-4 border-card shadow-lg shadow-brand/20 ring-1 ring-border/40 sm:h-32 sm:w-32">
-                  {displayImageUrl ? (
-                    <AvatarImage
-                      src={displayImageUrl}
-                      alt={employee.fullName}
-                      className="object-cover"
-                    />
-                  ) : null}
-                  <AvatarFallback className="bg-gradient-to-bl from-brand to-brand/75 text-3xl font-bold text-brand-foreground">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
+                <UserAvatar
+                  name={employee.fullName}
+                  profileImage={employee.profileImage}
+                  profileImageUrl={employee.profileImageUrl}
+                  previewUrl={displayPreview}
+                  className="h-28 w-28 border-4 border-card shadow-lg shadow-brand/20 ring-1 ring-border/40 sm:h-32 sm:w-32"
+                  fallbackClassName="bg-gradient-to-bl from-brand to-brand/75 text-3xl font-bold text-brand-foreground"
+                  alt={employee.fullName}
+                />
 
                 <button
                   type="button"

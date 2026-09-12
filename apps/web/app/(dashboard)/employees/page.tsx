@@ -5,15 +5,14 @@ import { useRouter } from "next/navigation";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
 import { formatDate, formatDateTime, formatPhoneDisplay } from "@/lib/utils";
-import { filePreviewUrl } from "@/lib/upload";
 import { PageHeader } from "@/components/shared/page-header";
 import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { EmptyState } from "@/components/shared/empty-state";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Select,
   SelectContent,
@@ -66,15 +65,6 @@ const ALL = "ALL";
 function formatOptionalDateTime(value: string | null) {
   if (!value) return "—";
   return formatDateTime(value);
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0])
-    .join("");
 }
 
 export default function EmployeesPage() {
@@ -477,20 +467,12 @@ export default function EmployeesPage() {
                         >
                           <TableCell>
                             <div className="flex min-w-[10rem] items-center gap-3">
-                              <Avatar className="h-9 w-9 shrink-0">
-                                {employee.profileImage ? (
-                                  <AvatarImage
-                                    src={
-                                      filePreviewUrl(employee.profileImage) ||
-                                      undefined
-                                    }
-                                    alt=""
-                                  />
-                                ) : null}
-                                <AvatarFallback>
-                                  {initials(employee.fullName)}
-                                </AvatarFallback>
-                              </Avatar>
+                              <UserAvatar
+                                name={employee.fullName}
+                                profileImage={employee.profileImage}
+                                profileImageUrl={employee.profileImageUrl}
+                                className="h-9 w-9"
+                              />
                               <div className="min-w-0">
                                 <div className="font-medium">
                                   {employee.fullName}

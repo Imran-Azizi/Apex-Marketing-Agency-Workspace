@@ -19,10 +19,9 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { resolveAssetSrc } from "@/lib/api";
 import { hasPermission, isFullAccessRole } from "@/lib/rbac";
 import { useMeQuery } from "@/lib/permissions";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,12 +58,6 @@ export type ChatWorkspaceProps = {
   onRequestClose?: () => void;
   className?: string;
 };
-
-function initials(name?: string | null) {
-  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "?";
-  return parts.slice(0, 2).map((p) => p[0]).join("");
-}
 
 function PresenceDot({ online }: { online?: boolean }) {
   return (
@@ -982,15 +975,12 @@ export function ChatWorkspace({
                   )}
                 >
                   <div className="relative shrink-0">
-                    <Avatar className="h-11 w-11">
-                      <AvatarImage
-                        src={
-                          resolveAssetSrc({ storageKey: c.peer?.profileImage }) ||
-                          undefined
-                        }
-                      />
-                      <AvatarFallback>{initials(c.title)}</AvatarFallback>
-                    </Avatar>
+                    <UserAvatar
+                      name={c.title}
+                      profileImage={c.peer?.profileImage}
+                      profileImageUrl={c.peer?.profileImageUrl}
+                      className="h-11 w-11"
+                    />
                     <PresenceDot online={online} />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -1048,15 +1038,12 @@ export function ChatWorkspace({
                 <ArrowRight className="h-4 w-4" />
               </Button>
               <div className="relative">
-                <Avatar className="h-10 w-10">
-                  <AvatarImage
-                    src={
-                      resolveAssetSrc({ storageKey: selected?.peer?.profileImage }) ||
-                      undefined
-                    }
-                  />
-                  <AvatarFallback>{initials(selected?.title)}</AvatarFallback>
-                </Avatar>
+                <UserAvatar
+                  name={selected?.title}
+                  profileImage={selected?.peer?.profileImage}
+                  profileImageUrl={selected?.peer?.profileImageUrl}
+                  className="h-10 w-10"
+                />
                 <PresenceDot online={peerOnline} />
               </div>
               <div className="min-w-0 flex-1">
@@ -1111,10 +1098,19 @@ export function ChatWorkspace({
                       ) : null}
                       <div
                         className={cn(
-                          "mb-1 flex",
+                          "mb-1 flex items-end gap-2",
                           mine ? "justify-start" : "justify-end",
                         )}
                       >
+                        {!mine ? (
+                          <UserAvatar
+                            name={m.sender?.fullName || selected?.title}
+                            profileImage={m.sender?.profileImage}
+                            profileImageUrl={m.sender?.profileImageUrl}
+                            className="mb-0.5 h-7 w-7"
+                            fallbackClassName="text-[10px]"
+                          />
+                        ) : null}
                         <div
                           className={cn(
                             "max-w-[min(85%,28rem)] rounded-2xl px-3 py-2 text-sm shadow-sm",
@@ -1295,12 +1291,12 @@ export function ChatWorkspace({
                   onClick={() => void openWithUser(u)}
                 >
                   <div className="relative">
-                    <Avatar className="h-9 w-9">
-                      <AvatarImage
-                        src={resolveAssetSrc({ storageKey: u.profileImage }) || undefined}
-                      />
-                      <AvatarFallback>{initials(u.fullName)}</AvatarFallback>
-                    </Avatar>
+                    <UserAvatar
+                      name={u.fullName}
+                      profileImage={u.profileImage}
+                      profileImageUrl={u.profileImageUrl}
+                      className="h-9 w-9"
+                    />
                     <PresenceDot online={u.isOnline} />
                   </div>
                   <div className="min-w-0">

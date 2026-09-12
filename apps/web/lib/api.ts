@@ -19,8 +19,19 @@ export const STORAGE_PUBLIC_BASE = (
   API_BASE.replace(/\/api\/v1\/?$/, "") + "/files"
 ).replace(/\/$/, "");
 
+/** Bunny account prefix (e.g. `apex`) when STORAGE_PUBLIC_BASE is a Pull Zone. */
+export const STORAGE_PATH_PREFIX = (
+  process.env.NEXT_PUBLIC_STORAGE_PATH_PREFIX || ""
+)
+  .trim()
+  .replace(/^\/+|\/+$/g, "");
+
 function isAbsoluteHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
+}
+
+function isFilesProxyBase(base: string): boolean {
+  return /\/files$/i.test(String(base || "").replace(/\/$/, ""));
 }
 
 /** Extract upload-time CDN URL from asset meta when present. */
@@ -51,7 +62,17 @@ export function storedAssetUrlFromMeta(meta: unknown): string | null {
 export function storagePublicUrl(storageKey: string): string | null {
   if (!storageKey || storageKey.startsWith("ref://")) return null;
   if (isAbsoluteHttpUrl(storageKey)) return storageKey.trim();
-  const encoded = storageKey
+  let key = String(storageKey).replace(/^\/+/, "");
+  // /files proxy adds the Bunny prefix server-side; CDN bases need it in the path.
+  if (
+    STORAGE_PATH_PREFIX &&
+    !isFilesProxyBase(STORAGE_PUBLIC_BASE) &&
+    key !== STORAGE_PATH_PREFIX &&
+    !key.startsWith(`${STORAGE_PATH_PREFIX}/`)
+  ) {
+    key = `${STORAGE_PATH_PREFIX}/${key}`;
+  }
+  const encoded = key
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/");

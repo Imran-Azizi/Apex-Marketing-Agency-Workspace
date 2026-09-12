@@ -16,7 +16,7 @@ import { PageHeader } from "@/components/shared/page-header";
 import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { EmptyState } from "@/components/shared/empty-state";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,7 +68,11 @@ const DATE_PRESET_OPTIONS = [
 interface AssignmentRecord {
   role: string;
   teamProfile?: { displayName?: string | null; userId?: string | null };
-  user?: { id?: string; fullName?: string | null };
+  user?: {
+    id?: string;
+    fullName?: string | null;
+    profileImage?: string | null;
+  };
 }
 
 interface Project {
@@ -101,7 +105,7 @@ interface ProjectFilterOptions {
     personName: string;
     companyName: string | null;
   }>;
-  editors: Array<{ id: string; fullName: string }>;
+  editors: Array<{ id: string; fullName: string; profileImage?: string | null }>;
 }
 
 type ActiveChip = {
@@ -112,18 +116,14 @@ type ActiveChip = {
 
 function getAssignedPerson(project: Project, role: "EDITOR" | "NARRATOR") {
   const assignment = project.assignments?.find((item) => item.role === role);
-  return (
-    assignment?.teamProfile?.displayName || assignment?.user?.fullName || null
-  );
-}
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("");
+  if (!assignment) return null;
+  const name =
+    assignment.teamProfile?.displayName || assignment.user?.fullName || null;
+  if (!name) return null;
+  return {
+    name,
+    profileImage: assignment.user?.profileImage || null,
+  };
 }
 
 function customerLabel(customer: {
@@ -790,50 +790,52 @@ export default function ProjectsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {getAssignedPerson(project, "EDITOR") ? (
-                        <div
-                          className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
-                          title={getAssignedPerson(project, "EDITOR") || ""}
-                        >
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback>
-                              {initials(
-                                getAssignedPerson(project, "EDITOR") || "?",
-                              )}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="truncate text-sm font-medium">
-                            {getAssignedPerson(project, "EDITOR")}
+                      {(() => {
+                        const editor = getAssignedPerson(project, "EDITOR");
+                        return editor ? (
+                          <div
+                            className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
+                            title={editor.name}
+                          >
+                            <UserAvatar
+                              name={editor.name}
+                              profileImage={editor.profileImage}
+                              className="h-8 w-8"
+                            />
+                            <span className="truncate text-sm font-medium">
+                              {editor.name}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
+                            تعیین نشده
                           </span>
-                        </div>
-                      ) : (
-                        <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
-                          تعیین نشده
-                        </span>
-                      )}
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
-                      {getAssignedPerson(project, "NARRATOR") ? (
-                        <div
-                          className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
-                          title={getAssignedPerson(project, "NARRATOR") || ""}
-                        >
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback>
-                              {initials(
-                                getAssignedPerson(project, "NARRATOR") || "?",
-                              )}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="truncate text-sm font-medium">
-                            {getAssignedPerson(project, "NARRATOR")}
+                      {(() => {
+                        const narrator = getAssignedPerson(project, "NARRATOR");
+                        return narrator ? (
+                          <div
+                            className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
+                            title={narrator.name}
+                          >
+                            <UserAvatar
+                              name={narrator.name}
+                              profileImage={narrator.profileImage}
+                              className="h-8 w-8"
+                            />
+                            <span className="truncate text-sm font-medium">
+                              {narrator.name}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
+                            تعیین نشده
                           </span>
-                        </div>
-                      ) : (
-                        <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
-                          تعیین نشده
-                        </span>
-                      )}
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       <Badge

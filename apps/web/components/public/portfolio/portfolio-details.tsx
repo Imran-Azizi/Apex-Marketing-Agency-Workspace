@@ -7,7 +7,7 @@ import { CalendarDays, Check, ChevronLeft, Share2, Tag } from "lucide-react";
 import { VideoPlayer } from "@/components/media/video-player";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { portfolioPublicStreamUrl } from "@/lib/media";
+import { portfolioPublicPlaybackUrl } from "@/lib/media";
 import type { PublicPortfolioDetail } from "@/lib/portfolio";
 import { cn, formatDate } from "@/lib/utils";
 import { PortfolioRelated } from "./portfolio-related";
@@ -18,6 +18,7 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
   const extraCategories = (item.categories || []).filter(
     (category) => category.id !== item.category?.id,
   );
+  const playbackSrc = portfolioPublicPlaybackUrl(item);
 
   async function share() {
     const url = window.location.href;
@@ -68,9 +69,10 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
 
         <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
           <VideoPlayer
-            src={portfolioPublicStreamUrl(item.id)}
+            src={playbackSrc}
             poster={item.thumbnailUrl || undefined}
             title={item.title}
+            type={item.video?.mimeType || "video/mp4"}
             className="rounded-none"
           />
         </div>

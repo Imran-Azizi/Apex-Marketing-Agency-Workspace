@@ -21,11 +21,16 @@ import {
 } from '../../services/notifications.js';
 
 export const UNNAMED_LEAD = 'سرنخ جدید';
+export const WHATSAPP_CUSTOMER_FALLBACK = 'مشتری واتساپ';
+
+function isWhatsAppSource(source) {
+  return source === 'WHATSAPP' || source === 'WHATSAPP_WEBSITE';
+}
 
 function fallbackName(personName, source) {
   const name = String(personName || '').trim();
   if (name) return name;
-  if (source === 'WHATSAPP') return 'سرنخ واتساپ';
+  if (isWhatsAppSource(source)) return WHATSAPP_CUSTOMER_FALLBACK;
   if (source === 'WEBSITE' || source === 'WEBSITE_CONTACT') return 'سرنخ وب‌سایت';
   return UNNAMED_LEAD;
 }
@@ -75,7 +80,7 @@ export async function ingestLead({
       const patch = {
         lastContactAt: now,
       };
-      if ((!existing.personName || existing.personName === UNNAMED_LEAD || existing.personName.startsWith('سرنخ '))
+      if ((!existing.personName || existing.personName === UNNAMED_LEAD || existing.personName === WHATSAPP_CUSTOMER_FALLBACK || existing.personName.startsWith('سرنخ '))
         && personName?.trim()) {
         patch.personName = personName.trim();
       }
@@ -104,7 +109,7 @@ export async function ingestLead({
           channel: source,
           ...(meta || {}),
         },
-        title: source === 'WHATSAPP' ? 'پیام واتساپ دریافت شد' : 'تعامل جدید',
+        title: isWhatsAppSource(source) ? 'پیام واتساپ دریافت شد' : 'تعامل جدید',
         notify: false,
         touchLastContact: true,
       });
@@ -154,12 +159,44 @@ export async function ingestLead({
       lostReason: null,
     };
 
-    const created = existing
-      ? await tx.crmCustomer.update({
-          where: { id: existing.id },
-          data: { ...baseData, deletedAt: null, convertedAt: null },
-        })
-      : await tx.crmCustomer.create({ data: baseData });
+    let created;
+    try {
+      created = existing
+        ? await tx.crmCustomer.update({
+            where: { id: existing.id },
+            data: { ...baseData, deletedAt: null, convertedAt: null },
+          })
+        : await tx.crmCustomer.create({ data: baseData });
+    } catch (err) {
+      // Concurrent webhook create on same normalizedWhatsapp.
+      if (err?.code === 'P2002') {
+        const raced = await findByNormalized(tx, whatsapp || phone);
+        if (raced && !raced.deletedAt) {
+          const updated = await tx.crmCustomer.update({
+            where: { id: raced.id },
+            data: { lastContactAt: now },
+          });
+          await applyCrmEvent(tx, {
+            customerId: raced.id,
+            event: CRM_EVENTS.INTERACTION,
+            actorId,
+            actorType: actorId ? 'USER' : 'SYSTEM',
+            source,
+            interactionType,
+            note: message || notes,
+            body: message || notes,
+            relatedType,
+            relatedId,
+            meta: { channel: source, race: true, ...(meta || {}) },
+            title: isWhatsAppSource(source) ? 'پیام واتساپ دریافت شد' : 'تعامل جدید',
+            notify: false,
+            touchLastContact: true,
+          });
+          return { customer: updated, created: false, duplicate: true };
+        }
+      }
+      throw err;
+    }
 
     await tx.opportunity.create({
       data: {
@@ -172,7 +209,9 @@ export async function ingestLead({
 
     await recordCrmActivity(tx, {
       crmCustomerId: created.id,
-      type: source === 'WHATSAPP' ? ACTIVITY_TYPES.WHATSAPP_MESSAGE : ACTIVITY_TYPES.LEAD_CREATED,
+      type: isWhatsAppSource(source)
+        ? ACTIVITY_TYPES.WHATSAPP_MESSAGE
+        : ACTIVITY_TYPES.LEAD_CREATED,
       title: 'سرنخ ایجاد شد',
       body: message || notes || `منبع: ${source}`,
       newStatus: 'NEW_LEAD',
@@ -187,8 +226,12 @@ export async function ingestLead({
     if (message) {
       await recordCrmActivity(tx, {
         crmCustomerId: created.id,
-        type: source === 'WHATSAPP' ? ACTIVITY_TYPES.WHATSAPP_MESSAGE : ACTIVITY_TYPES.CONTACT_FORM,
-        title: source === 'WHATSAPP' ? 'پیام واتساپ دریافت شد' : 'پیام فرم تماس',
+        type: isWhatsAppSource(source)
+          ? ACTIVITY_TYPES.WHATSAPP_MESSAGE
+          : ACTIVITY_TYPES.CONTACT_FORM,
+        title: isWhatsAppSource(source)
+          ? 'پیام واتساپ دریافت شد'
+          : 'پیام فرم تماس',
         body: message,
         actorId,
         actorType: 'SYSTEM',
@@ -229,14 +272,23 @@ export async function ingestLead({
   return result;
 }
 
-export async function ingestWhatsAppMessage({ from, text, name, profileName }) {
+export async function ingestWhatsAppMessage({
+  from,
+  text,
+  name,
+  profileName,
+  source = 'WHATSAPP',
+  meta = null,
+}) {
+  const leadSource =
+    source === 'WHATSAPP_WEBSITE' ? 'WHATSAPP_WEBSITE' : 'WHATSAPP';
   return ingestLead({
-    source: 'WHATSAPP',
+    source: leadSource,
     whatsapp: from,
     personName: name || profileName || '',
     message: text || '',
     interactionType: 'WHATSAPP',
-    meta: { provider: 'whatsapp' },
+    meta: { provider: 'whatsapp', ...(meta || {}) },
   });
 }
 

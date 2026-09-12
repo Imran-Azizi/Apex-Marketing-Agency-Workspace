@@ -2,6 +2,7 @@ import { z } from "zod";
 import { isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE } from "@/lib/phone";
 
 export const CONTACT_SUBJECTS = [
+  { value: "GENERAL", label: "درخواست عمومی" },
   { value: "CONSULTATION", label: "مشاوره پروژه" },
   { value: "QUOTE", label: "درخواست قیمت" },
   { value: "COLLABORATION", label: "همکاری" },
@@ -11,7 +12,11 @@ export const CONTACT_SUBJECTS = [
 
 export type ContactSubject = (typeof CONTACT_SUBJECTS)[number]["value"];
 
+/** Default stored subject for public form submissions (field removed from UI). */
+export const DEFAULT_CONTACT_SUBJECT: ContactSubject = "GENERAL";
+
 export const CONTACT_SUBJECT_LABELS: Record<ContactSubject, string> = {
+  GENERAL: "درخواست عمومی",
   CONSULTATION: "مشاوره پروژه",
   QUOTE: "درخواست قیمت",
   COLLABORATION: "همکاری",
@@ -30,12 +35,11 @@ export type PublicContactInfo = {
   whatsapp: ContactChannel;
   phone: ContactChannel;
   email: ContactChannel;
-  subjects: Array<{ value: string; label: string }>;
 };
 
 /** Hours copy already shown on the public contact panel. */
 export const CONTACT_HOURS_TEXT =
-  "ساعات پاسخگویی: همه‌روزه از ۹ صبح تا ۶ عصر";
+  "پاسخگوی مشتریان به‌صورت ۲۴ ساعته در ۷ روز هفته";
 
 export function configuredContactChannels(
   info: PublicContactInfo | undefined,
@@ -76,7 +80,6 @@ export type ContactFormValues = {
   email: string;
   phone: string;
   company: string;
-  subject: ContactSubject | "";
   message: string;
 };
 
@@ -135,10 +138,6 @@ export const contactFormSchema = z.object({
     .min(1, "شماره تماس الزامی است")
     .refine(isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE),
   company: z.string().trim().max(120, "نام شرکت بیش از حد طولانی است").optional().or(z.literal("")),
-  subject: z.enum(
-    ["CONSULTATION", "QUOTE", "COLLABORATION", "SUPPORT", "OTHER"],
-    { required_error: "موضوع درخواست را انتخاب کنید" },
-  ),
   message: z
     .string()
     .trim()

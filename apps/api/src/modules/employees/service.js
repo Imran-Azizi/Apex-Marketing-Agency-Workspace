@@ -6,6 +6,8 @@ import { createNotificationOnce } from "../../services/notifications.js";
 import { buildPortalPasswordRecord } from "../portal/credentials.js";
 import { decryptCredential } from "../../utils/credentialVault.js";
 import { strongPasswordSchema } from "../../utils/passwords.js";
+import { storage } from "../../services/storage.js";
+import { profileImageUrlFor } from "../../utils/profileImageUrl.js";
 
 /** Roles managers can assign when creating/editing employees. */
 export const EMPLOYEE_ROLES = ["SALES", "EDITOR", "NARRATOR", "FINANCE", "PROJECT_MANAGER"];
@@ -127,6 +129,7 @@ function toPublicEmployee(user) {
   return {
     ...rest,
     hasPasswordCipher: Boolean(passwordCipher),
+    profileImageUrl: profileImageUrlFor(rest.profileImage),
   };
 }
 
@@ -361,6 +364,41 @@ export const employeesService = {
       }
     }
 
+    // Replace: keep employee update successful even if old Bunny cleanup flakes.
+    // Clear: require Bunny delete so DB/storage stay aligned.
+    if (
+      body.profileImage !== undefined &&
+      body.profileImage &&
+      body.profileImage !== current.profileImage
+    ) {
+      await storage.tryDeleteStoredObject(current.profileImage, {
+        logTag: "employee-update",
+      });
+    } else if (
+      body.profileImage !== undefined &&
+      !body.profileImage &&
+      current.profileImage
+    ) {
+      await storage.deleteStoredObject(current.profileImage, {
+        required: true,
+        logTag: "employee-update",
+      });
+    }
+
+    if (body.cvStorageKey !== undefined) {
+      const nextCv = body.cvStorageKey || null;
+      if (nextCv && nextCv !== current.cvStorageKey) {
+        await storage.tryDeleteStoredObject(current.cvStorageKey, {
+          logTag: "employee-update",
+        });
+      } else if (!nextCv && current.cvStorageKey) {
+        await storage.deleteStoredObject(current.cvStorageKey, {
+          required: true,
+          logTag: "employee-update",
+        });
+      }
+    }
+
     const user = await prisma.$transaction(async (tx) => {
       const updated = await tx.user.update({
         where: { id },
@@ -564,13 +602,42 @@ export const employeesService = {
       );
     }
 
+    const teamProfiles = await prisma.teamProfile.findMany({
+      where: { userId: id, deletedAt: null },
+      select: { id: true },
+    });
+    const teamProfileIds = teamProfiles.map((p) => p.id);
+    const audioSamples = teamProfileIds.length
+      ? await prisma.audioSample.findMany({
+          where: { teamProfileId: { in: teamProfileIds }, deletedAt: null },
+          select: { storageKey: true },
+        })
+      : [];
+
+    await storage.deleteStoredObjects(
+      [
+        current.profileImage,
+        current.cvStorageKey,
+        ...audioSamples.map((s) => s.storageKey),
+      ],
+      { required: true, logTag: "employee-delete" },
+    );
+
     await prisma.$transaction(async (tx) => {
+      if (teamProfileIds.length) {
+        await tx.audioSample.updateMany({
+          where: { teamProfileId: { in: teamProfileIds }, deletedAt: null },
+          data: { deletedAt: new Date() },
+        });
+      }
       await tx.user.update({
         where: { id },
         data: {
           isActive: false,
           deletedAt: new Date(),
           email: `deleted_${Date.now()}_${current.email}`,
+          profileImage: null,
+          cvStorageKey: null,
         },
       });
       await tx.teamProfile.updateMany({

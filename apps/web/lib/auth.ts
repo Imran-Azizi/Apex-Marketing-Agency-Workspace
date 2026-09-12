@@ -12,6 +12,8 @@ export interface AuthUser {
   fullName: string;
   role: string;
   permissions?: string[];
+  profileImage?: string | null;
+  profileImageUrl?: string | null;
 }
 
 export interface PortalAccount {
@@ -37,6 +39,7 @@ export interface MeResponse {
   companyName?: string;
   panel?: AuthPanel | null;
   profileImage?: string | null;
+  profileImageUrl?: string | null;
 }
 
 export interface LoginCredentials {

@@ -336,6 +336,15 @@ export const env = {
   defaultManagerPassword:
     process.env.DEFAULT_MANAGER_PASSWORD || "ApexManager!2026",
   whatsappNumber: process.env.WHATSAPP_NUMBER || "93700000000",
+  /**
+   * Meta WhatsApp Cloud API (optional until connected).
+   * Callback URL: {API_URL}/api/v1/public/webhooks/whatsapp
+   */
+  whatsappWebhookVerifyToken: process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "",
+  whatsappAppSecret: process.env.WHATSAPP_APP_SECRET || "",
+  whatsappAccessToken: process.env.WHATSAPP_ACCESS_TOKEN || "",
+  whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
+  whatsappBusinessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "",
   contactEmail: process.env.CONTACT_EMAIL || "info@apex.af",
   contactPhone: process.env.CONTACT_PHONE || process.env.WHATSAPP_NUMBER || "93700000000",
   /**
@@ -358,6 +367,13 @@ export const env = {
     "dev-signed-url-secret-32-characters",
   ),
   signedUrlTtl: Number(process.env.SIGNED_URL_TTL_SECONDS || 300),
+
+  /** Shared secret for Next.js on-demand revalidation (POST /api/revalidate). */
+  webRevalidateSecret: trimEnv(process.env.WEB_REVALIDATE_SECRET),
+
+  /** Optional absolute paths when ffmpeg is not on PATH. */
+  ffmpegPath: trimEnv(process.env.FFMPEG_PATH),
+  ffprobePath: trimEnv(process.env.FFPROBE_PATH),
 
   // SMTP — optional; required to email backup archives
   smtpHost: process.env.SMTP_HOST || "",

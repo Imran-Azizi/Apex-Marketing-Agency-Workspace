@@ -10,9 +10,17 @@ export const metadata: Metadata = {
   title: "اپیکس ورک‌اسپیس",
   description: "سیستم مدیریت مشتری، پورتال، پروژه‌ها و هوش مصنوعی",
   icons: {
-    icon: [{ url: "/brand/apex-logo.png", type: "image/png" }],
-    apple: [{ url: "/brand/apex-logo.png", type: "image/png" }],
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/brand/favicon/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/brand/favicon/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/brand/favicon/android-chrome-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/brand/favicon/android-chrome-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/brand/favicon/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: ["/favicon.ico"],
   },
+  manifest: "/site.webmanifest",
 };
 
 export default function RootLayout({

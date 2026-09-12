@@ -15,6 +15,7 @@ function CustomerImage({ src, alt }: { src: string | null; alt: string }) {
       src={src}
       alt={alt}
       sizes="80px"
+      quality={85}
       className="object-center transition-transform duration-500 group-hover:scale-[1.05]"
       fallback={
         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/20 via-muted to-background">

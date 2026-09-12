@@ -95,7 +95,7 @@ router.delete(
   requirePermission('finance.delete'),
   async (req, res, next) => {
     try {
-      ok(res, await financeService.deleteExpense(req.params.id));
+      ok(res, await financeService.deleteExpense(req.params.id, req.auth));
     } catch (e) {
       next(e);
     }

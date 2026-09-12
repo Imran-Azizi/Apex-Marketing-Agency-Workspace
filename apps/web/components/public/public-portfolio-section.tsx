@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Film } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import {
@@ -17,12 +17,16 @@ import { PublicSection } from "@/components/public/public-section";
 import { PortfolioCategoryTabs } from "@/components/public/portfolio/portfolio-category-tabs";
 import { PortfolioGrid } from "@/components/public/portfolio/portfolio-grid";
 
+const STALE_MS = 5 * 60_000;
+
 export function PublicPortfolioSection({
   initialTabs,
   initialList,
+  description,
 }: {
   initialTabs?: PublicPortfolioTabs | null;
   initialList?: PublicPortfolioList | null;
+  description?: string | null;
 }) {
   const [category, setCategory] = useState(MIXED_SLUG);
   const [expanded, setExpanded] = useState(false);
@@ -30,9 +34,11 @@ export function PublicPortfolioSection({
   const tabsQ = useQuery({
     queryKey: ["public-portfolio-tabs"],
     queryFn: () => apiGet<PublicPortfolioTabs>("/public/portfolio/categories"),
-    staleTime: 60_000,
+    staleTime: STALE_MS,
     initialData: initialTabs ?? undefined,
+    initialDataUpdatedAt: Date.now(),
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const listQ = useQuery({
@@ -41,10 +47,14 @@ export function PublicPortfolioSection({
       apiGet<PublicPortfolioList>(
         `/public/portfolio?category=${encodeURIComponent(category)}`,
       ),
-    staleTime: 60_000,
+    staleTime: STALE_MS,
     initialData:
       category === MIXED_SLUG ? (initialList ?? undefined) : undefined,
+    initialDataUpdatedAt:
+      category === MIXED_SLUG ? Date.now() : undefined,
+    placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const tabs = tabsQ.data?.tabs || [];
@@ -53,7 +63,7 @@ export function PublicPortfolioSection({
   const visible = expanded ? items : items.slice(0, PUBLIC_PREVIEW_LIMIT);
   const canShowMore = total > PUBLIC_PREVIEW_LIMIT;
   const isMixed = category === MIXED_SLUG;
-  const loading = tabsQ.isLoading || listQ.isLoading;
+  const loading = (tabsQ.isLoading && !tabsQ.data) || (listQ.isLoading && !listQ.data);
   const error = tabsQ.error || listQ.error;
 
   const emptyCopy = useMemo(() => {
@@ -76,7 +86,11 @@ export function PublicPortfolioSection({
   }
 
   return (
-    <PublicSection id="portfolio" title="نمونه های کاری">
+    <PublicSection
+      id="portfolio"
+      title="نمونه های کاری"
+      description={description || undefined}
+    >
       {tabs.length > 0 ? (
         <PortfolioCategoryTabs
           tabs={tabs}

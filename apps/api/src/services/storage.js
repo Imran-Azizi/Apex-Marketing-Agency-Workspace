@@ -9,6 +9,12 @@ import {
   sanitizeFilename,
 } from "./storage/media-manager.js";
 import { bunnyDriver } from "./storage/bunny-driver.js";
+import {
+  collectStorageKeys,
+  deleteStoredObject as deleteStoredObjectHelper,
+  deleteStoredObjects as deleteStoredObjectsHelper,
+  resolveStorageKey,
+} from "./storage/object-delete.js";
 
 function assertStorageConfigured() {
   if (env.bunnyStorageZone && env.bunnyStorageApiKey) return;
@@ -196,7 +202,51 @@ export const storage = {
 
   async deleteObject(key) {
     assertStorageConfigured();
-    await bunnyDriver.deleteObject(key);
+    const storageKey = resolveStorageKey(key);
+    if (!storageKey) {
+      throw new AppError("File key required", 400, "INVALID_KEY");
+    }
+    await bunnyDriver.deleteObject(storageKey);
+  },
+
+  /**
+   * Resolve CDN/storage URLs and app keys to a Bunny object key.
+   * Returns null when the value is not a deletable storage object.
+   */
+  resolveStorageKey,
+
+  collectStorageKeys,
+
+  /**
+   * Delete a stored object from Bunny. Fails loud by default so callers do not
+   * mark DB rows deleted while the file remains on Bunny.
+   */
+  async deleteStoredObject(keyOrUrl, opts = {}) {
+    assertStorageConfigured();
+    return deleteStoredObjectHelper(
+      (key) => bunnyDriver.deleteObject(key),
+      keyOrUrl,
+      opts,
+    );
+  },
+
+  async deleteStoredObjects(keysOrUrls, opts = {}) {
+    assertStorageConfigured();
+    return deleteStoredObjectsHelper(
+      (key) => bunnyDriver.deleteObject(key),
+      keysOrUrls,
+      opts,
+    );
+  },
+
+  /** Best-effort cleanup when replacing a file (does not fail the parent flow). */
+  async tryDeleteStoredObject(keyOrUrl, opts = {}) {
+    if (!env.bunnyStorageZone || !env.bunnyStorageApiKey) return { skipped: true };
+    return deleteStoredObjectHelper(
+      (key) => bunnyDriver.deleteObject(key),
+      keyOrUrl,
+      { required: false, logTag: opts.logTag || "storage", ...opts },
+    );
   },
 
   async readBuffer(key) {
@@ -240,4 +290,4 @@ export const storage = {
   },
 };
 
-export { generateStorageKey, sanitizeFilename, buildStorageMeta };
+export { generateStorageKey, sanitizeFilename, buildStorageMeta, resolveStorageKey, collectStorageKeys };

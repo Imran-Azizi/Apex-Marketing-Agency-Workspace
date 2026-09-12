@@ -31,7 +31,7 @@ export function PortfolioCard({
           {item.thumbnailUrl ? (
             <CoverImage
               src={item.thumbnailUrl}
-              alt=""
+              alt={item.title}
               sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
               className="transition-transform duration-500 motion-safe:group-hover:scale-[1.04]"
             />

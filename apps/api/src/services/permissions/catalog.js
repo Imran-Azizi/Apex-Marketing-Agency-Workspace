@@ -47,7 +47,12 @@ export const PERMISSION_CATALOG = [
         label: "ویرایش",
         description: "ویرایش اطلاعات مشتری و دارایی‌ها",
       },
-      { code: "crm.delete", label: "حذف", description: "حذف نرم مشتری" },
+      {
+        code: "crm.delete",
+        label: "حذف مشتری",
+        description:
+          "حذف نرم مشتری در CRM و فروش و مدیریت مشتریان — برای فروش به‌صورت پیش‌فرض غیرفعال است و فقط با اعطای مدیر فعال می‌شود",
+      },
       {
         code: "crm.merge",
         label: "ادغام",
@@ -293,8 +298,9 @@ export const PERMISSION_CATALOG = [
       },
       {
         code: "finance.delete",
-        label: "حذف پرداخت",
-        description: "حذف پرداخت",
+        label: "حذف مصارف شرکت",
+        description:
+          "حذف مصارف ثبت‌شده در مصارف شرکت — برای نقش مالی به‌صورت پیش‌فرض غیرفعال است و فقط با اعطای مدیر فعال می‌شود",
       },
       {
         code: "finance.approve",
@@ -577,7 +583,8 @@ const ALL = ALL_PERMISSION_CODES;
 export const LEGACY_CODE_MAP = {
   "dashboard:view": ["dashboard.view"],
   "crm:read": ["crm.view"],
-  "crm:write": ["crm.create", "crm.edit", "crm.delete"],
+  // Write covers create/edit only — delete is a separate grantable permission.
+  "crm:write": ["crm.create", "crm.edit"],
   "crm:merge": ["crm.merge"],
   "opportunity:manage": ["crm.opportunity"],
   "portal_invite:create": ["crm.invite"],
@@ -596,7 +603,8 @@ export const LEGACY_CODE_MAP = {
   "production:upload": ["video.view", "video.edit", "poster.view"],
   "production:submit": ["video.upload", "poster.upload"],
   "finance:read": ["finance.view"],
-  "finance:write": ["finance.create", "finance.edit", "finance.delete"],
+  // Write covers create/edit only — delete is a separate grantable permission.
+  "finance:write": ["finance.create", "finance.edit"],
   "download:allow": ["delivery.view", "delivery.allow"],
   "settings:manage": ["settings.view", "settings.edit", "settings.permissions"],
   "backup:manage": [
@@ -643,7 +651,8 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "crm.view",
     "crm.create",
     "crm.edit",
-    "crm.delete",
+    // crm.delete is intentionally omitted — Sales cannot delete by default;
+    // Managers grant it per-user from Settings → دسترسی‌ها.
     "crm.merge",
     "crm.opportunity",
     "crm.invite",
@@ -680,7 +689,8 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "finance.view",
     "finance.create",
     "finance.edit",
-    "finance.delete",
+    // finance.delete is intentionally omitted — Finance cannot delete company
+    // expenses by default; Managers grant it per-user from Settings → دسترسی‌ها.
     "delivery.view",
     "delivery.allow",
     "audit.view",

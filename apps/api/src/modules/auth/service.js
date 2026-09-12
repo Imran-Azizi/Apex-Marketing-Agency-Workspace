@@ -14,6 +14,7 @@ import { getWhatsappLookupKeys, parseInternationalPhone, WHATSAPP_VALIDATION_MES
 import { roleToPanel } from '../../config/cookies.js';
 import { effectiveFromUser } from '../../services/permissions/effective.js';
 import { SECURITY } from '../../config/security.js';
+import { profileImageUrlFor } from '../../utils/profileImageUrl.js';
 
 function parseExpiryToDate(expiresIn) {
   const match = /^(\d+)([smhd])$/.exec(expiresIn || '7d');
@@ -111,6 +112,7 @@ export const authService = {
         fullName: user.fullName,
         role: user.role.code,
         profileImage: user.profileImage || null,
+        profileImageUrl: profileImageUrlFor(user.profileImage),
         permissions: effectiveFromUser(user),
       },
     };
@@ -284,6 +286,7 @@ export const authService = {
         fullName: auth.user.fullName,
         role: auth.roleCode,
         profileImage: auth.user.profileImage || null,
+        profileImageUrl: profileImageUrlFor(auth.user.profileImage),
         permissions: auth.permissions,
       };
     }

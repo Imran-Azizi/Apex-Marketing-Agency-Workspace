@@ -66,7 +66,7 @@ export const AUTH_AUDIENCE_COPY: Record<AuthAudience, AuthAudienceCopy> = {
     documentTitle: "ورود فروش — اپیکس",
     eyebrow: "فضای فروش",
     title: "ورود فروش",
-    description: "به فضای کاری فروش، تعاملات و پیگیری مشتریان وارد شوید.",
+    description: "به فضای کاری فروش و پیگیری مشتریان وارد شوید.",
   },
   portal: {
     documentTitle: "پورتال مشتری — اپیکس",

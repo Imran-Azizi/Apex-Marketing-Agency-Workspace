@@ -49,10 +49,26 @@ export function createTtlCache() {
     inflight.delete(key);
   }
 
+  function invalidatePrefix(prefix) {
+    const needle = String(prefix || "");
+    if (!needle) return;
+    for (const key of [...store.keys()]) {
+      if (key === needle || key.startsWith(needle)) {
+        store.delete(key);
+        inflight.delete(key);
+      }
+    }
+    for (const key of [...inflight.keys()]) {
+      if (key === needle || key.startsWith(needle)) {
+        inflight.delete(key);
+      }
+    }
+  }
+
   function clear() {
     store.clear();
     inflight.clear();
   }
 
-  return { get, set, getOrSet, invalidate, clear };
+  return { get, set, getOrSet, invalidate, invalidatePrefix, clear };
 }

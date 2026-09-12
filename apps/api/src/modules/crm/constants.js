@@ -1,6 +1,7 @@
 /** Canonical lead-source codes stored in CrmCustomer.source */
 export const LEAD_SOURCE_CODES = [
   'WHATSAPP',
+  'WHATSAPP_WEBSITE',
   'WEBSITE',
   'WEBSITE_CONTACT',
   'INSTAGRAM',
@@ -17,6 +18,7 @@ export const LEAD_SOURCE_CODES = [
 
 export const LEAD_SOURCE_LABELS = {
   WHATSAPP: 'واتساپ',
+  WHATSAPP_WEBSITE: 'واتساپ / وب‌سایت عمومی',
   WEBSITE: 'وب‌سایت',
   WEBSITE_CONTACT: 'فرم تماس وب‌سایت',
   INSTAGRAM: 'اینستاگرام',

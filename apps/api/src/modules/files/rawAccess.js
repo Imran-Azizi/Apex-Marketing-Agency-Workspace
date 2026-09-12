@@ -60,10 +60,13 @@ export async function assertRawStorageAccess(storageKey, auth) {
 
   if (parts[0] === "users" && parts[1]) {
     if (parts[1] === auth.userId) return key;
-    const perms = auth.permissions || [];
-    if (perms.includes("employees.view") || perms.includes("employees.edit")) {
-      return key;
-    }
+    // Staff peers (chat, assignments, directories) may load each other's avatars.
+    if (auth.audience !== "PORTAL") return key;
+    throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+  }
+
+  if (parts[0] === "profile-images") {
+    if (auth.audience !== "PORTAL") return key;
     throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
   }
 

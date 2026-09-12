@@ -408,6 +408,33 @@ async function main() {
     update: {},
   });
 
+  const publicCopyDefaults = [
+    [
+      'public_company_description',
+      'اولین شرکت معیاری تولید اعلانات تبلیغاتی حرفه ای با هوش مصنوعی ما به کیفیت خلاقیت و نتیجه معتقدیم',
+    ],
+    [
+      'public_services_description',
+      'خدمات شرکت اپیکس، ساخت ویدیوهای تبلیغاتی است که با استفاده از موشن گرافیک، فوتیج‌های ارسالی و سرویس‌های هوش مصنوعی تولید می‌شوند.',
+    ],
+    ['public_portfolio_description', ''],
+    [
+      'public_customers_description',
+      'برندها و سازمان‌هایی که به اپیکس اعتماد کرده‌اند و در ساخت روایت تصویری خود با ما همکاری داشته‌اند.',
+    ],
+    [
+      'public_contact_description',
+      'برای مشاوره پروژه، دریافت پیشنهاد همکاری یا گفتگو درباره تولید محتوای حرفه‌ای، فرم را ارسال کنید یا از راه‌های ارتباطی مستقیم استفاده کنید.',
+    ],
+  ];
+  for (const [key, text] of publicCopyDefaults) {
+    await prisma.setting.upsert({
+      where: { key },
+      create: { key, value: { text } },
+      update: {},
+    });
+  }
+
   await prisma.setting.upsert({
     where: { key: 'ai_settings' },
     create: {

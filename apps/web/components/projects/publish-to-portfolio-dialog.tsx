@@ -165,6 +165,7 @@ export function PublishToPortfolioDialog({
       qc.invalidateQueries({ queryKey: ["portfolio-project", projectId] });
       qc.invalidateQueries({ queryKey: ["portfolio-admin"] });
       qc.invalidateQueries({ queryKey: ["public-portfolio"] });
+      qc.invalidateQueries({ queryKey: ["public-portfolio-tabs"] });
       setConfirmPublish(false);
       onOpenChange(false);
     },

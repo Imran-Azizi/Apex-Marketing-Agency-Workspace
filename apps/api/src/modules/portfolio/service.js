@@ -4,6 +4,7 @@ import { prisma } from '../../db/prisma.js';
 import { AppError } from '../../utils/response.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { storage } from '../../services/storage.js';
+import { isPublicStorageKey } from '../../services/storage/media-manager.js';
 import {
   asMeta,
   isSentToCustomer,
@@ -23,6 +24,8 @@ import {
   mockPortfolioCopy,
   parsePortfolioAiJson,
 } from './copy.js';
+import { afterPublicPortfolioMutation } from './public-invalidate.js';
+import { preparePortfolioVideoForWeb } from '../../services/video/optimize-web-mp4.js';
 
 const FINAL_KINDS = ['CLEAN_FINAL', 'WATERMARKED_FINAL'];
 const ELIGIBLE_STATUSES = new Set([
@@ -100,22 +103,27 @@ export function slugify(input) {
   return base || `portfolio-${Date.now().toString(36)}`;
 }
 
+/**
+ * Allocate a slug that is free under the global @@unique constraint.
+ * Soft-deleted rows still occupy their slug, so they must be considered.
+ */
 export async function uniqueSlug(base, excludeId = null) {
-  let candidate = slugify(base);
+  const root = slugify(base);
+  let candidate = root;
   let i = 0;
-  while (true) {
+  while (i < 100) {
     const existing = await prisma.portfolioItem.findFirst({
       where: {
         slug: candidate,
-        deletedAt: null,
         ...(excludeId ? { id: { not: excludeId } } : {}),
       },
       select: { id: true },
     });
     if (!existing) return candidate;
     i += 1;
-    candidate = `${slugify(base)}-${i}`;
+    candidate = `${root}-${i}`;
   }
+  return `${root}-${Date.now().toString(36)}`;
 }
 
 function scoreFinalFile(file, projectStatus) {
@@ -208,16 +216,32 @@ export function serializeAdminItem(item) {
   };
 }
 
-export function serializePublicItem(item) {
+export function serializePublicItem(item, { compact = false } = {}) {
   const categories = (item.categories || [])
     .map((row) => row.category)
     .filter(Boolean);
+  const storageKey = item.storageKey || item.videoFile?.storageKey || null;
+  const mimeType = item.videoFile?.mimeType || 'video/mp4';
+  const playbackUrl =
+    !compact && storageKey && isPublicStorageKey(storageKey)
+      ? mediaUrlFor(storageKey)
+      : null;
+
+  const description = String(item.description || '').trim() || null;
+  const successStory = String(item.successStory || '').trim() || null;
+  let listDescription = description;
+  if (compact && !listDescription && successStory) {
+    const condensed = successStory.replace(/\s+/g, ' ');
+    listDescription =
+      condensed.length > 220 ? `${condensed.slice(0, 217)}…` : condensed;
+  }
+
   return {
     id: item.id,
     slug: item.slug,
     title: item.title,
-    description: item.description || null,
-    successStory: item.successStory || null,
+    description: compact ? listDescription : description,
+    successStory: compact ? null : successStory,
     publishedAt: item.publishedAt,
     thumbnailUrl: mediaUrlFor(item.thumbnailKey),
     category: categories[0]
@@ -229,8 +253,9 @@ export function serializePublicItem(item) {
       slug: category.slug,
     })),
     video: {
-      mimeType: item.videoFile?.mimeType || 'video/mp4',
+      mimeType,
       streamPath: `/public/portfolio/${item.id}/stream`,
+      playbackUrl,
     },
   };
 }
@@ -507,6 +532,8 @@ export const portfolioService = {
         : String(body.successStory || '').trim() || null;
     const now = new Date();
 
+    const prepared = await preparePortfolioVideoForWeb(video.storageKey);
+
     const existing = await prisma.portfolioItem.findFirst({
       where: { projectId, deletedAt: null },
     });
@@ -520,6 +547,7 @@ export const portfolioService = {
           description,
           successStory,
           videoFileId: video.id,
+          storageKey: prepared.storageKey,
           status: 'PUBLISHED',
           publishedAt: existing.publishedAt || now,
           publishedById: actor.userId,
@@ -543,6 +571,7 @@ export const portfolioService = {
             description,
             successStory,
             videoFileId: video.id,
+            storageKey: prepared.storageKey,
             status: 'PUBLISHED',
             publishedAt: now,
             publishedById: actor.userId,
@@ -556,6 +585,7 @@ export const portfolioService = {
           data: {
             projectId,
             videoFileId: video.id,
+            storageKey: prepared.storageKey,
             title,
             description,
             successStory: successStory ?? null,
@@ -589,10 +619,13 @@ export const portfolioService = {
         status: item.status,
         projectId,
         videoFileId: video.id,
+        storageKey: prepared.storageKey,
+        optimized: prepared.optimized,
       },
       req,
     });
 
+    await afterPublicPortfolioMutation({ slug: item.slug });
     return serializeAdminItem(item);
   },
 
@@ -672,9 +705,40 @@ export const portfolioService = {
     if (body.title != null) data.title = body.title.trim();
     if (body.description !== undefined) data.description = body.description;
     if (body.successStory !== undefined) data.successStory = body.successStory;
-    if (body.storageKey !== undefined) data.storageKey = body.storageKey;
     if (body.thumbnailKey !== undefined) data.thumbnailKey = body.thumbnailKey;
     if (body.sortOrder != null) data.sortOrder = body.sortOrder;
+
+    if (body.storageKey !== undefined && body.storageKey) {
+      if (body.storageKey !== existing.storageKey) {
+        const prepared = await preparePortfolioVideoForWeb(body.storageKey);
+        data.storageKey = prepared.storageKey;
+        await storage.tryDeleteStoredObject(existing.storageKey, {
+          logTag: 'portfolio',
+        });
+      }
+    } else if (body.storageKey === null && existing.storageKey) {
+      await storage.deleteStoredObject(existing.storageKey, {
+        required: true,
+        logTag: 'portfolio',
+      });
+      data.storageKey = null;
+    }
+
+    if (
+      body.thumbnailKey !== undefined &&
+      body.thumbnailKey &&
+      body.thumbnailKey !== existing.thumbnailKey
+    ) {
+      await storage.tryDeleteStoredObject(existing.thumbnailKey, {
+        logTag: 'portfolio',
+      });
+    } else if (body.thumbnailKey === null && existing.thumbnailKey) {
+      await storage.deleteStoredObject(existing.thumbnailKey, {
+        required: true,
+        logTag: 'portfolio',
+      });
+    }
+
     if (body.status) {
       data.status = body.status;
       if (body.status === 'PUBLISHED' && !existing.publishedAt) {
@@ -692,6 +756,8 @@ export const portfolioService = {
         throw new AppError('ویدیوی انتخاب‌شده واجد شرایط نیست', 400, 'INVALID_VIDEO');
       }
       data.videoFileId = video.id;
+      const prepared = await preparePortfolioVideoForWeb(video.storageKey);
+      data.storageKey = prepared.storageKey;
     }
     if (data.title && data.title !== existing.title) {
       data.slug = await uniqueSlug(data.title, existing.id);
@@ -732,6 +798,7 @@ export const portfolioService = {
       req,
     });
 
+    await afterPublicPortfolioMutation({ slug: item.slug });
     return serializeAdminItem(item);
   },
 
@@ -740,6 +807,11 @@ export const portfolioService = {
       where: { id, deletedAt: null },
     });
     if (!existing) throw new AppError('نمونه‌کار یافت نشد', 404, 'NOT_FOUND');
+
+    await storage.deleteStoredObjects(
+      [existing.storageKey, existing.thumbnailKey],
+      { required: true, logTag: 'portfolio' },
+    );
 
     await prisma.portfolioItem.update({
       where: { id },
@@ -763,6 +835,7 @@ export const portfolioService = {
       req,
     });
 
+    await afterPublicPortfolioMutation({ slug: existing.slug });
     return { id, deleted: true };
   },
 
@@ -802,7 +875,7 @@ export const portfolioService = {
         take: 8,
         include: { item: { include: publicItemInclude } },
       });
-      related = rows.map((row) => serializePublicItem(row.item));
+      related = rows.map((row) => serializePublicItem(row.item, { compact: true }));
     }
 
     return { ...serialized, related };
@@ -850,10 +923,40 @@ export const portfolioService = {
 
 export async function streamPortfolioVideo(req, res, file) {
   const storageKey = file.storageKey;
+  const contentTypeHint = file.mimeType || 'video/mp4';
+
+  // Public portfolio objects: redirect straight to Bunny CDN (supports Range).
+  // Skip Storage API HEAD to reduce time-to-first-byte.
+  if (
+    isPublicStorageKey(storageKey) &&
+    storage.prefersDirectCdnRedirect({ signed: false })
+  ) {
+    try {
+      const url =
+        (await storage.createPresignedGetUrl(storageKey).catch(() => null)) ||
+        storage.publicUrl(storageKey);
+      if (url) {
+        res.setHeader(
+          'Cache-Control',
+          'public, max-age=300, stale-while-revalidate=600',
+        );
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.redirect(302, url);
+        return;
+      }
+    } catch (err) {
+      console.warn(
+        '[portfolio-stream] CDN redirect failed, proxying:',
+        err?.message || err,
+      );
+    }
+  }
+
   const head = await storage.head(storageKey);
   const fileSize = head.size;
   const contentType =
-    file.mimeType ||
+    contentTypeHint ||
     (head.contentType && head.contentType !== 'application/octet-stream'
       ? head.contentType
       : null) ||
@@ -871,6 +974,7 @@ export async function streamPortfolioVideo(req, res, file) {
           'public, max-age=300, stale-while-revalidate=600',
         );
         res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+        res.setHeader('Accept-Ranges', 'bytes');
         res.redirect(302, url);
         return;
       }

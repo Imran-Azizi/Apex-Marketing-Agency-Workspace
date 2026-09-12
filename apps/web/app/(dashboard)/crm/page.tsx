@@ -53,7 +53,7 @@ import { CrmSelectionBar } from "./_components/crm-selection-bar";
 import { useCustomerSelection } from "./_components/use-customer-selection";
 import { CustomerActions } from "./_components/customer-actions";
 import { CustomerPipelineStatusBadge } from "./_components/customer-pipeline-status-badge";
-import { formatLeadSource } from "./_components/constants";
+import { formatLeadSource, isWhatsAppLeadSource } from "./_components/constants";
 import type {
   CrmCustomer,
   CrmFormOptions,
@@ -460,7 +460,7 @@ export default function CrmPage() {
             description={
               hasFilters
                 ? "با معیارهای جستجو یا فیلتر انتخاب‌شده مشتری‌ای پیدا نشد."
-                : "هنوز مشتریی در دسته «مشتریان ما» ثبت نشده است. پس از تأیید پرداخت در CRM و فروش، مشتری اینجا نمایش داده می‌شود."
+                : "هنوز مشتریی از CRM و فروش به مدیریت مشتریان منتقل نشده است. پس از انتقال موفق، مشتری اینجا نمایش داده می‌شود."
             }
             action={
               hasFilters ? (
@@ -595,7 +595,20 @@ export default function CrmPage() {
                         />
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
-                        {formatLeadSource(customer.source)}
+                        {customer.source ? (
+                          <Badge
+                            variant={
+                              isWhatsAppLeadSource(customer.source)
+                                ? "success"
+                                : "outline"
+                            }
+                            className="font-normal"
+                          >
+                            {formatLeadSource(customer.source)}
+                          </Badge>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
                         {customer.salesOwner?.fullName || "—"}

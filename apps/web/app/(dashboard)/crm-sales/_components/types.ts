@@ -1,6 +1,7 @@
 export interface CrmAllowedActions {
   view: boolean;
   edit: boolean;
+  delete?: boolean;
   recordCustomerInfo: boolean;
   addNote: boolean;
   addInteraction: boolean;

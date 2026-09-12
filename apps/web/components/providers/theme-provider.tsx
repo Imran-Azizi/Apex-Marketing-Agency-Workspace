@@ -13,7 +13,7 @@ export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
       enableSystem
       enableColorScheme
       storageKey="apex-theme"
-      disableTransitionOnChange={false}
+      disableTransitionOnChange
       {...props}
     >
       {children}

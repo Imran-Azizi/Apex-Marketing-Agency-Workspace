@@ -1863,6 +1863,12 @@ export const portalService = {
       where: { id, crmCustomerId: auth.customerId, deletedAt: null },
     });
     if (!asset) throw new AppError("فایل یافت نشد", 404, "NOT_FOUND");
+
+    await storage.deleteStoredObject(asset.storageKey, {
+      required: true,
+      logTag: "portal-client-asset",
+    });
+
     return prisma.clientAsset.update({
       where: { id },
       data: { deletedAt: new Date() },

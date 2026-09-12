@@ -5,12 +5,11 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Search, Shield, SlidersHorizontal, X } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { filePreviewUrl } from "@/lib/upload";
 import { EmptyState } from "@/components/shared/empty-state";
+import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -35,6 +34,7 @@ type PermissionEmployee = {
   fullName: string;
   email: string;
   profileImage: string | null;
+  profileImageUrl?: string | null;
   isActive: boolean;
   role: { code: string; name: string };
   totalPermissions: number;
@@ -64,15 +64,6 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const ALL = "ALL";
-
-function initials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("");
-}
 
 export function PermissionsPanel() {
   const [searchInput, setSearchInput] = useState("");
@@ -211,9 +202,6 @@ export function PermissionsPanel() {
               </TableHeader>
               <TableBody>
                 {items.map((emp) => {
-                  const imageUrl = emp.profileImage
-                    ? filePreviewUrl(emp.profileImage)
-                    : null;
                   const pct = emp.totalPermissions
                     ? Math.round((emp.enabledCount / emp.totalPermissions) * 100)
                     : 0;
@@ -221,18 +209,13 @@ export function PermissionsPanel() {
                     <TableRow key={emp.id}>
                       <TableCell>
                         <div className="flex items-center gap-3">
-                          <Avatar className="h-9 w-9 shrink-0">
-                            {imageUrl ? (
-                              <AvatarImage
-                                src={imageUrl}
-                                alt={emp.fullName}
-                                className="object-cover"
-                              />
-                            ) : null}
-                            <AvatarFallback className="bg-brand-muted text-xs text-brand">
-                              {initials(emp.fullName)}
-                            </AvatarFallback>
-                          </Avatar>
+                          <UserAvatar
+                            name={emp.fullName}
+                            profileImage={emp.profileImage}
+                            profileImageUrl={emp.profileImageUrl}
+                            className="h-9 w-9"
+                            fallbackClassName="bg-brand-muted text-xs text-brand"
+                          />
                           <div className="min-w-0 text-start">
                             <p className="truncate text-sm font-medium">
                               {emp.fullName}

@@ -18,6 +18,59 @@ test("hero schema accepts a valid slide payload", () => {
   assert.equal(parsed.title.includes("تبلیغات"), true);
   assert.equal(parsed.imageKey, "images/hero/123-abc.jpg");
   assert.equal(parsed.durationSeconds, 5);
+  assert.equal(parsed.buttonEnabled, false);
+});
+
+test("hero schema accepts per-slide button configuration", () => {
+  const parsed = createHeroSlideSchema.parse({
+    title: "اسلاید نمونه",
+    imageKey: "images/hero/a.jpg",
+    buttonEnabled: true,
+    buttonText: "مشاهده نمونه‌کارها",
+    buttonDestination: "portfolio",
+  });
+  assert.equal(parsed.buttonEnabled, true);
+  assert.equal(parsed.buttonText, "مشاهده نمونه‌کارها");
+  assert.equal(parsed.buttonDestination, "portfolio");
+
+  const external = createHeroSlideSchema.parse({
+    title: "اسلاید نمونه",
+    imageKey: "images/hero/a.jpg",
+    buttonEnabled: true,
+    buttonText: "وب‌سایت",
+    buttonDestination: "external",
+    buttonUrl: "https://example.com/path",
+  });
+  assert.equal(external.buttonDestination, "external");
+  assert.equal(external.buttonUrl, "https://example.com/path");
+});
+
+test("hero schema rejects enabled button without text or destination", () => {
+  const missingText = createHeroSlideSchema.safeParse({
+    title: "اسلاید نمونه",
+    imageKey: "images/hero/a.jpg",
+    buttonEnabled: true,
+    buttonDestination: "services",
+  });
+  assert.equal(missingText.success, false);
+
+  const missingDest = createHeroSlideSchema.safeParse({
+    title: "اسلاید نمونه",
+    imageKey: "images/hero/a.jpg",
+    buttonEnabled: true,
+    buttonText: "خدمات ما",
+  });
+  assert.equal(missingDest.success, false);
+
+  const badExternal = createHeroSlideSchema.safeParse({
+    title: "اسلاید نمونه",
+    imageKey: "images/hero/a.jpg",
+    buttonEnabled: true,
+    buttonText: "لینک",
+    buttonDestination: "external",
+    buttonUrl: "not-a-url",
+  });
+  assert.equal(badExternal.success, false);
 });
 
 test("hero schema requires title and image on create", () => {

@@ -59,7 +59,15 @@ const SheetContent = React.forwardRef<
   SheetContentProps
 >(
   (
-    { side = "right", className, children, showCloseButton = true, ...props },
+    {
+      side = "right",
+      className,
+      children,
+      showCloseButton = true,
+      onInteractOutside,
+      onFocusOutside,
+      ...props
+    },
     ref,
   ) => (
     <SheetPortal>
@@ -67,6 +75,28 @@ const SheetContent = React.forwardRef<
       <SheetPrimitive.Content
         ref={ref}
         className={cn(sheetVariants({ side }), className)}
+        onInteractOutside={(event) => {
+          const target = event.target as Element | null;
+          if (
+            target?.closest?.(
+              "[data-phone-country-menu],[data-radix-dropdown-menu-content],[data-radix-select-content]",
+            )
+          ) {
+            event.preventDefault();
+          }
+          onInteractOutside?.(event);
+        }}
+        onFocusOutside={(event) => {
+          const target = event.target as Element | null;
+          if (
+            target?.closest?.(
+              "[data-phone-country-menu],[data-radix-dropdown-menu-content],[data-radix-select-content]",
+            )
+          ) {
+            event.preventDefault();
+          }
+          onFocusOutside?.(event);
+        }}
         {...props}
       >
         {children}

@@ -1,9 +1,12 @@
+import { profileImageUrlFor } from "../../utils/profileImageUrl.js";
+
 function safeUser(user) {
   if (!user) return null;
   return {
     id: user.id,
     fullName: user.fullName,
     profileImage: user.profileImage || null,
+    profileImageUrl: profileImageUrlFor(user.profileImage),
     roleCode: user.role?.code || user.roleCode || null,
     teamKind: user.teamProfile?.kind || null,
     isOnline: Boolean(user.isOnline),

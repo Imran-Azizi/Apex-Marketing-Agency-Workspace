@@ -5,9 +5,12 @@ import { toEnglishDigits } from "./utils";
 export const WHATSAPP_VALIDATION_MESSAGE =
   "لطفاً یک شماره واتساپ معتبر وارد کنید.";
 
+/** Incomplete E.164 while typing / after country select (e.g. "+971", "+1202"). */
+const PARTIAL_E164 = /^\+[1-9]\d{0,14}$/;
+
 export function isValidWhatsAppNumber(value: string | undefined | null): boolean {
   if (!value?.trim()) return false;
-  return isValidPhoneNumber(value);
+  return isValidPhoneNumber(toEnglishDigits(value).trim());
 }
 
 export const whatsappFieldSchema = z
@@ -16,7 +19,8 @@ export const whatsappFieldSchema = z
   .refine(isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE);
 
 /**
- * Convert stored/raw values to E.164 for react-phone-number-input.
+ * Convert stored/raw values for react-phone-number-input.
+ * Keeps partial international values so the selected country does not reset to default.
  */
 export function toPhoneInputValue(
   raw: string | undefined | null,
@@ -25,7 +29,10 @@ export function toPhoneInputValue(
 
   const value = toEnglishDigits(raw).trim();
   if (value.startsWith("+")) {
-    return isValidPhoneNumber(value) ? value : undefined;
+    const compact = value.replace(/[^\d+]/g, "");
+    if (!PARTIAL_E164.test(compact)) return undefined;
+    // Valid complete numbers and in-progress international input both pass through.
+    return compact;
   }
 
   const digits = value.replace(/\D/g, "");
@@ -46,11 +53,16 @@ export function toPhoneInputValue(
     if (isValidPhoneNumber(candidate)) return candidate;
   }
 
-  return digits.length >= 8 ? `+${digits}` : undefined;
+  // Digits-only international identity already stored without '+'.
+  if (digits.length >= 8 && digits.length <= 15 && PARTIAL_E164.test(`+${digits}`)) {
+    return `+${digits}`;
+  }
+
+  return undefined;
 }
 
 export function normalizeWhatsAppForSubmit(value: string | undefined | null): string {
-  const input = String(value || "").trim();
+  const input = toEnglishDigits(String(value || "")).trim();
   if (!isValidPhoneNumber(input)) {
     throw new Error(WHATSAPP_VALIDATION_MESSAGE);
   }

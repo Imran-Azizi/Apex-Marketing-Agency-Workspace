@@ -4,6 +4,8 @@ import { AppError } from "../../utils/response.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { createNotificationOnce } from "../../services/notifications.js";
 import { isFullAccessRole } from "../../services/permissions/catalog.js";
+import { storage } from "../../services/storage.js";
+import { profileImageUrlFor } from "../../utils/profileImageUrl.js";
 import {
   assertCanCommunicate,
   assertConversationMember,
@@ -275,6 +277,7 @@ export const chatService = {
         id: user.id,
         fullName: user.fullName,
         profileImage: user.profileImage,
+        profileImageUrl: profileImageUrlFor(user.profileImage),
         roleCode: user.role.code,
         teamKind: user.teamProfile?.kind || null,
         isOnline: online.has(user.id),
@@ -700,7 +703,10 @@ export const chatService = {
   async deleteMessage(auth, messageId, req) {
     const message = await prisma.chatMessage.findFirst({
       where: { id: messageId, deletedAt: null },
-      include: { conversation: { select: { id: true, deletedAt: true } } },
+      include: {
+        conversation: { select: { id: true, deletedAt: true } },
+        attachments: { select: { id: true, storageKey: true } },
+      },
     });
     if (!message || message.conversation.deletedAt) {
       throw new AppError("پیام یافت نشد", 404, "MESSAGE_NOT_FOUND");
@@ -712,11 +718,22 @@ export const chatService = {
     }
     await assertConversationMember(message.conversationId, auth.userId);
 
+    await storage.deleteStoredObjects(
+      message.attachments.map((a) => a.storageKey),
+      { required: true, logTag: "chat-message" },
+    );
+
     const updated = await prisma.chatMessage.update({
       where: { id: messageId },
       data: { deletedAt: new Date(), body: null },
       include: messageInclude,
     });
+
+    if (message.attachments.length) {
+      await prisma.chatAttachment.deleteMany({
+        where: { messageId },
+      });
+    }
 
     await writeAudit({
       userId: auth.userId,

@@ -26,6 +26,7 @@ import {
   withProjectCreateLock,
 } from './projectCreateGuard.js';
 import { canAccessProject } from '../../services/projectAccess.js';
+import { storage } from '../../services/storage.js';
 import { z } from 'zod';
 
 const createProjectSchema = z.object({
@@ -214,7 +215,7 @@ export const projectService = {
             where: { isActive: true },
             include: {
               teamProfile: { select: { displayName: true, userId: true } },
-              user: { select: { id: true, fullName: true } },
+              user: { select: { id: true, fullName: true, profileImage: true } },
             },
           },
           finance: ['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(auth.roleCode)
@@ -264,12 +265,12 @@ export const projectService = {
         },
         select: {
           userId: true,
-          user: { select: { id: true, fullName: true } },
+          user: { select: { id: true, fullName: true, profileImage: true } },
           teamProfile: {
             select: {
               userId: true,
               displayName: true,
-              user: { select: { id: true, fullName: true } },
+              user: { select: { id: true, fullName: true, profileImage: true } },
             },
           },
         },
@@ -292,7 +293,11 @@ export const projectService = {
         assignment.teamProfile?.user?.fullName ||
         null;
       if (!name) continue;
-      editorsById.set(id, { id, fullName: name });
+      const profileImage =
+        assignment.user?.profileImage ||
+        assignment.teamProfile?.user?.profileImage ||
+        null;
+      editorsById.set(id, { id, fullName: name, profileImage });
     }
 
     return {
@@ -323,7 +328,7 @@ export const projectService = {
         crmCustomer: true,
         service: true,
         format: true,
-        assignments: { include: { teamProfile: true, user: { select: { id: true, fullName: true } } } },
+        assignments: { include: { teamProfile: true, user: { select: { id: true, fullName: true, profileImage: true } } } },
         files: { where: { deletedAt: null } },
         contentVersions: { orderBy: { versionNumber: 'desc' } },
         finance: true,
@@ -515,6 +520,10 @@ export const projectService = {
       include: {
         opportunity: true,
         invoices: { select: { id: true } },
+        files: {
+          where: { deletedAt: null },
+          select: { id: true, storageKey: true },
+        },
         _count: {
           select: {
             invoices: true,
@@ -525,6 +534,28 @@ export const projectService = {
       },
     });
     if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+
+    const [portfolioItems, expenses] = await Promise.all([
+      prisma.portfolioItem.findMany({
+        where: { projectId: id, deletedAt: null },
+        select: { storageKey: true, thumbnailKey: true },
+      }),
+      prisma.expense.findMany({
+        where: { projectId: id },
+        select: { receiptKey: true },
+      }),
+    ]);
+
+    const storageKeys = storage.collectStorageKeys(
+      project.files.map((f) => f.storageKey),
+      portfolioItems.flatMap((p) => [p.storageKey, p.thumbnailKey]),
+      expenses.map((e) => e.receiptKey),
+    );
+
+    await storage.deleteStoredObjects(storageKeys, {
+      required: true,
+      logTag: 'project-delete',
+    });
 
     const deletedAt = new Date();
     const invoiceIds = project.invoices.map((inv) => inv.id);
@@ -560,6 +591,12 @@ export const projectService = {
       const portfolioUpdated = await tx.portfolioItem.updateMany({
         where: { projectId: id, deletedAt: null },
         data: { deletedAt, status: 'UNPUBLISHED' },
+      });
+
+      // Soft-delete project files (Bunny objects already removed above)
+      await tx.projectFile.updateMany({
+        where: { projectId: id, deletedAt: null },
+        data: { deletedAt },
       });
 
       // Detach opportunity and restore pre-project CRM stage

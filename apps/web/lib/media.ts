@@ -13,6 +13,19 @@ export function portfolioPublicStreamUrl(portfolioId: string): string {
   return `${API_BASE}/public/portfolio/${encodeURIComponent(portfolioId)}/stream`;
 }
 
+/**
+ * Best playback URL for the public player:
+ * prefer direct CDN when the API provides it, otherwise the ranged stream endpoint.
+ */
+export function portfolioPublicPlaybackUrl(item: {
+  id: string;
+  video?: { playbackUrl?: string | null; streamPath?: string | null } | null;
+}): string {
+  const direct = item.video?.playbackUrl?.trim();
+  if (direct) return direct;
+  return portfolioPublicStreamUrl(item.id);
+}
+
 /** Authenticated stream URL for manager preview of any portfolio item. */
 export function portfolioAdminStreamUrl(portfolioId: string): string {
   const panel = resolveClientAuthPanel();

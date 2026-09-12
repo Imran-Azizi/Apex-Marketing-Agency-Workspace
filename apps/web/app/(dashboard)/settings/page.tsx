@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Mail, MessageCircle, Pencil, Shield } from "lucide-react";
+import { Loader2, Mail, MessageCircle, Pencil, Shield, Globe } from "lucide-react";
 import { api, apiGet, ensureCsrf } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
@@ -27,6 +27,7 @@ import { isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE } from "@/lib/phone"
 import { WhatsAppPhoneInput } from "@/components/shared/whatsapp-phone-input";
 import { useHasPermission } from "@/lib/permissions";
 import { PermissionsPanel } from "./_components/permissions-panel";
+import { PublicCopyPanel } from "./_components/public-copy-panel";
 
 type SettingRecord = {
   id: string;
@@ -289,6 +290,10 @@ export default function SettingsPage() {
               دسترسی‌ها
             </TabsTrigger>
           ) : null}
+          <TabsTrigger value="website" className="gap-1.5">
+            <Globe className="h-3.5 w-3.5" />
+            وب‌سایت
+          </TabsTrigger>
           <TabsTrigger value="whatsapp" className="gap-1.5">
             <MessageCircle className="h-3.5 w-3.5" />
             واتساپ
@@ -304,6 +309,14 @@ export default function SettingsPage() {
             <PermissionsPanel />
           </TabsContent>
         ) : null}
+
+        <TabsContent value="website">
+          {isLoading ? <Skeleton className="h-64 w-full rounded-2xl" /> : null}
+          {error ? <EmptyState title="بارگذاری تنظیمات ناموفق بود" /> : null}
+          {!isLoading && !error ? (
+            <PublicCopyPanel settings={data} canEdit={canEditSettings} />
+          ) : null}
+        </TabsContent>
 
         <TabsContent value="whatsapp">
 

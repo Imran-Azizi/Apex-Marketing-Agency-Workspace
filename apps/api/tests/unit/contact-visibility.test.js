@@ -12,24 +12,22 @@ test("salesContactVisibility is null for managers", () => {
   );
 });
 
-test("salesContactVisibility scopes to owned or unassigned CRM customers", () => {
-  const vis = salesContactVisibility({ roleCode: "SALES", userId: "sales-1" });
-  assert.deepEqual(vis, {
-    OR: [
-      { crmCustomerId: null },
-      { crmCustomer: { salesOwnerId: "sales-1" } },
-      { crmCustomer: { salesOwnerId: null } },
-    ],
-  });
+test("salesContactVisibility does not restrict Sales users", () => {
+  assert.equal(
+    salesContactVisibility({ roleCode: "SALES", userId: "sales-1" }),
+    null,
+  );
 });
 
-test("withContactVisibility wraps filters for sales", () => {
-  const where = withContactVisibility({ deletedAt: null }, {
-    roleCode: "SALES",
-    userId: "sales-1",
-  });
-  assert.equal(where.AND.length, 2);
-  assert.deepEqual(where.AND[0], { deletedAt: null });
+test("withContactVisibility leaves sales queries unchanged", () => {
+  const where = { deletedAt: null };
+  assert.deepEqual(
+    withContactVisibility(where, {
+      roleCode: "SALES",
+      userId: "sales-1",
+    }),
+    where,
+  );
 });
 
 test("withContactVisibility leaves manager queries unchanged", () => {

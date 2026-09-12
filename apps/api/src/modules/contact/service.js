@@ -13,12 +13,16 @@ import { withContactVisibility } from "./visibility.js";
 import { formatCustomerNameWithCompany } from "../../utils/crmCustomerName.js";
 
 export const CONTACT_SUBJECTS = [
+  { value: "GENERAL", label: "درخواست عمومی" },
   { value: "CONSULTATION", label: "مشاوره پروژه" },
   { value: "QUOTE", label: "درخواست قیمت" },
   { value: "COLLABORATION", label: "همکاری" },
   { value: "SUPPORT", label: "پشتیبانی" },
   { value: "OTHER", label: "سایر" },
 ];
+
+/** Stored when the public form no longer collects a subject. */
+export const DEFAULT_CONTACT_SUBJECT = "GENERAL";
 
 const SUBJECT_LABELS = Object.fromEntries(
   CONTACT_SUBJECTS.map((s) => [s.value, s.label]),
@@ -74,10 +78,10 @@ export const submitContactSchema = z.object({
     .max(120, "نام شرکت بیش از حد طولانی است")
     .optional()
     .or(z.literal("")),
-  subject: z.enum(["CONSULTATION", "QUOTE", "COLLABORATION", "SUPPORT", "OTHER"], {
-    required_error: "موضوع درخواست را انتخاب کنید",
-    invalid_type_error: "موضوع درخواست نامعتبر است",
-  }),
+  // Optional for backward compatibility; public form no longer sends subject.
+  subject: z
+    .enum(["GENERAL", "CONSULTATION", "QUOTE", "COLLABORATION", "SUPPORT", "OTHER"])
+    .optional(),
   message: z
     .string({ required_error: "پیام الزامی است" })
     .trim()
@@ -178,7 +182,7 @@ export const contactService = {
         getWhatsappNumber(),
         prisma.setting.findUnique({ where: { key: "contact_email" } }),
         prisma.setting.findUnique({ where: { key: "contact_phone" } }),
-        buildWhatsappCta(),
+        buildWhatsappCta({ fromPublicWebsite: true }),
       ]);
 
     const email =
@@ -208,7 +212,6 @@ export const contactService = {
         value: email,
         href: email ? `mailto:${email}` : "",
       },
-      subjects: CONTACT_SUBJECTS,
     };
   },
 
@@ -217,7 +220,10 @@ export const contactService = {
     const email = sanitizeText(raw.email, 160).toLowerCase();
     const phone = sanitizeText(raw.phone, 40);
     const company = sanitizeText(raw.company || "", 120) || null;
-    const subject = raw.subject;
+    const subject =
+      SUBJECT_LABELS[raw.subject] != null
+        ? raw.subject
+        : DEFAULT_CONTACT_SUBJECT;
     const message = sanitizeMultiline(raw.message, 2000);
 
     const since = new Date(Date.now() - DUPLICATE_WINDOW_MS);

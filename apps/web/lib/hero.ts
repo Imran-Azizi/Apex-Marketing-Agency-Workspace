@@ -15,6 +15,22 @@ export const HERO_DURATION_OPTIONS = [
   { value: 10, label: "10 ثانیه" },
 ] as const;
 
+/** Public-site destinations for per-slide CTA buttons (mirrors API catalog). */
+export const HERO_BUTTON_DESTINATIONS = [
+  { id: "home", label: "صفحه اصلی" },
+  { id: "about", label: "درباره ما" },
+  { id: "services", label: "خدمات" },
+  { id: "portfolio", label: "نمونه‌کارها" },
+  { id: "customers", label: "مشتریان ما" },
+  { id: "contact", label: "تماس با ما / ارسال درخواست" },
+] as const;
+
+export const HERO_BUTTON_EXTERNAL = "external" as const;
+
+export type HeroButtonDestinationId =
+  | (typeof HERO_BUTTON_DESTINATIONS)[number]["id"]
+  | typeof HERO_BUTTON_EXTERNAL;
+
 export type HeroSlide = {
   id: string;
   title: string;
@@ -25,6 +41,10 @@ export type HeroSlide = {
   durationSeconds?: number;
   sortOrder?: number;
   isPublished?: boolean;
+  buttonEnabled?: boolean;
+  buttonText?: string | null;
+  buttonDestination?: HeroButtonDestinationId | string | null;
+  buttonUrl?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -70,3 +90,30 @@ export function heroDurationLabel(seconds?: number | null): string {
   return HERO_DURATION_OPTIONS.find((item) => item.value === value)?.label
     ?? `${value} ثانیه`;
 }
+
+export function heroSlideHasButton(slide: Pick<
+  HeroSlide,
+  "buttonEnabled" | "buttonText" | "buttonDestination" | "buttonUrl"
+>): boolean {
+  if (!slide.buttonEnabled) return false;
+  if (!String(slide.buttonText || "").trim()) return false;
+  if (!slide.buttonDestination) return false;
+  if (slide.buttonDestination === HERO_BUTTON_EXTERNAL) {
+    return Boolean(String(slide.buttonUrl || "").trim());
+  }
+  return true;
+}
+
+/**
+ * Responsive sizes for hero images — mobile gets smaller srcset candidates.
+ * Quality is preserved via Next AVIF/WebP at high quality settings.
+ */
+export const HERO_IMAGE_SIZES =
+  "(max-width: 640px) 100vw, (max-width: 1024px) 100vw, (max-width: 1920px) 100vw, 1920px";
+
+/**
+ * Public hero stage: locked 16:9 frame (design canvas 1920×1080).
+ * Full-bleed on all devices — width 100%, height = width × 9/16.
+ */
+export const HERO_STAGE_CLASSNAME =
+  "hero-stage relative w-full overflow-hidden aspect-video bg-[hsl(220_22%_8%)]";

@@ -826,11 +826,10 @@ export const backupService = {
     const backup = await this.get(id);
     const { cloudKey } = parseStorageKeys(backup.storageKey);
     if (cloudKey) {
-      try {
-        await storage.deleteObject(cloudKey);
-      } catch (err) {
-        console.warn('[backup] storage delete:', err?.message || err);
-      }
+      await storage.deleteStoredObject(cloudKey, {
+        required: true,
+        logTag: "backup",
+      });
     }
     await deleteLocalBackup(backup.id);
     await prisma.systemBackup.delete({ where: { id } });

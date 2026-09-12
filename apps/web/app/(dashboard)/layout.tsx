@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { FloatingChatLauncher } from "@/components/chat/floating-chat";
+import { AppBootLoader } from "@/components/loading/app-boot-loader";
 
 export default function DashboardLayout({
   children,
@@ -104,6 +105,7 @@ export default function DashboardLayout({
 
   return (
     <div className="flex min-h-screen">
+      <AppBootLoader />
       <SessionKeepAlive />
       <DashboardSidebar role={me.role} permissions={me.permissions} />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -111,6 +113,7 @@ export default function DashboardLayout({
           userName={getDisplayName(me)}
           role={me.role}
           profileImage={me.profileImage}
+          profileImageUrl={me.profileImageUrl}
           permissions={me.permissions}
         />
         <main className="min-w-0 flex-1 overflow-auto p-3 sm:p-4 lg:p-6">{children}</main>

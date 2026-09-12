@@ -1,19 +1,9 @@
-import { isManagerRole } from "../crm/pipeline.js";
-
 /**
- * Sales users may only see contact messages that are unlinked, or linked to
- * CRM customers they own or that are unassigned (same rule as CRM list).
+ * Contact inbox visibility — aligned with CRM list: Sales sees the full
+ * customer-linked message pool (no salesOwnerId restriction).
  */
-export function salesContactVisibility(auth) {
-  if (!auth || isManagerRole(auth.roleCode)) return null;
-  if (String(auth.roleCode || "").toUpperCase() !== "SALES") return null;
-  return {
-    OR: [
-      { crmCustomerId: null },
-      { crmCustomer: { salesOwnerId: auth.userId } },
-      { crmCustomer: { salesOwnerId: null } },
-    ],
-  };
+export function salesContactVisibility(_auth) {
+  return null;
 }
 
 export function withContactVisibility(where, auth) {

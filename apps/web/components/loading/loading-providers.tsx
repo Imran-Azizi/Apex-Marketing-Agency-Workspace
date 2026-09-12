@@ -1,17 +1,13 @@
 "use client";
 
 import { Suspense } from "react";
-import { AppBootLoader } from "@/components/loading/app-boot-loader";
 import { NavigationProgress } from "@/components/loading/navigation-progress";
 
-/** Client shell for boot splash + route progress (searchParams needs Suspense). */
+/** Route progress only — public first paint must not wait on a splash overlay. */
 export function LoadingProviders() {
   return (
-    <>
-      <AppBootLoader />
-      <Suspense fallback={null}>
-        <NavigationProgress />
-      </Suspense>
-    </>
+    <Suspense fallback={null}>
+      <NavigationProgress />
+    </Suspense>
   );
 }

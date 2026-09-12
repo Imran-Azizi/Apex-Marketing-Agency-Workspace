@@ -141,29 +141,36 @@ test('transfer to customer management is allowed before deposit, but not after c
   );
 });
 
-test('isActiveInManagement matches OUR_CUSTOMERS category', () => {
+test('isActiveInManagement follows transfer (convertedAt), not payment category', () => {
   assert.equal(
-    isActiveInManagement({ pipelineStage: 'PROJECT_CREATED', hasVerifiedPayment: true }),
-    true,
-  );
-  assert.equal(
-    isActiveInManagement({ pipelineStage: 'DELIVERED', hasVerifiedPayment: true }),
-    true,
-  );
-  assert.equal(
-    isActiveInManagement({ pipelineStage: 'REPEAT_CUSTOMER', hasVerifiedPayment: true }),
+    isActiveInManagement({
+      pipelineStage: 'PROJECT_CREATED',
+      convertedAt: new Date(),
+      hasVerifiedPayment: false,
+    }),
     true,
   );
   assert.equal(
     isActiveInManagement({
-      pipelineStage: 'ORDER_CONFIRMED',
+      pipelineStage: 'CONTACTED',
       convertedAt: new Date(),
-      hasVerifiedPayment: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isActiveInManagement({
+      pipelineStage: 'DELIVERED',
+      convertedAt: new Date(),
+      hasVerifiedPayment: true,
     }),
     false,
   );
   assert.equal(
-    isActiveInManagement({ pipelineStage: 'LOST_CANCELED', hasVerifiedPayment: true }),
+    isActiveInManagement({
+      pipelineStage: 'PROJECT_CREATED',
+      convertedAt: null,
+      hasVerifiedPayment: true,
+    }),
     false,
   );
   assert.equal(
@@ -224,8 +231,22 @@ test('normalizes Afghan and international WhatsApp identities without country lo
   assert.equal(iran.country, 'IR');
   const uae = parseInternationalPhone('+971501234567');
   assert.equal(uae.digits, '971501234567');
+  assert.equal(uae.country, 'AE');
   const us = parseInternationalPhone('+12025550123');
   assert.equal(us.digits, '12025550123');
+  assert.equal(us.country, 'US');
+  const uk = parseInternationalPhone('+447400123456');
+  assert.equal(uk.digits, '447400123456');
+  assert.equal(uk.country, 'GB');
+  const pk = parseInternationalPhone('+923001234567');
+  assert.equal(pk.digits, '923001234567');
+  assert.equal(pk.country, 'PK');
+  const india = parseInternationalPhone('+919876543210');
+  assert.equal(india.digits, '919876543210');
+  assert.equal(india.country, 'IN');
+  const de = parseInternationalPhone('+4915123456789');
+  assert.equal(de.digits, '4915123456789');
+  assert.equal(de.country, 'DE');
 });
 
 test('legacy Afghan numbers match international equivalents', () => {

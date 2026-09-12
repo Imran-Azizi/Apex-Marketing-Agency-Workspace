@@ -127,6 +127,7 @@ export function getTransferBlockReason(customer: {
 
 export const LEAD_SOURCE_LABELS: Record<string, string> = {
   WHATSAPP: "واتساپ",
+  WHATSAPP_WEBSITE: "واتساپ / وب‌سایت عمومی",
   WEBSITE: "وب‌سایت",
   WEBSITE_CONTACT: "فرم تماس وب‌سایت",
   INSTAGRAM: "اینستاگرام",
@@ -150,6 +151,10 @@ export function formatLeadSource(source: string | null | undefined): string {
     return detail ? `سایر: ${detail}` : LEAD_SOURCE_LABELS.OTHER;
   }
   return LEAD_SOURCE_LABELS[source] || source;
+}
+
+export function isWhatsAppLeadSource(source: string | null | undefined): boolean {
+  return source === "WHATSAPP" || source === "WHATSAPP_WEBSITE";
 }
 
 export function parseLeadSource(source: string | null | undefined): {

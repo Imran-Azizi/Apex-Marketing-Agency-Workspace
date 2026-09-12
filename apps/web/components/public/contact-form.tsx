@@ -8,10 +8,8 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { apiPost } from "@/lib/api";
 import {
-  CONTACT_SUBJECTS,
   CONTACT_SUCCESS_MESSAGE,
   contactFormSchema,
-  type PublicContactInfo,
 } from "@/lib/contact";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -19,13 +17,6 @@ import { Input } from "@/components/ui/input";
 import { WhatsAppPhoneInput } from "@/components/shared/whatsapp-phone-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 const FIELD_CLASS =
   "h-12 rounded-xl border-border/80 bg-background/90 text-[15px] shadow-sm shadow-black/[0.03] transition-[border-color,box-shadow,background-color] duration-200 placeholder:text-muted-foreground/65 focus-visible:border-brand/55 focus-visible:ring-2 focus-visible:ring-brand/20 focus-visible:ring-offset-0 dark:bg-background/70";
@@ -41,11 +32,7 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 
 type FormValues = z.infer<typeof contactFormSchema>;
 
-export function ContactForm({
-  subjects,
-}: {
-  subjects?: PublicContactInfo["subjects"];
-}) {
+export function ContactForm() {
   const submittingRef = useRef(false);
   const [success, setSuccess] = useState(false);
 
@@ -64,12 +51,10 @@ export function ContactForm({
       email: "",
       phone: "",
       company: "",
-      subject: "CONSULTATION",
       message: "",
     },
   });
 
-  const options = subjects?.length ? subjects : CONTACT_SUBJECTS;
   const busy = isSubmitting;
 
   async function onSubmit(values: FormValues) {
@@ -81,7 +66,6 @@ export function ContactForm({
         email: values.email.trim(),
         phone: values.phone.trim(),
         company: values.company?.trim() || "",
-        subject: values.subject,
         message: values.message.trim(),
       });
       setSuccess(true);
@@ -186,7 +170,9 @@ export function ContactForm({
                 onBlur={field.onBlur}
                 disabled={busy}
                 aria-invalid={!!errors.phone}
-                aria-describedby={errors.phone ? "contact-phone-error" : undefined}
+                aria-describedby={
+                  errors.phone ? "contact-phone-error" : undefined
+                }
                 inputClassName={cn(FIELD_CLASS, "text-start h-12 rounded-xl")}
               />
             )}
@@ -202,44 +188,17 @@ export function ContactForm({
             placeholder="نام شرکت (اختیاری)"
             disabled={busy}
             aria-invalid={errors.company ? true : undefined}
-            aria-describedby={errors.company ? "contact-company-error" : undefined}
+            aria-describedby={
+              errors.company ? "contact-company-error" : undefined
+            }
             className={FIELD_CLASS}
             {...register("company")}
           />
-          <FieldError id="contact-company-error" message={errors.company?.message} />
+          <FieldError
+            id="contact-company-error"
+            message={errors.company?.message}
+          />
         </div>
-      </div>
-
-      <div className="mt-4 space-y-1.5">
-        <Label htmlFor="contact-subject">موضوع درخواست</Label>
-        <Controller
-          name="subject"
-          control={control}
-          render={({ field }) => (
-            <Select
-              value={field.value || undefined}
-              onValueChange={field.onChange}
-              disabled={busy}
-            >
-              <SelectTrigger
-                id="contact-subject"
-                aria-invalid={errors.subject ? true : undefined}
-                aria-required
-                className={cn(FIELD_CLASS, "h-12")}
-              >
-                <SelectValue placeholder="موضوع را انتخاب کنید" />
-              </SelectTrigger>
-              <SelectContent>
-                {options.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        />
-        <FieldError id="contact-subject-error" message={errors.subject?.message} />
       </div>
 
       <div className="mt-4 space-y-1.5">
@@ -250,12 +209,17 @@ export function ContactForm({
           placeholder="درباره پروژه یا نیاز خود بنویسید…"
           disabled={busy}
           aria-invalid={errors.message ? true : undefined}
-          aria-describedby={errors.message ? "contact-message-error" : undefined}
+          aria-describedby={
+            errors.message ? "contact-message-error" : undefined
+          }
           aria-required
           className="min-h-[9rem] rounded-xl border-border/80 bg-background/90 text-[15px] shadow-sm focus-visible:border-brand/55 focus-visible:ring-2 focus-visible:ring-brand/20 focus-visible:ring-offset-0 dark:bg-background/70"
           {...register("message")}
         />
-        <FieldError id="contact-message-error" message={errors.message?.message} />
+        <FieldError
+          id="contact-message-error"
+          message={errors.message?.message}
+        />
       </div>
 
       <Button

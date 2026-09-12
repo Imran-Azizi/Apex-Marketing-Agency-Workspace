@@ -13,8 +13,8 @@ export function useMeQuery() {
     queryKey: ["me", panel || "internal"],
     queryFn: getMe,
     retry: false,
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
   });
 }
 

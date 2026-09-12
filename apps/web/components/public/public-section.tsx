@@ -38,7 +38,7 @@ export function PublicSection({
             {title}
           </h2>
           {description ? (
-            <p className="mt-3 text-pretty text-sm leading-7 text-muted-foreground sm:text-base sm:leading-8">
+            <p className="mt-3 whitespace-pre-wrap text-pretty text-sm leading-7 text-muted-foreground sm:text-base sm:leading-8">
               {description}
             </p>
           ) : null}

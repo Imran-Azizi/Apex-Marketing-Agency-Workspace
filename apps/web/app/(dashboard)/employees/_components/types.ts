@@ -52,6 +52,7 @@ export interface Employee {
   fullName: string;
   phone: string | null;
   profileImage: string | null;
+  profileImageUrl?: string | null;
   cvStorageKey?: string | null;
   cvFileName?: string | null;
   cvMimeType?: string | null;
