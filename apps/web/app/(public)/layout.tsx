@@ -12,7 +12,8 @@ import type { PublicContactInfo } from "@/lib/contact";
 import { COMPANY_INTRO_TITLE } from "@/lib/company";
 import type { PublicSiteCopy } from "@/lib/public-copy";
 
-export const revalidate = PUBLIC_REVALIDATE_SECONDS;
+/** Must be a numeric literal — Next.js cannot analyze imported segment config. */
+export const revalidate = 60;
 
 export async function generateMetadata(): Promise<Metadata> {
   const copy = await fetchPublicJson<PublicSiteCopy>(

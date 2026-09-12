@@ -21,7 +21,8 @@ import {
 } from "@/lib/portfolio";
 import type { PublicSiteCopy } from "@/lib/public-copy";
 
-export const revalidate = PUBLIC_REVALIDATE_SECONDS;
+/** Must be a numeric literal — Next.js cannot analyze imported segment config. */
+export const revalidate = 60;
 
 function fetchSiteCopy() {
   return fetchPublicJson<PublicSiteCopy>(
