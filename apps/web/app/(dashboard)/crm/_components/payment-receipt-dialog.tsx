@@ -170,7 +170,6 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
         : "—";
   const totalAmount = receipt.finance?.totalAmount ?? 0;
   const paidAmount = receipt.payment.amount;
-  const remaining = receipt.finance?.remainingBalance ?? 0;
   const method =
     receipt.payment.methodLabel &&
     receipt.payment.methodLabel !== "ثبت نشده"
@@ -211,12 +210,6 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
       ltr: Boolean(row.ltr),
     })),
     { label: "ثبت‌کننده", value: recorder },
-    {
-      label: "مبلغ باقی‌مانده",
-      value: formatReceiptAmount(remaining),
-      amount: true,
-      emphasize: true,
-    },
   ];
 
   return (

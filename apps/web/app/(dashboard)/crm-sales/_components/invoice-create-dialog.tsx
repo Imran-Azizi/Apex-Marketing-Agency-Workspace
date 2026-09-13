@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiPost, ApiError } from "@/lib/api";
-import { cn, formatCurrency } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -177,19 +177,6 @@ export function InvoiceCreateDialog({
     setFieldError("");
     setErrors({});
   }, [open, customer?.id]);
-
-  const remaining = useMemo(() => {
-    const total = parseMoney(totalAmount);
-    const paid = parseMoney(paidAmount || "0");
-    if (!Number.isFinite(total) || total < 0) return 0;
-    const safePaid = Number.isFinite(paid) && paid > 0 ? paid : 0;
-    return Math.max(0, total - safePaid);
-  }, [totalAmount, paidAmount]);
-
-  const hasTotal = useMemo(() => {
-    const total = parseMoney(totalAmount);
-    return Number.isFinite(total) && total > 0;
-  }, [totalAmount]);
 
   const clearField = (key: FieldKey) => {
     setErrors((current) => {
@@ -378,42 +365,6 @@ export function InvoiceCreateDialog({
                 title={crmSalesText("invoiceFinanceSection")}
               />
 
-              {/* Remaining — featured */}
-              <div
-                aria-live="polite"
-                className={cn(
-                  "relative overflow-hidden rounded-xl border px-4 py-3.5 sm:px-5 sm:py-4",
-                  remaining > 0
-                    ? "border-amber-500/30 bg-gradient-to-l from-amber-500/[0.08] via-card to-card dark:from-amber-500/10"
-                    : hasTotal
-                      ? "border-emerald-500/25 bg-gradient-to-l from-emerald-500/[0.06] via-card to-card dark:from-emerald-500/10"
-                      : "border-border/50 bg-muted/15",
-                )}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0 text-start">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {crmSalesText("invoiceRemaining")}
-                    </p>
-                  </div>
-                  <p
-                    dir="ltr"
-                    aria-readonly="true"
-                    className={cn(
-                      "shrink-0 text-right text-2xl font-black tabular-nums tracking-tight [unicode-bidi:isolate] sm:text-[1.65rem]",
-                      remaining > 0
-                        ? "text-amber-700 dark:text-amber-400"
-                        : hasTotal
-                          ? "text-emerald-700 dark:text-emerald-400"
-                          : "text-foreground",
-                    )}
-                  >
-                    {formatCurrency(remaining)}
-                  </p>
-                </div>
-              </div>
-
-              {/* Inputs row */}
               <div className="grid gap-3 sm:grid-cols-[5.5rem_1fr_1fr]">
                 <div className="space-y-1.5">
                   <Label

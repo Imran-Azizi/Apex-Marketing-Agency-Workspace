@@ -5,7 +5,6 @@ import { useMutation } from "@tanstack/react-query";
 import {
   BadgeCheck,
   CircleDollarSign,
-  CreditCard,
   FileText,
   Lock,
   Save,
@@ -13,38 +12,21 @@ import {
   ShieldCheck,
   Wallet,
 } from "lucide-react";
-import { apiPatch, apiPost } from "@/lib/api";
+import { apiPatch } from "@/lib/api";
 import { formatCurrency, cn } from "@/lib/utils";
-import {
-  CUSTOMER_PAYMENT_METHODS,
-  type CustomerPaymentMethod,
-} from "@/lib/payment-methods";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { CrmCurrencyField } from "./crm-ui";
+import {
+  NewPaymentDialog,
+  type OpportunityFinance,
+  type RecordedPayment,
+} from "./new-payment-dialog";
 
-export type OpportunityFinance = {
-  projectTotal: number;
-  totalPaid: number;
-  remainingBalance: number;
-  customerDebt: number;
-  /** Approved + pending amounts reserved against the contract. */
-  reservedPaid?: number;
-  pendingApprovalTotal?: number;
-  /** Max amount that can still be recorded (respects pending approvals). */
-  availableToRecord?: number;
-};
+export type { OpportunityFinance };
 
 export type OpportunityDetails = {
   id: string;
@@ -209,14 +191,7 @@ interface CustomerDetailsFormProps {
   opportunity: OpportunityDetails;
   paymentCount?: number;
   onSaved: () => void | Promise<void>;
-  onPaymentCreated?: (payment: {
-    id: string;
-    isFirstPayment?: boolean;
-    customerConverted?: boolean;
-    portalInviteUnlocked?: boolean;
-    receiptGenerated?: boolean;
-    finance?: OpportunityFinance;
-  }) => void | Promise<void>;
+  onPaymentCreated?: (payment: RecordedPayment) => void | Promise<void>;
 }
 
 export function CustomerDetailsForm({
@@ -229,17 +204,6 @@ export function CustomerDetailsForm({
   const baseline = useMemo(() => toFormState(opportunity), [opportunity]);
   const [form, setForm] = useState<FormState>(baseline);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] =
-    useState<CustomerPaymentMethod | null>(null);
-  const [hesabPayAccount, setHesabPayAccount] = useState("");
-  const [officeAddress, setOfficeAddress] = useState("");
-  const [responsiblePhone, setResponsiblePhone] = useState("");
-  const [bankCardNumber, setBankCardNumber] = useState("");
-  const [bankInfo, setBankInfo] = useState("");
-  const [paymentMethodError, setPaymentMethodError] = useState("");
-  const [paymentMetaError, setPaymentMetaError] = useState("");
-  const [paymentError, setPaymentError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
     agreedPrice?: string;
     agreedTerms?: string;
@@ -274,64 +238,6 @@ export function CustomerDetailsForm({
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
   });
 
-  const paymentMut = useMutation({
-    mutationFn: () =>
-      apiPost<{
-        id: string;
-        isFirstPayment?: boolean;
-        customerConverted?: boolean;
-        portalInviteUnlocked?: boolean;
-        receiptGenerated?: boolean;
-        paymentNumber?: string;
-        awaitingApproval?: boolean;
-        approvalStatus?: string;
-        method?: CustomerPaymentMethod;
-        methodLabel?: string;
-        finance?: OpportunityFinance;
-      }>(`/crm/payments`, {
-        opportunityId: opportunity.id,
-        amount: Number(paymentAmount),
-        method: paymentMethod,
-        paymentMethodMeta: {
-          hesabPayAccount: hesabPayAccount.trim() || undefined,
-          officeAddress: officeAddress.trim() || undefined,
-          responsiblePhone: responsiblePhone.trim() || undefined,
-          bankCardNumber: bankCardNumber.trim() || undefined,
-          bankInfo: bankInfo.trim() || undefined,
-        },
-      }),
-    onSuccess: async (res) => {
-      const unlocked =
-        res?.portalInviteUnlocked === true ||
-        res?.isFirstPayment === true ||
-        paymentCount === 0;
-      if (res?.awaitingApproval) {
-        toast.success("پرداخت ثبت شد — در انتظار تایید مدیر");
-      } else if (unlocked) {
-        toast.success("پرداخت ثبت شد — دعوت پورتال و رسید پرداخت آماده شد");
-      } else {
-        toast.success("پرداخت ثبت شد و رسید پرداخت ساخته شد");
-      }
-      setPaymentOpen(false);
-      setPaymentAmount("");
-      setPaymentMethod(null);
-      setHesabPayAccount("");
-      setOfficeAddress("");
-      setResponsiblePhone("");
-      setBankCardNumber("");
-      setBankInfo("");
-      setPaymentMethodError("");
-      setPaymentMetaError("");
-      setPaymentError("");
-      if (onPaymentCreated) {
-        await onPaymentCreated(res);
-      } else {
-        await onSaved();
-      }
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
-  });
-
   const handleSave = () => {
     const errors: { agreedPrice?: string; agreedTerms?: string } = {};
     if (!form.agreedPrice.trim() || !isValidMoneyInput(form.agreedPrice) || parseMoney(form.agreedPrice) <= 0) {
@@ -349,62 +255,7 @@ export function CustomerDetailsForm({
   };
 
   const openPaymentModal = () => {
-    setPaymentAmount("");
-    setPaymentMethod(null);
-    setHesabPayAccount("");
-    setOfficeAddress("");
-    setResponsiblePhone("");
-    setBankCardNumber("");
-    setBankInfo("");
-    setPaymentMethodError("");
-    setPaymentMetaError("");
-    setPaymentError("");
     setPaymentOpen(true);
-  };
-
-  const submitPayment = () => {
-    if (!paymentMethod) {
-      setPaymentMethodError("لطفاً روش پرداخت را انتخاب کنید.");
-      return;
-    }
-    setPaymentMethodError("");
-    setPaymentMetaError("");
-
-    if (paymentMethod === "HESAB_PAY" && !hesabPayAccount.trim()) {
-      setPaymentMetaError("شماره حساب پی الزامی است.");
-      return;
-    }
-    if (paymentMethod === "CASH") {
-      if (!officeAddress.trim()) {
-        setPaymentMetaError("آدرس دفتر الزامی است.");
-        return;
-      }
-      if (!responsiblePhone.trim()) {
-        setPaymentMetaError("شماره تماس مسئول دفتر الزامی است.");
-        return;
-      }
-    }
-    if (paymentMethod === "BANK_TRANSFER" && !bankCardNumber.trim()) {
-      setPaymentMetaError("شماره کارت بانکی الزامی است.");
-      return;
-    }
-    const amt = Number(paymentAmount);
-    if (!paymentAmount.trim() || Number.isNaN(amt) || amt <= 0) {
-      setPaymentError("لطفاً یک مبلغ معتبر و مثبت وارد کنید.");
-      return;
-    }
-    if (finance.projectTotal <= 0 || !locked) {
-      setPaymentError("ابتدا قیمت و شرایط قرارداد را ذخیره کنید.");
-      return;
-    }
-    if (amt > (finance.availableToRecord ?? finance.remainingBalance) + 0.009) {
-      setPaymentError(
-        "مبلغ پرداخت نمی‌تواند بیشتر از باقی‌مانده پرداخت باشد.",
-      );
-      return;
-    }
-    setPaymentError("");
-    paymentMut.mutate();
   };
 
   return (
@@ -623,259 +474,21 @@ export function CustomerDetailsForm({
         )}
       </div>
 
-      <Dialog
+      <NewPaymentDialog
         open={paymentOpen}
-        onOpenChange={(open) => {
-          if (paymentMut.isPending) return;
-          setPaymentOpen(open);
-          if (!open) {
-            setPaymentAmount("");
-            setPaymentMethod(null);
-            setHesabPayAccount("");
-            setOfficeAddress("");
-            setResponsiblePhone("");
-            setBankCardNumber("");
-            setBankInfo("");
-            setPaymentMethodError("");
-            setPaymentMetaError("");
-            setPaymentError("");
+        onOpenChange={setPaymentOpen}
+        opportunityId={opportunity.id}
+        finance={finance}
+        contractLocked={locked}
+        paymentCount={paymentCount}
+        onCreated={async (payment) => {
+          if (onPaymentCreated) {
+            await onPaymentCreated(payment);
+          } else {
+            await onSaved();
           }
         }}
-      >
-        <DialogContent dir="rtl" className="gap-5 rounded-2xl sm:max-w-md">
-          <DialogHeader className="text-start">
-            <div className="mb-1 flex h-11 w-11 items-center justify-center rounded-xl bg-brand/10 text-brand">
-              <CreditCard className="h-5 w-5" />
-            </div>
-            <DialogTitle className="text-start text-lg">پرداخت جدید</DialogTitle>
-          </DialogHeader>
-
-          <div className="grid grid-cols-2 gap-3 rounded-xl border border-border/50 bg-muted/20 p-3">
-            <div className="text-start">
-              <p className="text-[11px] text-muted-foreground">باقی‌مانده پرداخت</p>
-              <p className="text-sm font-bold tabular-nums text-amber-700 dark:text-amber-400">
-                {formatCurrency(
-                  finance.availableToRecord ?? finance.remainingBalance,
-                )}
-              </p>
-            </div>
-            <div className="text-start">
-              <p className="text-[11px] text-muted-foreground">مجموع پرداخت‌شده</p>
-              <p className="text-sm font-bold tabular-nums text-brand">
-                {formatCurrency(finance.totalPaid)}
-              </p>
-            </div>
-            {(finance.pendingApprovalTotal || 0) > 0 ? (
-              <div className="col-span-2 text-start">
-                <p className="text-[11px] text-muted-foreground">
-                  در انتظار تایید مدیر
-                </p>
-                <p className="text-sm font-semibold tabular-nums text-amber-800 dark:text-amber-400">
-                  {formatCurrency(finance.pendingApprovalTotal || 0)}
-                </p>
-              </div>
-            ) : null}
-          </div>
-
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-foreground">
-              روش پرداخت <span className="text-destructive">*</span>
-            </legend>
-            <div
-              role="radiogroup"
-              aria-label="روش پرداخت"
-              aria-invalid={!!paymentMethodError}
-              aria-describedby={
-                paymentMethodError ? "payment-method-error" : undefined
-              }
-              className="grid grid-cols-2 gap-1.5 rounded-xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-4"
-            >
-              {CUSTOMER_PAYMENT_METHODS.map((option) => {
-                const selected = paymentMethod === option.value;
-                return (
-                  <label
-                    key={option.value}
-                    className={cn(
-                      "relative flex min-h-10 cursor-pointer items-center justify-center rounded-lg px-2 text-sm font-semibold transition-all",
-                      "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background",
-                      selected
-                        ? "bg-card text-brand shadow-sm ring-1 ring-brand/25"
-                        : "text-muted-foreground hover:bg-card/60 hover:text-foreground",
-                      paymentMut.isPending &&
-                        "pointer-events-none opacity-60",
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="payment-method"
-                      value={option.value}
-                      checked={selected}
-                      disabled={paymentMut.isPending}
-                      onChange={() => {
-                        setPaymentMethod(option.value);
-                        setPaymentMethodError("");
-                        setPaymentMetaError("");
-                      }}
-                      className="sr-only"
-                    />
-                    {option.label}
-                  </label>
-                );
-              })}
-            </div>
-            {paymentMethodError ? (
-              <p
-                id="payment-method-error"
-                className="text-xs text-destructive"
-                role="alert"
-              >
-                {paymentMethodError}
-              </p>
-            ) : null}
-          </fieldset>
-
-          {paymentMethod === "HESAB_PAY" ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-hesab" className="text-xs">
-                شماره حساب پی <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="payment-hesab"
-                dir="ltr"
-                disabled={paymentMut.isPending}
-                className="h-11 rounded-xl text-end"
-                value={hesabPayAccount}
-                onChange={(e) => {
-                  setHesabPayAccount(e.target.value);
-                  setPaymentMetaError("");
-                }}
-              />
-            </div>
-          ) : null}
-
-          {paymentMethod === "CASH" ? (
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="payment-office" className="text-xs">
-                  آدرس دفتر <span className="text-destructive">*</span>
-                </Label>
-                <Textarea
-                  id="payment-office"
-                  disabled={paymentMut.isPending}
-                  className="min-h-[4rem] resize-none rounded-xl"
-                  value={officeAddress}
-                  onChange={(e) => {
-                    setOfficeAddress(e.target.value);
-                    setPaymentMetaError("");
-                  }}
-                  rows={2}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="payment-rep-phone" className="text-xs">
-                  شماره تماس مسئول دفتر <span className="text-destructive">*</span>
-                </Label>
-                <Input
-                  id="payment-rep-phone"
-                  dir="ltr"
-                  disabled={paymentMut.isPending}
-                  className="h-11 rounded-xl text-end"
-                  value={responsiblePhone}
-                  onChange={(e) => {
-                    setResponsiblePhone(e.target.value);
-                    setPaymentMetaError("");
-                  }}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          {paymentMethod === "BANK_TRANSFER" ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-card" className="text-xs">
-                شماره کارت بانکی <span className="text-destructive">*</span>
-              </Label>
-              <Input
-                id="payment-card"
-                dir="ltr"
-                disabled={paymentMut.isPending}
-                className="h-11 rounded-xl text-end"
-                value={bankCardNumber}
-                onChange={(e) => {
-                  setBankCardNumber(e.target.value);
-                  setPaymentMetaError("");
-                }}
-              />
-            </div>
-          ) : null}
-
-          {paymentMethod === "HAWALA" ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="payment-hawala" className="text-xs">
-                جزئیات حواله
-              </Label>
-              <Textarea
-                id="payment-hawala"
-                disabled={paymentMut.isPending}
-                className="min-h-[4rem] resize-none rounded-xl"
-                placeholder="نام صرافی، شماره حواله یا سایر جزئیات"
-                value={bankInfo}
-                onChange={(e) => {
-                  setBankInfo(e.target.value);
-                  setPaymentMetaError("");
-                }}
-                rows={2}
-              />
-            </div>
-          ) : null}
-
-          {paymentMetaError ? (
-            <p className="text-xs text-destructive" role="alert">
-              {paymentMetaError}
-            </p>
-          ) : null}
-
-          <div className="space-y-2">
-            <CrmCurrencyField
-              id="new-payment-amount"
-              label="مقدار *"
-              value={paymentAmount}
-              onChange={(v) => {
-                setPaymentAmount(v);
-                if (paymentError) setPaymentError("");
-              }}
-              placeholder="0"
-              hint={`حداکثر مجاز: ${formatCurrency(finance.availableToRecord ?? finance.remainingBalance)}`}
-            />
-            {paymentError && (
-              <p className="text-xs text-destructive">{paymentError}</p>
-            )}
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              disabled={paymentMut.isPending}
-              onClick={() => setPaymentOpen(false)}
-            >
-              انصراف
-            </Button>
-            <Button
-              type="button"
-              variant="brand"
-              className="rounded-xl shadow-md shadow-brand/20"
-              isLoading={paymentMut.isPending}
-              loadingText="در حال ثبت..."
-              onClick={submitPayment}
-            >
-              <Wallet className="h-4 w-4" />
-              ثبت پرداخت
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      />
     </section>
   );
 }

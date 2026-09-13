@@ -208,6 +208,20 @@ export default function FinanceProjectsPage() {
 
         onOpenChange={setDetailsOpen}
 
+        onPaymentCreated={async () => {
+
+          const result = await query.refetch();
+
+          const next = result.data?.items.find(
+
+            (item) => item.id === selectedProject?.id,
+
+          );
+
+          if (next) setSelectedProject(next);
+
+        }}
+
       />
 
     </div>

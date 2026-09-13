@@ -3,7 +3,8 @@
  * /finance/dashboard, /finance/pnl, and Manager Dashboard finance cards.
  *
  * Rules (aligned with CRM paymentFinance + ProjectFinance):
- * - received = sum of VERIFIED payments with paidAt in range (payments are source of truth)
+ * - received = sum of VERIFIED *financial* payments in range
+ *   (CRM و فروش sample invoices are excluded; they never post Payment rows)
  * - totalProjectReceipts = totalFinalPrice (sum of project contract values — NOT cash received)
  * - directProjectCosts = narrator + editor + otherDirectCosts from ProjectFinance
  * - projectProfit = totalFinalPrice − directProjectCosts (for scoped projects)
@@ -22,6 +23,7 @@
 
 import { prisma } from '../../db/prisma.js';
 import { APPROVED_PAYMENT_VERIFICATIONS } from '../crm/paymentFinance.js';
+import { financialPaymentWhere } from '../crm/sampleInvoice.js';
 import {
   directProjectCosts,
   netCompanyProfit,
@@ -94,6 +96,7 @@ async function sumVerifiedPayments({ from, to }) {
   const where = {
     verification: { in: [...APPROVED_PAYMENT_VERIFICATIONS] },
     ...dateFilter('paidAt', from, to),
+    ...financialPaymentWhere(),
   };
   const agg = await prisma.payment.aggregate({
     where,
@@ -151,6 +154,8 @@ export async function loadAllProjectsForFinanceList() {
           id: true,
           agreedPrice: true,
           currency: true,
+          contractLocked: true,
+          crmCustomerId: true,
         },
       },
     },
@@ -227,7 +232,6 @@ export async function loadPaymentsGroupedByProject(projects) {
         select: {
           projectId: true,
           opportunityId: true,
-          invoiceNumber: true,
         },
       },
     },

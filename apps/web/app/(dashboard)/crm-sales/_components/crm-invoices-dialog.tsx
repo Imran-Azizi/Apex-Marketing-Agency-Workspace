@@ -103,7 +103,6 @@ function shareText(invoice: CrmInvoice) {
     number: invoice.invoiceNumber,
     total: money(invoice.total),
     paid: money(invoice.paidAmount),
-    remaining: money(invoice.remainingAmount),
   });
 }
 
@@ -329,10 +328,6 @@ export function CrmInvoicesDialog({
                     <span className="shrink-0 text-end">
                       <span className="block text-sm font-bold tabular-nums">
                         {money(invoice.total)}
-                      </span>
-                      <span className="block text-[11px] text-muted-foreground">
-                        {crmSalesText("invoiceRemaining")}:{" "}
-                        {money(invoice.remainingAmount)}
                       </span>
                     </span>
                   </button>

@@ -3,6 +3,8 @@
  * Labels live here (not in business conditionals) so UI/API can localize.
  */
 
+import { financialPaymentWhere } from './sampleInvoice.js';
+
 export const CRM_STAGES = Object.freeze([
   'NEW_LEAD',
   'CONTACTED',
@@ -352,7 +354,11 @@ export function stagesForCategory(category) {
 }
 
 function notOurCustomerClause() {
-  return { payments: { none: { verification: 'VERIFIED' } } };
+  return {
+    payments: {
+      none: { verification: 'VERIFIED', ...financialPaymentWhere() },
+    },
+  };
 }
 
 /**
@@ -366,7 +372,7 @@ export function buildCategoryWhere(category, { excludeLost = true } = {}) {
     return {
       AND: [
         ...notLost,
-        { payments: { some: { verification: 'VERIFIED' } } },
+        { payments: { some: { verification: 'VERIFIED', ...financialPaymentWhere() } } },
       ],
     };
   }
@@ -430,7 +436,7 @@ export function buildCategoryWhere(category, { excludeLost = true } = {}) {
                     ],
                   },
                 },
-                { payments: { some: {} } },
+                { payments: { some: financialPaymentWhere() } },
               ],
             },
           ],

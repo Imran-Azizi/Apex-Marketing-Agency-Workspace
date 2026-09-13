@@ -39,7 +39,6 @@ export function buildInvoiceDocumentHtml(invoice) {
   const customer = invoice.customer || {};
   const total = Number(invoice.total || 0);
   const paid = Number(invoice.paidAmount || 0);
-  const remaining = Number(invoice.remainingAmount || 0);
   const status = invoiceStatusLabel(invoice.status);
   const method = dash(invoice.paymentMethodLabel);
   const recorder = String(invoice.recordedByName || "").trim();
@@ -63,7 +62,7 @@ export function buildInvoiceDocumentHtml(invoice) {
       amount: true,
     },
     {
-      label: "مبلغ پرداخت شده",
+      label: "مبلغ قابل پرداخت",
       value: formatReceiptAmount(paid),
       amount: true,
     },
@@ -75,13 +74,8 @@ export function buildInvoiceDocumentHtml(invoice) {
     })),
     { label: "وضعیت پرداخت", value: status },
     ...(recorder ? [{ label: "ثبت‌کننده", value: recorder }] : []),
-    {
-      label: "مبلغ باقی‌مانده",
-      value: formatReceiptAmount(remaining),
-      amount: true,
-      last: true,
-    },
   ];
+  if (summaryRows.length) summaryRows[summaryRows.length - 1].last = true;
 
   const summaryHtml = summaryRows
     .map(

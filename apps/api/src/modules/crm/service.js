@@ -61,6 +61,14 @@ import {
 import { hasAnyPermission } from "../../services/permissions/effective.js";
 import { storage } from "../../services/storage.js";
 import { ingestWhatsAppMessage } from "./ingestion.js";
+import { getCompanyContact } from "../settings/company-contact.js";
+import {
+  isSampleCrmInvoice,
+  financialInvoiceWhere,
+  financialPaymentWhere,
+  sampleInvoiceDisplayStatus,
+  resolveSampleInvoicePaidAmount,
+} from "./sampleInvoice.js";
 import {
   assertPaymentWithinRemaining,
   batchOpportunityFinanceSnapshots,
@@ -426,15 +434,18 @@ export const crmService = {
             select: { agreedPrice: true, pipelineStage: true },
           },
           payments: {
-            where: { verification: "VERIFIED" },
+            where: {
+              verification: "VERIFIED",
+              ...financialPaymentWhere(),
+            },
             select: { id: true },
             take: 1,
           },
           _count: {
             select: {
               projects: { where: { deletedAt: null } },
-              invoices: true,
-              payments: true,
+              invoices: { where: financialInvoiceWhere() },
+              payments: { where: financialPaymentWhere() },
             },
           },
         },
@@ -516,12 +527,7 @@ export const crmService = {
             status: { not: "CANCELED" },
             AND: [
               { OR: [{ projectId: null }, { project: { deletedAt: null } }] },
-              {
-                OR: [
-                  { opportunityId: { not: null } },
-                  { projectId: { not: null } },
-                ],
-              },
+              financialInvoiceWhere(),
             ],
           },
           orderBy: { createdAt: "desc" },
@@ -541,12 +547,7 @@ export const crmService = {
                         { project: { deletedAt: null } },
                       ],
                     },
-                    {
-                      OR: [
-                        { opportunityId: { not: null } },
-                        { projectId: { not: null } },
-                      ],
-                    },
+                    financialInvoiceWhere(),
                   ],
                 },
               },
@@ -561,8 +562,8 @@ export const crmService = {
         salesOwner: true,
         _count: {
           select: {
-            invoices: true,
-            payments: true,
+            invoices: { where: financialInvoiceWhere() },
+            payments: { where: financialPaymentWhere() },
           },
         },
       },
@@ -583,7 +584,11 @@ export const crmService = {
       batchOpportunityFinanceSnapshots(prisma, customer.opportunities),
       listCrmActivities(prisma, customer.id),
       prisma.payment.findFirst({
-        where: { crmCustomerId: customer.id, verification: "VERIFIED" },
+        where: {
+          crmCustomerId: customer.id,
+          verification: "VERIFIED",
+          ...financialPaymentWhere(),
+        },
         select: { id: true },
       }),
     ]);
@@ -1132,7 +1137,7 @@ export const crmService = {
     const paidAmount = roundMoney(body.paidAmount || 0);
     if (paidAmount > total) {
       throw new AppError(
-        "مبلغ پرداخت‌شده نمی‌تواند از مبلغ کل بیشتر باشد",
+        "مبلغ قابل پرداخت نمی‌تواند از مبلغ کل بیشتر باشد",
         400,
         "VALIDATION",
       );
@@ -1170,9 +1175,12 @@ export const crmService = {
     );
     const invoiceTotal = itemsTotal > 0 ? itemsTotal : total;
     const paymentMethod = body.paymentMethod || null;
-    const paymentMethodMeta = paymentMethod
-      ? sanitizePaymentMethodMeta(paymentMethod, body.paymentMethodMeta)
-      : undefined;
+    const paymentMethodMeta = {
+      ...(paymentMethod
+        ? sanitizePaymentMethodMeta(paymentMethod, body.paymentMethodMeta)
+        : {}),
+      quotedPaidAmount: paidAmount,
+    };
 
     const invoice = await prisma.$transaction(async (tx) => {
       const count = await tx.invoice.count();
@@ -1184,7 +1192,7 @@ export const crmService = {
           crmCustomerId: customer.id,
           opportunityId: null,
           projectId: null,
-          status: "ISSUED",
+          status: sampleInvoiceDisplayStatus(invoiceTotal, paidAmount),
           issuedAt: new Date(),
           dueAt: body.dueAt ? new Date(body.dueAt) : null,
           subtotal: invoiceTotal,
@@ -1197,6 +1205,11 @@ export const crmService = {
         },
         include: { items: true },
       });
+      await tx.$executeRaw`
+        UPDATE "invoices"
+        SET "quotedPaidAmount" = ${paidAmount}
+        WHERE "id" = ${inv.id}
+      `;
 
       await applyCrmEvent(tx, {
         customerId: customer.id,
@@ -1212,7 +1225,9 @@ export const crmService = {
         meta: {
           invoiceNumber,
           total: invoiceTotal,
+          quotedPaidAmount: paidAmount,
           origin: "CRM_SALES",
+          sample: true,
         },
       });
 
@@ -1226,41 +1241,22 @@ export const crmService = {
       entityId: invoice.id,
       after: {
         total: invoiceTotal,
+        quotedPaidAmount: paidAmount,
         opportunityId: null,
         origin: "CRM_SALES",
+        sample: true,
         invoiceNumber: invoice.invoiceNumber,
         crmCustomerId: customer.id,
       },
       req,
     });
 
-    let paymentId = null;
-    if (paidAmount > 0) {
-      const paymentResult = await this.recordPayment(
-        {
-          invoiceId: invoice.id,
-          amount: paidAmount,
-          method: body.paymentMethod,
-          paymentMethodMeta: body.paymentMethodMeta,
-          reference: invoice.invoiceNumber,
-        },
-        auth,
-        req,
-      );
-      paymentId = paymentResult.id || null;
-    }
-
-    const latest = await prisma.crmCustomer.findFirst({
-      where: { id: customerId, deletedAt: null },
-      select: { convertedAt: true },
-    });
-
     const view = await this.getInvoiceView(invoice.id);
     return {
       ...view,
       customerId,
-      customerConverted: Boolean(latest?.convertedAt),
-      paymentId,
+      customerConverted: Boolean(customer.convertedAt),
+      paymentId: null,
     };
   },
 
@@ -1316,8 +1312,10 @@ export const crmService = {
     return {
       customer: customerSummary,
       items: invoices.map((inv) => {
-        const total = roundMoney(inv.total);
-        const paidAmount = paidByInvoice.get(inv.id) || 0;
+        const paidAmount = resolveSampleInvoicePaidAmount(
+          inv,
+          paidByInvoice.get(inv.id) || 0,
+        );
         return {
           ...inv,
           paymentMethodLabel: formatPaymentMethod(inv.paymentMethod),
@@ -1326,8 +1324,8 @@ export const crmService = {
             inv.paymentMethodMeta,
           ),
           paidAmount,
-          remainingAmount: roundMoney(Math.max(0, total - paidAmount)),
           isCrmInvoice: true,
+          isSampleInvoice: true,
           customer: customerSummary,
         };
       }),
@@ -1488,21 +1486,26 @@ export const crmService = {
       where: { invoiceId: invoice.id, verification: "VERIFIED" },
       _sum: { amount: true },
     });
-    paidAmount = roundMoney(verified._sum.amount || 0);
-    if (invoice.opportunityId) {
-      const snap = await syncOpportunityFinance(prisma, invoice.opportunityId, {
-        persist: false,
-      });
-      paidAmount = roundMoney(snap.finance.totalPaid);
+    const paymentSum = roundMoney(verified._sum.amount || 0);
+    const isCrmInvoice = isSampleCrmInvoice(invoice);
+    if (isCrmInvoice) {
+      paidAmount = resolveSampleInvoicePaidAmount(invoice, paymentSum);
+    } else {
+      paidAmount = paymentSum;
+      if (invoice.opportunityId) {
+        const snap = await syncOpportunityFinance(prisma, invoice.opportunityId, {
+          persist: false,
+        });
+        paidAmount = roundMoney(snap.finance.totalPaid);
+      }
     }
-    const total = roundMoney(invoice.total);
-    const remainingAmount = roundMoney(Math.max(0, total - paidAmount));
-    const isCrmInvoice = !invoice.opportunityId && !invoice.projectId;
-    const latestPayment = await prisma.payment.findFirst({
-      where: { invoiceId: invoice.id },
-      orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
-      select: { id: true, recordedById: true },
-    });
+    const latestPayment = isCrmInvoice
+      ? null
+      : await prisma.payment.findFirst({
+          where: { invoiceId: invoice.id },
+          orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+          select: { id: true, recordedById: true },
+        });
     let recordedByName = null;
     if (latestPayment?.recordedById) {
       const recorder = await prisma.user.findUnique({
@@ -1517,6 +1520,7 @@ export const crmService = {
           .replace(/^https?:\/\//i, "")
           .replace(/\/$/, "")
       : null;
+    const companyContact = await getCompanyContact();
 
     return {
       ...invoice,
@@ -1526,15 +1530,15 @@ export const crmService = {
         invoice.paymentMethodMeta,
       ),
       paidAmount,
-      remainingAmount,
       isCrmInvoice,
+      isSampleInvoice: isCrmInvoice,
       paymentId: latestPayment?.id || null,
       recordedByName,
       statusLabel: invoiceStatusLabel(invoice.status),
       company: {
         name: "APEX SMART MARKETING",
-        phone: env.contactPhone || null,
-        email: env.contactEmail || null,
+        phone: companyContact.phone,
+        email: companyContact.email,
         website,
       },
       customer: {
@@ -1584,6 +1588,13 @@ export const crmService = {
         where: { id: invoiceId },
       });
       if (!invoice) throw new AppError("فاکتور یافت نشد", 404, "NOT_FOUND");
+      if (isSampleCrmInvoice(invoice)) {
+        throw new AppError(
+          "این فاکتور نمونه‌ای است و در سوابق مالی ثبت نمی‌شود",
+          400,
+          "SAMPLE_INVOICE",
+        );
+      }
       crmCustomerId = invoice.crmCustomerId;
       if (!resolvedOpportunityId && invoice.opportunityId) {
         resolvedOpportunityId = invoice.opportunityId;
@@ -1622,7 +1633,7 @@ export const crmService = {
 
     const year = new Date().getFullYear();
     const priorPaymentCount = await prisma.payment.count({
-      where: { crmCustomerId },
+      where: { crmCustomerId, ...financialPaymentWhere() },
     });
     const isFirstPayment = priorPaymentCount === 0;
     const seq = priorPaymentCount + 1;
@@ -2290,14 +2301,15 @@ export const crmService = {
           .replace(/^https?:\/\//i, "")
           .replace(/\/$/, "")
       : null;
+    const companyContact = await getCompanyContact();
 
     return {
       receiptTitle: "رسید پرداخت",
       company: {
         name: "APEX SMART",
         tagline: "سیستم مدیریت مشتریان و پروژه‌ها",
-        phone: env.contactPhone || null,
-        email: env.contactEmail || null,
+        phone: companyContact.phone,
+        email: companyContact.email,
         website,
       },
       customer: {
@@ -2568,7 +2580,11 @@ export const crmService = {
     );
 
     const verifiedCount = await prisma.payment.count({
-      where: { crmCustomerId: opp.crmCustomerId, verification: "VERIFIED" },
+      where: {
+        crmCustomerId: opp.crmCustomerId,
+        verification: "VERIFIED",
+        ...financialPaymentWhere(),
+      },
     });
     const hasVerifiedPayment = verifiedCount > 0;
     const converted = Boolean(opp.crmCustomer.convertedAt);

@@ -3,7 +3,7 @@ import { AppError } from '../../utils/response.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { aiProvider } from '../../services/aiProvider.js';
 import { rebuildProjectContext, mapProjectStatusToCustomer, computeFinanceFields } from '../../services/projectContext.js';
-import { syncProjectFinanceFromPayments } from '../crm/paymentFinance.js';
+import { syncProjectFinanceFromPayments, batchOpportunityFinanceSnapshots } from '../crm/paymentFinance.js';
 import {
   syncCustomerWhatsappFromBrief,
 } from '../../utils/whatsappNormalize.js';
@@ -341,6 +341,14 @@ export const projectService = {
         downloadPermission: true,
         invoices: { include: { payments: true, items: true } },
         assetRefs: { include: { clientAsset: true } },
+        opportunity: {
+          select: {
+            id: true,
+            crmCustomerId: true,
+            agreedPrice: true,
+            contractLocked: true,
+          },
+        },
       },
     });
     if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
@@ -362,6 +370,23 @@ export const projectService = {
     if (result.finance && ['MANAGER', 'ADMIN', 'FINANCE'].includes(auth.roleCode)) {
       const calc = computeFinanceFields(result.finance);
       result = { ...result, finance: { ...result.finance, ...calc } };
+    }
+
+    if (project.opportunity?.id) {
+      result = {
+        ...result,
+        opportunityId: project.opportunity.id,
+        contractLocked: Boolean(project.opportunity.contractLocked),
+      };
+      if (result.finance) {
+        const snaps = await batchOpportunityFinanceSnapshots(prisma, [
+          project.opportunity,
+        ]);
+        const paymentFinance = snaps.get(project.opportunity.id);
+        if (paymentFinance) {
+          result = { ...result, paymentFinance };
+        }
+      }
     }
 
     if (['MANAGER', 'ADMIN', 'FINANCE', 'SALES'].includes(auth.roleCode)) {

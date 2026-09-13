@@ -2,6 +2,11 @@
 
 import { Banknote, Coins, Mic2, Scissors, TrendingUp, Wallet } from "lucide-react";
 import { cn, formatCurrency } from "@/lib/utils";
+import {
+  emptyPaymentFinance,
+  NewPaymentButton,
+  type OpportunityFinance,
+} from "@/app/(dashboard)/crm/_components/new-payment-dialog";
 
 export type ProjectFinanceSummary = {
   agreedPrice?: string | number | null;
@@ -11,7 +16,31 @@ export type ProjectFinanceSummary = {
   otherDirectCosts?: string | number | null;
   balance?: number | null;
   profit?: number | null;
+  finalProjectPrice?: string | number | null;
 };
+
+function toOpportunityFinance(
+  finance: ProjectFinanceSummary,
+  paymentFinance?: OpportunityFinance | null,
+): OpportunityFinance {
+  if (paymentFinance) return paymentFinance;
+  const agreedPrice = toNumber(finance.agreedPrice);
+  const finalPrice = toNumber(finance.finalProjectPrice);
+  const projectTotal = agreedPrice ?? finalPrice ?? 0;
+  const received = toNumber(finance.received) ?? 0;
+  const remaining =
+    finance.balance != null && Number.isFinite(finance.balance)
+      ? finance.balance
+      : Math.max(0, projectTotal - received);
+  return {
+    ...emptyPaymentFinance(),
+    projectTotal,
+    totalPaid: received,
+    remainingBalance: remaining,
+    customerDebt: remaining,
+    availableToRecord: remaining,
+  };
+}
 
 function toNumber(value: string | number | null | undefined): number | null {
   if (value == null || value === "") return null;
@@ -135,11 +164,33 @@ function CostRow({
   );
 }
 
-export function ProjectFinancePanel({ finance }: { finance: ProjectFinanceSummary | null | undefined }) {
+export function ProjectFinancePanel({
+  finance,
+  opportunityId,
+  contractLocked = false,
+  paymentFinance,
+  paymentCount = 0,
+}: {
+  finance: ProjectFinanceSummary | null | undefined;
+  opportunityId?: string | null;
+  contractLocked?: boolean;
+  paymentFinance?: OpportunityFinance | null;
+  paymentCount?: number;
+}) {
   if (!finance) {
     return (
-      <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-        اطلاعات پرداخت در دسترس نیست
+      <div dir="rtl" className="space-y-4 text-start">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-muted-foreground">
+            اطلاعات پرداخت در دسترس نیست
+          </p>
+          <NewPaymentButton
+            opportunityId={opportunityId}
+            finance={paymentFinance || emptyPaymentFinance()}
+            contractLocked={contractLocked}
+            paymentCount={paymentCount}
+          />
+        </div>
       </div>
     );
   }
@@ -162,14 +213,23 @@ export function ProjectFinancePanel({ finance }: { finance: ProjectFinanceSummar
     balance == null ? "neutral" : balance <= 0 ? "success" : "warning";
   const profitTone =
     profit == null ? "neutral" : profit >= 0 ? "success" : "danger";
+  const paymentSnapshot = toOpportunityFinance(finance, paymentFinance);
 
   return (
     <div dir="rtl" className="space-y-5 text-start">
-      <div className="space-y-1 border-b border-border/60 pb-3">
-        <h3 className="text-base font-semibold">خلاصه پرداخت پروژه</h3>
-        <p className="text-xs text-muted-foreground sm:text-sm">
-          قیمت توافقی، دریافتی‌ها، هزینه‌ها، مانده و سود
-        </p>
+      <div className="flex flex-col gap-3 border-b border-border/60 pb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold">خلاصه پرداخت پروژه</h3>
+          <p className="text-xs text-muted-foreground sm:text-sm">
+            قیمت توافقی، دریافتی‌ها، هزینه‌ها، مانده و سود
+          </p>
+        </div>
+        <NewPaymentButton
+          opportunityId={opportunityId}
+          finance={paymentSnapshot}
+          contractLocked={contractLocked}
+          paymentCount={paymentCount}
+        />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

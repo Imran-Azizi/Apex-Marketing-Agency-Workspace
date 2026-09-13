@@ -147,6 +147,17 @@ interface ProjectDetail {
     profit?: number;
     finalProjectPrice?: string;
   } | null;
+  paymentFinance?: {
+    projectTotal: number;
+    totalPaid: number;
+    remainingBalance: number;
+    customerDebt: number;
+    reservedPaid?: number;
+    pendingApprovalTotal?: number;
+    availableToRecord?: number;
+  } | null;
+  opportunityId?: string | null;
+  contractLocked?: boolean;
   downloadPermission?: {
     allowed: boolean;
     allowedAt?: string | null;
@@ -667,7 +678,18 @@ export default function ProjectDetailPage({
               )}
 
               {tab === "finance" && (
-                <ProjectFinancePanel finance={data.finance} />
+                <ProjectFinancePanel
+                  finance={data.finance}
+                  opportunityId={data.opportunityId}
+                  contractLocked={Boolean(data.contractLocked)}
+                  paymentFinance={data.paymentFinance}
+                  paymentCount={
+                    Number(data.finance?.received || 0) > 0 ||
+                    (data.paymentFinance?.totalPaid || 0) > 0
+                      ? 1
+                      : 0
+                  }
+                />
               )}
             </div>
           </ProjectSectionShell>

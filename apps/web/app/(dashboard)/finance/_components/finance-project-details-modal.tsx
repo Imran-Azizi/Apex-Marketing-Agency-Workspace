@@ -29,6 +29,12 @@ import {
   settlementLabel,
   verificationLabel,
 } from "./finance-project-ui";
+import {
+  emptyPaymentFinance,
+  NewPaymentButton,
+  type OpportunityFinance,
+  type RecordedPayment,
+} from "@/app/(dashboard)/crm/_components/new-payment-dialog";
 
 function KpiCard({
   label,
@@ -80,16 +86,34 @@ function confirmationText(payment: FinanceProjectPayment) {
   return "—";
 }
 
+function financeFromProject(project: FinanceProject): OpportunityFinance {
+  return {
+    ...emptyPaymentFinance(),
+    projectTotal: Number(project.finalProjectPrice) || 0,
+    totalPaid: Number(project.received) || 0,
+    remainingBalance: Number(project.balance) || 0,
+    customerDebt: Number(project.balance) || 0,
+    pendingApprovalTotal: Number(project.pendingApprovalTotal) || 0,
+    reservedPaid: Number(project.reservedPaid) || undefined,
+    availableToRecord:
+      project.availableToRecord != null
+        ? Number(project.availableToRecord)
+        : Number(project.balance) || 0,
+  };
+}
+
 type FinanceProjectDetailsModalProps = {
   project: FinanceProject | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onPaymentCreated?: (payment: RecordedPayment) => void | Promise<void>;
 };
 
 export function FinanceProjectDetailsModal({
   project,
   open,
   onOpenChange,
+  onPaymentCreated,
 }: FinanceProjectDetailsModalProps) {
   if (!project) return null;
 
@@ -140,19 +164,28 @@ export function FinanceProjectDetailsModal({
             ) : null}
           </div>
 
-          <div className="space-y-1">
-            <DialogTitle className="text-start text-xl font-bold tracking-tight">
-              جزئیات مالی پروژه
-            </DialogTitle>
-            <DialogDescription className="text-start leading-relaxed">
-              <span className="font-medium text-foreground/90">
-                {project.title}
-              </span>
-              <span className="mx-2 text-border">·</span>
-              <span className="tabular-nums">{project.code}</span>
-              <span className="mx-2 text-border">·</span>
-              <span>{customerName}</span>
-            </DialogDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <DialogTitle className="text-start text-xl font-bold tracking-tight">
+                جزئیات مالی پروژه
+              </DialogTitle>
+              <DialogDescription className="text-start leading-relaxed">
+                <span className="font-medium text-foreground/90">
+                  {project.title}
+                </span>
+                <span className="mx-2 text-border">·</span>
+                <span className="tabular-nums">{project.code}</span>
+                <span className="mx-2 text-border">·</span>
+                <span>{customerName}</span>
+              </DialogDescription>
+            </div>
+            <NewPaymentButton
+              opportunityId={project.opportunityId}
+              finance={financeFromProject(project)}
+              contractLocked={Boolean(project.contractLocked)}
+              paymentCount={project.paymentCount ?? project.payments.length}
+              onCreated={onPaymentCreated}
+            />
           </div>
         </DialogHeader>
 
@@ -244,7 +277,7 @@ export function FinanceProjectDetailsModal({
                   پرداختی ثبت نشده
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  برای این پروژه هنوز تراکنش مالی ثبت نشده است.
+                  برای ثبت اولین تراکنش از دکمه «پرداخت جدید» استفاده کنید.
                 </p>
               </div>
             ) : (
@@ -255,7 +288,6 @@ export function FinanceProjectDetailsModal({
                       <TableHead className="text-xs">تاریخ</TableHead>
                       <TableHead className="text-xs">مبلغ</TableHead>
                       <TableHead className="text-xs">روش</TableHead>
-                      <TableHead className="text-xs">فاکتور</TableHead>
                       <TableHead className="text-xs">مرجع</TableHead>
                       <TableHead className="text-xs">وضعیت</TableHead>
                       <TableHead className="text-xs">تأیید</TableHead>
@@ -273,9 +305,6 @@ export function FinanceProjectDetailsModal({
                         </TableCell>
                         <TableCell className="text-sm">
                           {payment.methodLabel}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap text-sm tabular-nums text-muted-foreground">
-                          {payment.invoiceNumber || "—"}
                         </TableCell>
                         <TableCell className="max-w-[7rem] truncate text-sm text-muted-foreground">
                           {payment.reference || "—"}

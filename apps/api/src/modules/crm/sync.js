@@ -16,6 +16,7 @@ import {
   stageLabel,
 } from './pipeline.js';
 import { recordCrmActivity, statusChangeBody } from './activity.js';
+import { financialPaymentWhere } from './sampleInvoice.js';
 
 const EVENT_ACTIVITY = {
   [CRM_EVENTS.LEAD_CREATED]: ACTIVITY_TYPES.LEAD_CREATED,
@@ -140,7 +141,11 @@ export async function applyCrmEvent(tx, {
 
   if (event === CRM_EVENTS.PAYMENT_REVERSED && hasVerifiedPayment == null) {
     const verified = await tx.payment.count({
-      where: { crmCustomerId: customerId, verification: 'VERIFIED' },
+      where: {
+        crmCustomerId: customerId,
+        verification: 'VERIFIED',
+        ...financialPaymentWhere(),
+      },
     });
     extras = { ...extras, hasVerifiedPayment: verified > 0 };
   }

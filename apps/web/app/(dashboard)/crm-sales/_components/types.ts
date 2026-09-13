@@ -52,7 +52,6 @@ export interface CrmInvoice {
   total: string | number;
   subtotal?: string | number;
   paidAmount?: number;
-  remainingAmount?: number;
   videoCount?: number | null;
   notes?: string | null;
   issuedAt?: string | null;
@@ -62,6 +61,7 @@ export interface CrmInvoice {
   paymentMethodMeta?: Record<string, string> | null;
   paymentMethodMetaRows?: Array<{ label: string; value: string; ltr?: boolean }>;
   isCrmInvoice?: boolean;
+  isSampleInvoice?: boolean;
   paymentId?: string | null;
   recordedByName?: string | null;
   statusLabel?: string | null;

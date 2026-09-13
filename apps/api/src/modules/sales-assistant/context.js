@@ -12,6 +12,7 @@ import {
   isMeaningfulProgress,
   isSalesActivity,
 } from './rules.js';
+import { financialPaymentWhere } from '../crm/sampleInvoice.js';
 
 const ACTIVITY_TAKE = 40;
 
@@ -37,6 +38,7 @@ export async function loadCustomerContext(customerId, now = new Date()) {
       payments: {
         orderBy: { createdAt: 'desc' },
         take: 20,
+        where: financialPaymentWhere(),
         select: {
           id: true,
           amount: true,

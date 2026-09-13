@@ -85,11 +85,6 @@ export function InvoiceDocument({ invoice }: { invoice: CrmInvoice }) {
           },
         ]
       : []),
-    {
-      label: crmSalesText("invoiceRemainingAmount"),
-      value: formatInvoiceAmount(invoice.remainingAmount),
-      amount: true,
-    },
   ];
 
   return (

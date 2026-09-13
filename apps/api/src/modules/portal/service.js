@@ -20,6 +20,7 @@ import {
   serializePortalProjectSummary,
   buildProjectProgress,
 } from "./helpers.js";
+import { financialInvoiceWhere } from "../crm/sampleInvoice.js";
 import {
   notifyManagersOnce,
   buildContentApprovedByCustomerNotification,
@@ -287,7 +288,10 @@ export const portalService = {
           where: {
             crmCustomerId: auth.customerId,
             status: { not: "CANCELED" },
-            OR: [{ projectId: null }, { project: { deletedAt: null } }],
+            AND: [
+              { OR: [{ projectId: null }, { project: { deletedAt: null } }] },
+              financialInvoiceWhere(),
+            ],
           },
           include: { payments: { where: { verification: "VERIFIED" } } },
           orderBy: { createdAt: "desc" },

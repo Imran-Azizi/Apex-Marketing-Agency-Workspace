@@ -10,7 +10,7 @@ import {
 
 /**
  * Shared receipt display helpers (view formatting only — does not change stored values).
- * Print target: compact A6 / A4-friendly portrait receipt with nine fields only.
+ * Print target: compact A6 / A4-friendly portrait receipt.
  */
 
 export function formatReceiptAmount(amount) {
@@ -68,7 +68,7 @@ export function formatPaymentVerification(status) {
 }
 
 /**
- * Minimal professional RTL payment receipt HTML (nine fields only).
+ * Minimal professional RTL payment receipt HTML.
  * @param {object} receipt - payload from getPaymentReceipt()
  */
 export function buildPaymentReceiptHtml(receipt) {
@@ -82,7 +82,6 @@ export function buildPaymentReceiptHtml(receipt) {
   );
   const totalAmount = Number(receipt.finance?.totalAmount || 0);
   const paidAmount = Number(receipt.payment.amount || 0);
-  const remaining = Number(receipt.finance?.remainingBalance || 0);
   const methodText = resolveReceiptPaymentMethod({
     method: receipt.payment.method,
     methodLabel: receipt.payment.methodLabel,
@@ -117,12 +116,6 @@ export function buildPaymentReceiptHtml(receipt) {
       ltr: Boolean(row.ltr),
     })),
     { label: 'ثبت‌کننده', value: recorder },
-    {
-      label: 'مبلغ باقی‌مانده',
-      value: formatReceiptAmount(remaining),
-      amount: true,
-      emphasize: true,
-    },
   ];
 
   const rowsHtml = rows

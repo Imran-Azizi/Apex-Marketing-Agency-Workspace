@@ -235,7 +235,6 @@ function serializeFinancePayment(payment) {
     verification: payment.verification,
     reference: payment.reference || null,
     notes: payment.notes || null,
-    invoiceNumber: payment.invoice?.invoiceNumber || null,
     verifiedAt: payment.verifiedAt || null,
     verifiedBy: payment.verifiedBy
       ? { id: payment.verifiedBy.id, fullName: payment.verifiedBy.fullName }
@@ -259,6 +258,15 @@ function projectListMetrics(project, projectPayments) {
     ),
   ];
   const lastPaymentAt = projectPayments[0]?.paidAt || null;
+  const pendingApprovalTotal = roundMoney(
+    (projectPayments || [])
+      .filter((p) => p.verification === "PENDING")
+      .reduce((sum, p) => sum + dec(p.amount), 0),
+  );
+  const reservedPaid = roundMoney(m.received + pendingApprovalTotal);
+  const availableToRecord = roundMoney(
+    Math.max(0, m.finalProjectPrice - reservedPaid),
+  );
 
   return {
     finalProjectPrice: m.finalProjectPrice,
@@ -277,6 +285,9 @@ function projectListMetrics(project, projectPayments) {
     lastPaymentAt,
     paymentCount: projectPayments.length,
     verifiedPaymentCount: approved.length,
+    pendingApprovalTotal,
+    reservedPaid,
+    availableToRecord,
   };
 }
 
@@ -559,6 +570,8 @@ export const financeService = {
         completedAt: p.completedAt,
         createdAt: p.createdAt,
         customer: p.crmCustomer,
+        opportunityId: p.opportunity?.id || null,
+        contractLocked: Boolean(p.opportunity?.contractLocked),
         payments: projectPayments.map(serializeFinancePayment),
         ...m,
       };

@@ -1365,6 +1365,8 @@ model Invoice {
   videoCount        Int?
   paymentMethod     PaymentMethod?
   paymentMethodMeta Json?
+  /// Display-only payable for CRM و فروش sample invoices. Never posted as a Payment.
+  quotedPaidAmount  Decimal       @default(0) @db.Decimal(14, 2)
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 

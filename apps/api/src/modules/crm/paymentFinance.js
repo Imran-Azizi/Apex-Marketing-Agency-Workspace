@@ -63,7 +63,10 @@ export function paymentsWhere({
       { invoiceId: null },
       ...(opportunityId
         ? [{ invoice: { opportunityId } }]
-        : [{ invoiceId: { not: null } }]),
+        : [
+            { invoice: { opportunityId: { not: null } } },
+            { invoice: { projectId: { not: null } } },
+          ]),
     ],
   };
   if (excludePaymentId) {

@@ -68,7 +68,6 @@ export type FinanceProjectPayment = {
   verification: string;
   reference: string | null;
   notes: string | null;
-  invoiceNumber: string | null;
   verifiedAt?: string | null;
   verifiedBy?: { id: string; fullName: string } | null;
   rejectionReason?: string | null;
@@ -87,6 +86,11 @@ export type FinanceProject = {
   completedAt: string | null;
   createdAt: string;
   currency?: string;
+  opportunityId?: string | null;
+  contractLocked?: boolean;
+  pendingApprovalTotal?: number;
+  reservedPaid?: number;
+  availableToRecord?: number;
   customer: {
     id: string;
     personName: string | null;
