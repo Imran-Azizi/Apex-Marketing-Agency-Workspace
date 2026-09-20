@@ -55,21 +55,46 @@ function pathIsUnder(pathname: string, prefix: string): boolean {
 }
 
 /**
+ * Permission-gated routes that live under manager-flavored URL prefixes but may
+ * be opened by any internal role that was granted the matching permission
+ * (Editor, Sales, Narrator, Project Manager, Finance, …).
+ *
+ * These must NOT force `X-APEX-Panel: manager`, or the employee cookie slot is
+ * ignored → `/auth/me` 401 → dashboard treats the tab as logged out.
+ * Keep the tab’s existing panel (sessionStorage / role marker) instead.
+ */
+export const PERMISSION_SHARED_PATH_PREFIXES = [
+  "/manager/messages",
+  "/manager/video-storage",
+  "/manager/portfolio",
+  "/manager/hero",
+  "/manager/customers",
+  "/employees",
+  "/settings",
+  "/backup",
+  "/catalog/services",
+  "/business-assistant",
+  "/sales-assistant",
+] as const;
+
+function isPermissionSharedPath(pathname: string): boolean {
+  return PERMISSION_SHARED_PATH_PREFIXES.some((prefix) =>
+    pathIsUnder(pathname, prefix),
+  );
+}
+
+/**
  * Infer panel from URL when unambiguous.
- * Shared routes (/projects, /crm, …) return null — use sessionStorage / markers.
+ * Shared / permission-gated routes return null — use sessionStorage / markers.
  */
 export function panelFromPathname(pathname: string | null | undefined): AuthPanel | null {
   if (!pathname) return null;
   if (pathIsUnder(pathname, "/portal")) return "portal";
-  if (
-    pathIsUnder(pathname, "/manager") ||
-    pathIsUnder(pathname, "/employees") ||
-    pathIsUnder(pathname, "/settings")
-  ) {
-    // Shared inbox — keep the tab's sales/manager panel cookie.
-    if (pathIsUnder(pathname, "/manager/messages")) return null;
-    return "manager";
-  }
+
+  // Cross-role permission pages first (before the broad /manager rule).
+  if (isPermissionSharedPath(pathname)) return null;
+
+  if (pathIsUnder(pathname, "/manager")) return "manager";
   if (pathIsUnder(pathname, "/editor")) return "editor";
   if (pathIsUnder(pathname, "/sales")) return "sales";
   if (pathIsUnder(pathname, "/narrator")) return "narrator";

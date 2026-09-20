@@ -230,21 +230,21 @@ export function VideoUploadDialog({
   return (
     <Dialog open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
       <DialogContent
-        className="max-h-[92vh] overflow-y-auto text-start sm:max-w-lg"
+        className="max-h-[92vh] w-[calc(100%-1.5rem)] max-w-lg overflow-x-hidden overflow-y-auto text-start sm:w-full"
         dir="rtl"
       >
-        <DialogHeader className="text-start">
+        <DialogHeader className="min-w-0 text-start pe-8">
           <DialogTitle>آپلود ویدیو</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="leading-6">
             فایل را بکشید و رها کنید یا از سیستم انتخاب کنید. فرمت‌های مجاز: MP4،
             WebM، MOV، MKV
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="min-w-0 max-w-full space-y-4">
           <div
             className={cn(
-              "relative overflow-hidden rounded-2xl border border-dashed border-border/80 bg-muted/20",
+              "relative min-w-0 overflow-hidden rounded-2xl border border-dashed border-border/80 bg-muted/20",
               dragOver && "border-brand bg-brand/5",
             )}
             onDragOver={(e) => {
@@ -259,10 +259,10 @@ export function VideoUploadDialog({
             }}
           >
             {localPreview ? (
-              <div className="relative aspect-video">
+              <div className="relative aspect-video min-w-0 overflow-hidden bg-black">
                 <video
                   src={localPreview}
-                  className="h-full w-full object-cover"
+                  className="h-full w-full max-w-full object-contain"
                   muted
                   playsInline
                   preload="metadata"
@@ -273,7 +273,7 @@ export function VideoUploadDialog({
                     type="button"
                     size="icon"
                     variant="secondary"
-                    className="absolute end-3 top-3 h-8 w-8 rounded-full"
+                    className="absolute end-3 top-3 z-10 h-8 w-8 rounded-full"
                     onClick={() => {
                       if (localPreview) URL.revokeObjectURL(localPreview);
                       setLocalPreview(null);
@@ -288,7 +288,7 @@ export function VideoUploadDialog({
               <button
                 type="button"
                 disabled={busy}
-                className="flex w-full flex-col items-center gap-2 px-4 py-10 text-center"
+                className="flex w-full min-w-0 flex-col items-center gap-2 px-4 py-10 text-center"
                 onClick={() => inputRef.current?.click()}
               >
                 <span className="rounded-full bg-muted p-3">
@@ -311,29 +311,35 @@ export function VideoUploadDialog({
           </div>
 
           {file ? (
-            <div className="flex items-center gap-2 rounded-xl border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden rounded-xl border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               <Film className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{file.name}</span>
-              <span className="shrink-0">{formatFileSize(file.size)}</span>
+              <span className="min-w-0 flex-1 truncate" title={file.name}>
+                {file.name}
+              </span>
+              <span className="shrink-0 tabular-nums">
+                {formatFileSize(file.size)}
+              </span>
             </div>
           ) : null}
 
           {progress != null ? (
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs text-muted-foreground">
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex justify-between gap-2 text-xs text-muted-foreground">
                 <span>در حال آپلود…</span>
-                <span>{Math.round(progress)}٪</span>
+                <span className="shrink-0 tabular-nums">
+                  {Math.round(progress)}٪
+                </span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-brand transition-all"
+                  className="h-full max-w-full rounded-full bg-brand transition-all"
                   style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
                 />
               </div>
             </div>
           ) : null}
 
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <Label htmlFor="vs-title">عنوان</Label>
             <Input
               id="vs-title"
@@ -344,14 +350,14 @@ export function VideoUploadDialog({
               maxLength={200}
             />
           </div>
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
             <Label htmlFor="vs-desc">توضیحات (اختیاری)</Label>
             <Textarea
               id="vs-desc"
               value={description}
               disabled={busy}
               onChange={(e) => setDescription(e.target.value)}
-              className="min-h-24 rounded-xl"
+              className="min-h-24 max-w-full rounded-xl"
               maxLength={4000}
             />
           </div>
