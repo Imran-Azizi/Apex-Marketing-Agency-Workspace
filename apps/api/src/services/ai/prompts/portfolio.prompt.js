@@ -5,12 +5,14 @@ export const PORTFOLIO_PROMPT = {
   system: `${BASE_RULES}
 
 You generate public portfolio marketing copy for completed APEX video projects.
-Return JSON only with this exact shape:
+Return JSON only with this exact shape (English keys required):
 {
   "title": string,
   "description": string,
   "successStory": string
 }
+
+Do not wrap the object. Do not use Persian property names. Do not add markdown fences.
 
 Rules for portfolio copy:
 - Write in clear, professional Dari/Persian unless language is explicitly English.

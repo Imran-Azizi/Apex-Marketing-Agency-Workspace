@@ -500,7 +500,11 @@ export const portfolioService = {
         agentType: 'PORTFOLIO',
         system: PORTFOLIO_PROMPT.system,
         userContent: input,
+        // Reject invalid shapes early so the model pool can try the next provider/model.
+        accept: (result) =>
+          parsePortfolioAiJson(result?.text ?? result, createAiError),
       });
+      if (completion?.parsed) return completion.parsed;
       return parsePortfolioAiJson(completion?.text ?? completion, createAiError);
     } catch (err) {
       if (cfg.allowMockFallback) return mockPortfolioCopy(project);

@@ -3,6 +3,8 @@
  * Keeps PII and internal ops data out of generated marketing text.
  */
 
+import { extractJson } from '../../services/ai/validate.js';
+
 export const PORTFOLIO_TITLE_MAX = 120;
 export const PORTFOLIO_DESCRIPTION_MAX = 2000;
 export const PORTFOLIO_SUCCESS_STORY_MAX = 4000;
@@ -46,6 +48,43 @@ const PII_BRIEF_KEYS = new Set([
   'internalNotes',
 ]);
 
+const TITLE_KEYS = [
+  'title',
+  'portfolioTitle',
+  'headline',
+  'name',
+  'عنوان',
+  'تیتر',
+];
+const DESCRIPTION_KEYS = [
+  'description',
+  'shortDescription',
+  'summary',
+  'blurb',
+  'cardDescription',
+  'توضیحات',
+  'توضیحات کوتاه',
+  'خلاصه',
+];
+const SUCCESS_STORY_KEYS = [
+  'successStory',
+  'success_story',
+  'story',
+  'caseStudy',
+  'case_study',
+  'داستان موفقیت',
+  'داستان_موفقیت',
+];
+const WRAPPER_KEYS = [
+  'data',
+  'result',
+  'output',
+  'portfolio',
+  'copy',
+  'content',
+  'payload',
+];
+
 function clip(value, max) {
   if (value == null) return null;
   const text = String(value).trim();
@@ -66,6 +105,47 @@ function pickStr(obj, keys, max = 400) {
     if (clipped) return clipped;
   }
   return null;
+}
+
+function pickField(obj, keys, max) {
+  if (!obj) return '';
+  for (const key of keys) {
+    if (!(key in obj)) continue;
+    const clipped = clip(obj[key], max);
+    if (clipped) return clipped;
+  }
+  const entries = Object.entries(obj);
+  for (const want of keys) {
+    const found = entries.find(
+      ([k]) => String(k).toLowerCase() === String(want).toLowerCase(),
+    );
+    if (!found) continue;
+    const clipped = clip(found[1], max);
+    if (clipped) return clipped;
+  }
+  return '';
+}
+
+function unwrapNestedRecord(rec, depth = 0) {
+  if (!rec || depth > 3) return rec;
+  const hasDirect =
+    pickField(rec, TITLE_KEYS, PORTFOLIO_TITLE_MAX) ||
+    pickField(rec, DESCRIPTION_KEYS, PORTFOLIO_DESCRIPTION_MAX) ||
+    pickField(rec, SUCCESS_STORY_KEYS, PORTFOLIO_SUCCESS_STORY_MAX);
+  if (hasDirect) return rec;
+  for (const key of WRAPPER_KEYS) {
+    const nested = asRecord(rec[key]);
+    if (!nested) continue;
+    const unwrapped = unwrapNestedRecord(nested, depth + 1);
+    if (
+      pickField(unwrapped, TITLE_KEYS, PORTFOLIO_TITLE_MAX) ||
+      pickField(unwrapped, DESCRIPTION_KEYS, PORTFOLIO_DESCRIPTION_MAX) ||
+      pickField(unwrapped, SUCCESS_STORY_KEYS, PORTFOLIO_SUCCESS_STORY_MAX)
+    ) {
+      return unwrapped;
+    }
+  }
+  return rec;
 }
 
 export function publicSafeBrief(brief) {
@@ -223,34 +303,56 @@ export function buildPortfolioAiInput(project, video = null) {
         }
       : null,
     content,
+    outputSchema: {
+      title: 'string (Persian marketing title, max ~70 chars)',
+      description: 'string (2-4 sentence public card blurb, min 20 chars)',
+      successStory:
+        'string (public Success Story prose, min ~80 chars; prefer 180-420 words)',
+    },
+  };
+}
+
+function fieldsFromRecord(rec) {
+  const root = unwrapNestedRecord(rec);
+  return {
+    title: pickField(root, TITLE_KEYS, PORTFOLIO_TITLE_MAX),
+    description: pickField(root, DESCRIPTION_KEYS, PORTFOLIO_DESCRIPTION_MAX),
+    successStory: pickField(
+      root,
+      SUCCESS_STORY_KEYS,
+      PORTFOLIO_SUCCESS_STORY_MAX,
+    ),
   };
 }
 
 function unwrapAiJson(raw) {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const title = String(raw.title || '').trim();
-    const description = String(raw.description || '').trim();
-    const successStory = String(raw.successStory || raw.success_story || '').trim();
-    if (title || description || successStory) {
-      return { title, description, successStory };
+    // Provider completion objects: prefer .text / .content, else treat as payload.
+    if (typeof raw.text === 'string' || typeof raw.content === 'string') {
+      const nested = unwrapAiJson(raw.text || raw.content);
+      if (nested) return nested;
+    }
+    const direct = fieldsFromRecord(raw);
+    if (direct.title || direct.description || direct.successStory) {
+      return direct;
+    }
+    if (typeof raw.raw === 'string') {
+      const nested = unwrapAiJson(raw.raw);
+      if (nested) return nested;
     }
   }
-  let text = typeof raw === 'string' ? raw.trim() : '';
-  text = text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
+
+  const text = typeof raw === 'string' ? raw.trim() : '';
   if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    return {
-      title: String(parsed?.title || '').trim(),
-      description: String(parsed?.description || '').trim(),
-      successStory: String(parsed?.successStory || parsed?.success_story || '').trim(),
-    };
-  } catch {
-    return null;
+
+  const extracted = extractJson(text);
+  if (extracted && typeof extracted === 'object' && !extracted.raw) {
+    const fromJson = fieldsFromRecord(extracted);
+    if (fromJson.title || fromJson.description || fromJson.successStory) {
+      return fromJson;
+    }
   }
+  return null;
 }
 
 export function parsePortfolioAiJson(raw, createAiError) {
@@ -299,7 +401,8 @@ export function mockPortfolioCopy(project) {
   const brief = publicSafeBrief(project.brief);
   const goal = brief?.goal || 'معرفی برند و جذب مخاطب هدف';
   const audience = brief?.audience || 'مخاطبان هدف کسب‌وکار';
-  const company = publicSafeCustomer(project.crmCustomer, project.brief)?.companyName;
+  const company = publicSafeCustomer(project.crmCustomer, project.brief)
+    ?.companyName;
 
   const title = `${service} حرفه‌ای`.slice(0, PORTFOLIO_TITLE_MAX);
   const description = (
