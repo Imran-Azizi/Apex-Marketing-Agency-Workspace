@@ -39,6 +39,7 @@ import {
 } from "@/components/projects/editing-materials-panel";
 import { ProjectFinalProductPanel } from "@/components/projects/project-final-product-panel";
 import { ProjectPosterPanel } from "@/components/projects/project-poster-panel";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FinalProductsPayload } from "@/lib/final-product";
 import type { PostersPayload } from "@/lib/poster";
@@ -345,16 +346,17 @@ export function ProjectProductionPanel({
   };
 
   return (
-    <div className="space-y-4 text-start" dir="rtl">
+    <div className="space-y-3 text-start sm:space-y-4" dir="rtl">
       {showAssign || showStart ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           {showAssign ? (
             <Button
               variant="brand"
               size="sm"
+              className="h-10 flex-1 gap-1.5 sm:h-9 sm:flex-none"
               onClick={() => setAssignOpen(true)}
             >
-              <UserRound className="h-4 w-4" />
+              <UserRound className="h-4 w-4 shrink-0" />
               {task ? "تغییر ادیتور" : "ارجاع ادیتور"}
             </Button>
           ) : null}
@@ -362,13 +364,14 @@ export function ProjectProductionPanel({
             <Button
               variant="brand"
               size="sm"
+              className="h-10 flex-1 gap-1.5 sm:h-9 sm:flex-none"
               onClick={() => startMut.mutate()}
               disabled={startMut.isPending}
             >
               {startMut.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
               ) : (
-                <Film className="h-4 w-4" />
+                <Film className="h-4 w-4 shrink-0" />
               )}
               شروع ادیت
             </Button>
@@ -379,36 +382,45 @@ export function ProjectProductionPanel({
       <Tabs
         value={workspaceTab}
         onValueChange={(v) => setWorkspaceTab(v as ProductionWorkspaceTab)}
-        className="space-y-4"
+        className="space-y-3 sm:space-y-4"
         dir="rtl"
       >
-        <TabsList
-          variant="line"
-          className="w-full justify-start overflow-x-auto overscroll-x-contain rounded-xl border border-border/60 bg-muted/20 p-1 [scrollbar-width:thin]"
-          aria-label="تب‌های فضای تولید"
+        <HorizontalScroll
+          bordered={false}
+          className="rounded-xl"
+          viewportClassName="pb-0"
         >
-          {PRODUCTION_WORKSPACE_TABS.map((t) => {
-            const Icon = TAB_ICONS[t.id];
-            const count = tabBadges[t.id];
-            return (
-              <TabsTrigger
-                key={t.id}
-                value={t.id}
-                variant="line"
-                className="gap-1.5 rounded-lg px-3 data-[state=active]:bg-background data-[state=active]:shadow-sm"
-              >
-                <Icon className="h-3.5 w-3.5 opacity-70" aria-hidden />
-                <span className="hidden sm:inline">{t.label}</span>
-                <span className="sm:hidden">{t.shortLabel}</span>
-                {count != null && count > 0 ? (
-                  <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">
-                    {count}
-                  </span>
-                ) : null}
-              </TabsTrigger>
-            );
-          })}
-        </TabsList>
+          <TabsList
+            variant="line"
+            className="flex h-auto w-max min-w-full justify-start gap-0 rounded-xl border border-border/60 bg-muted/20 p-1"
+            aria-label="تب‌های فضای تولید"
+          >
+            {PRODUCTION_WORKSPACE_TABS.map((t) => {
+              const Icon = TAB_ICONS[t.id];
+              const count = tabBadges[t.id];
+              return (
+                <TabsTrigger
+                  key={t.id}
+                  value={t.id}
+                  variant="line"
+                  className="min-w-[4.75rem] shrink-0 gap-1 rounded-lg px-2 py-2 text-[11px] data-[state=active]:bg-background data-[state=active]:shadow-sm sm:min-w-[7rem] sm:gap-1.5 sm:px-3 sm:text-sm"
+                >
+                  <Icon
+                    className="h-3.5 w-3.5 shrink-0 opacity-70"
+                    aria-hidden
+                  />
+                  <span className="truncate sm:hidden">{t.shortLabel}</span>
+                  <span className="hidden sm:inline">{t.label}</span>
+                  {count != null && count > 0 ? (
+                    <span className="rounded-md bg-muted px-1 py-0.5 text-[10px] tabular-nums sm:px-1.5">
+                      {count}
+                    </span>
+                  ) : null}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </HorizontalScroll>
 
         <TabsContent
           value="customer"

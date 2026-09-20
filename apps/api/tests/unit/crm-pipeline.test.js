@@ -222,6 +222,17 @@ test('invoice creation is allowed before order confirmation', () => {
   );
 });
 
+test('portal invite is manager-only even when sales has crm.invite', () => {
+  const sales = { roleCode: 'SALES', permissions: ['crm.invite', 'crm.view'] };
+  const manager = { roleCode: 'MANAGER', permissions: [] };
+  const converted = {
+    pipelineStage: 'DEPOSIT_CONFIRMED',
+    convertedAt: new Date(),
+  };
+  assert.equal(getAllowedActions(converted, sales).invitePortal, false);
+  assert.equal(getAllowedActions(converted, manager).invitePortal, true);
+});
+
 test('normalizes Afghan and international WhatsApp identities without country lock-in', () => {
   assert.equal(normalizeWhatsapp('۰۷۰۰۱۲۳۴۵۶'), '93700123456');
   assert.equal(normalizeWhatsapp('+93 700 123 456'), '93700123456');

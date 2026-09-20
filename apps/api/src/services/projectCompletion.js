@@ -42,8 +42,7 @@ export async function evaluateCustomerFinalApproval(db, project) {
   }
 
   const {
-    isSentToCustomer,
-    allSentFilesCustomerApproved,
+    isFinalPackageCustomerConfirmed,
   } = await import('../modules/production/finalProduct.js');
 
   const files =
@@ -56,9 +55,7 @@ export async function evaluateCustomerFinalApproval(db, project) {
       },
     }));
 
-  const sent = (files || []).filter((f) => isSentToCustomer(f, project.status));
-  if (!sent.length) return false;
-  return allSentFilesCustomerApproved(files, project.status);
+  return isFinalPackageCustomerConfirmed(files, project.status);
 }
 
 /**
@@ -353,6 +350,21 @@ export async function tryAutoCompleteProject(
     notifyProgress,
     actorId,
   });
+
+  try {
+    const { markSentFinalsApprovedByCustomer } = await import(
+      '../modules/production/finalProduct.js'
+    );
+    await markSentFinalsApprovedByCustomer(db, projectId, {
+      approvedAt: completedAt instanceof Date ? completedAt : new Date(completedAt),
+      includeClean: true,
+    });
+  } catch (err) {
+    console.error(
+      '[completion] mark finals approved after complete',
+      err?.message || err,
+    );
+  }
 
   return {
     ...result,

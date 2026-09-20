@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ContactMessage } from "@/lib/contact";
 import { Button } from "@/components/ui/button";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import {
   Table,
   TableBody,
@@ -54,50 +55,52 @@ export function ContactMessagesTable({
         isFetching && "opacity-70 transition-opacity",
       )}
     >
-      <Table className="min-w-[40rem] lg:min-w-[64rem]">
-        <TableHeader className="sticky top-0 z-[1]">
-          <TableRow className="border-border/70 hover:bg-transparent">
-            <TableHead className="whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-              وضعیت
-            </TableHead>
-            <TableHead className="whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-              مشتری
-            </TableHead>
-            <TableHead className="whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-              موضوع
-            </TableHead>
-            <TableHead className="hidden whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80 md:table-cell">
-              شرکت
-            </TableHead>
-            <TableHead className="hidden whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80 sm:table-cell">
-              شماره تماس
-            </TableHead>
-            <TableHead className="hidden whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80 lg:table-cell">
-              ایمیل
-            </TableHead>
-            <TableHead className="whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-              تاریخ
-            </TableHead>
-            <TableHead className="w-14 bg-muted/70 text-center text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
-              عملیات
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {items.map((message) => (
-            <ContactMessageRow
-              key={message.id}
-              message={message}
-              canEdit={canEdit}
-              canDelete={canDelete}
-              onOpen={() => onOpen(message)}
-              onMarkRead={() => onMarkRead(message)}
-              onMarkUnread={() => onMarkUnread(message)}
-              onDelete={() => onDelete(message)}
-            />
-          ))}
-        </TableBody>
-      </Table>
+      <HorizontalScroll bordered={false}>
+        <Table scrollContainer={false} className="min-w-[56rem]">
+          <TableHeader className="sticky top-0 z-[1]">
+            <TableRow className="border-border/70 hover:bg-transparent">
+              <TableHead className="whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                وضعیت
+              </TableHead>
+              <TableHead className="min-w-[8rem] whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                مشتری
+              </TableHead>
+              <TableHead className="min-w-[8rem] whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                موضوع
+              </TableHead>
+              <TableHead className="min-w-[7rem] whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                شرکت
+              </TableHead>
+              <TableHead className="whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                شماره تماس
+              </TableHead>
+              <TableHead className="min-w-[10rem] whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                ایمیل
+              </TableHead>
+              <TableHead className="whitespace-nowrap bg-muted/70 text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                تاریخ
+              </TableHead>
+              <TableHead className="w-14 bg-muted/70 text-center text-[11px] font-semibold tracking-wide text-muted-foreground backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                عملیات
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((message) => (
+              <ContactMessageRow
+                key={message.id}
+                message={message}
+                canEdit={canEdit}
+                canDelete={canDelete}
+                onOpen={() => onOpen(message)}
+                onMarkRead={() => onMarkRead(message)}
+                onMarkUnread={() => onMarkUnread(message)}
+                onDelete={() => onDelete(message)}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </HorizontalScroll>
 
       <div className="flex flex-col items-center justify-between gap-3 border-t border-border/70 bg-muted/20 px-4 py-3 sm:flex-row">
         <p className="text-sm text-muted-foreground">

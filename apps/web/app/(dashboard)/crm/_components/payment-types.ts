@@ -69,7 +69,6 @@ export type PaymentReceipt = {
     id: string;
     invoiceNumber: string;
     projectReference: string | null;
-    videoCount: number | null;
     total: number;
     previouslyPaid: number;
     currentPayment: number;
@@ -80,7 +79,6 @@ export type PaymentReceipt = {
     issuedAt: string;
     notes: string | null;
   } | null;
-  videoCount?: number | null;
   finance: PaymentReceiptFinance;
   payment: {
     id: string;

@@ -34,7 +34,7 @@ export function PortfolioGrid({
 }) {
   return (
     <>
-      <div className="grid gap-4 md:hidden">
+      <div className="grid gap-2.5 md:hidden">
         {items.map((item) => (
           <PortfolioCard
             key={item.id}

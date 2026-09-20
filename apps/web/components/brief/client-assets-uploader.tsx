@@ -46,6 +46,14 @@ import {
   getMediaFolderLabel,
   mergeUploadStorageMeta,
 } from "@/lib/media-manager";
+import {
+  CLIENT_ASSET_LOGO_ACCEPT,
+  CLIENT_ASSET_LOGO_HINT,
+  CLIENT_ASSET_PRODUCT_IMAGE_ACCEPT,
+  CLIENT_ASSET_PRODUCT_IMAGE_HINT,
+  isClientAssetDisplayImage,
+  validateClientAssetImageFile,
+} from "@/lib/client-asset-images";
 
 export type ClientAssetItem = {
   id: string;
@@ -81,19 +89,19 @@ const SLOTS: UploadSlot[] = [
     kind: "LOGO",
     title: "لوگوی برند",
     description: "نسخه‌های مختلف لوگو را آپلود کنید",
-    accept: ".svg,.png,.ai,.eps,.psd,image/svg+xml,image/png",
+    accept: CLIENT_ASSET_LOGO_ACCEPT,
     multiple: true,
     icon: <ImageIcon className="h-5 w-5" />,
-    extensionsHint: "SVG, PNG, AI, EPS, PSD",
+    extensionsHint: CLIENT_ASSET_LOGO_HINT,
   },
   {
     kind: "PRODUCT_IMAGE",
     title: "تصاویر محصول / خدمت",
     description: "چند تصویر با کشیدن و رها کردن",
-    accept: "image/*,.jpg,.jpeg,.png,.webp,.gif",
+    accept: CLIENT_ASSET_PRODUCT_IMAGE_ACCEPT,
     multiple: true,
     icon: <FileImage className="h-5 w-5" />,
-    extensionsHint: "JPG, PNG, WEBP, GIF",
+    extensionsHint: CLIENT_ASSET_PRODUCT_IMAGE_HINT,
   },
   {
     kind: "VIDEO",
@@ -203,9 +211,7 @@ function AssetThumb({
   asset: ClientAssetItem;
   localUrl?: string | null;
 }) {
-  const isImage =
-    asset.mimeType?.startsWith("image/") ||
-    /\.(png|jpe?g|jfif|jpe|jif|gif|webp|svg)$/i.test(asset.name);
+  const isImage = isClientAssetDisplayImage(asset.mimeType, asset.name);
   const isVideo =
     asset.mimeType?.startsWith("video/") || asset.kind === "VIDEO";
   const isAudio =
@@ -239,7 +245,9 @@ function AssetThumb({
       <img
         src={url}
         alt={asset.name}
-        className="h-14 w-14 rounded-md object-cover"
+        className="h-14 w-14 rounded-md object-contain bg-muted/40"
+        loading="lazy"
+        decoding="async"
         onError={(e) => {
           e.currentTarget.style.display = "none";
           if (process.env.NODE_ENV !== "production") {
@@ -597,6 +605,14 @@ export function ClientAssetsUploader({
   async function handleFiles(kind: AssetKind, fileList: FileList | File[]) {
     const slot = SLOTS.find((s) => s.kind === kind);
     const files = Array.from(fileList).filter((file) => {
+      if (kind === "LOGO" || kind === "PRODUCT_IMAGE") {
+        const check = validateClientAssetImageFile(file, kind);
+        if (!check.ok) {
+          toast.error(check.message);
+          return false;
+        }
+        return true;
+      }
       if (slot && !extensionAllowed(file, slot.accept)) {
         toast.error(`فرمت ${file.name} برای این بخش مجاز نیست`);
         return false;

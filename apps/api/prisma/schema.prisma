@@ -545,6 +545,10 @@ model Opportunity {
   advancePayment     Decimal?         @db.Decimal(14, 2)
   agreedTerms        String?
   /**
+   * Number of videos in the contracted package — shown on payment receipts.
+   */
+  videoCount         Int?
+  /**
    * Once true, agreedPrice + agreedTerms cannot change without admin unlock.
    */
   contractLocked     Boolean          @default(false)
@@ -1624,7 +1628,10 @@ model HeroSlide {
   id                String    @id @default(cuid())
   title             String
   description       String?   @db.Text
+  /// Desktop / large-screen hero image (typically 16:9).
   imageKey          String
+  /// Optional mobile-optimized crop (typically 3:4 or 4:5). Falls back to imageKey.
+  mobileImageKey    String?
   altText           String?
   durationSeconds   Int       @default(5)
   sortOrder         Int       @default(0)

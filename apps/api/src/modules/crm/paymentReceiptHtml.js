@@ -1,7 +1,4 @@
-import {
-  formatReceiptVideoCount,
-  resolveReceiptPaymentMethod,
-} from './receiptDisplay.js';
+import { resolveReceiptPaymentMethod } from './receiptDisplay.js';
 import {
   BILL_BRAND_CSS,
   buildBillBrandHeaderHtml,
@@ -77,9 +74,6 @@ export function buildPaymentReceiptHtml(receipt) {
   const { datePart } = splitReceiptDateTime(paidAt);
   const paymentNo = (receipt.payment.paymentNumber || '').trim() || '—';
   const customerName = (receipt.customer?.personName || '').trim() || '—';
-  const videoCount = formatReceiptVideoCount(
-    receipt.videoCount ?? receipt.invoice?.videoCount,
-  );
   const totalAmount = Number(receipt.finance?.totalAmount || 0);
   const paidAmount = Number(receipt.payment.amount || 0);
   const methodText = resolveReceiptPaymentMethod({
@@ -96,7 +90,6 @@ export function buildPaymentReceiptHtml(receipt) {
     { label: 'شماره رسید', value: paymentNo, ltr: true },
     { label: 'تاریخ پرداخت', value: datePart },
     { label: 'نام مشتری', value: customerName },
-    { label: 'تعداد ویدیو', value: videoCount },
     {
       label: 'مبلغ مجموعی',
       value: formatReceiptAmount(totalAmount),

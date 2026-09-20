@@ -141,6 +141,27 @@ router.post(
   },
 );
 
+router.delete(
+  '/projects/:projectId/takes/:takeId',
+  requireCsrf,
+  requirePermission('narration.upload'),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await narrationService.deleteTakeAudio(
+          req.params.projectId,
+          req.params.takeId,
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.post(
   '/projects/:projectId/accept',
   requireCsrf,

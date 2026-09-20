@@ -259,6 +259,99 @@ function yieldEventLoop() {
 }
 
 /**
+ * Cinematic local still when external image APIs are unavailable.
+ * Distinct per scene (seeded palette + composition) so the collage is usable.
+ */
+export function renderLocalSceneStill({
+  sceneNumber = 1,
+  title = '',
+  visual = '',
+  width = 1920,
+  height = 1080,
+} = {}) {
+  const dst = createRgba(width, height, 18, 20, 26);
+  const seed = Math.max(1, Number(sceneNumber) || 1);
+  const hueShift = (seed * 47) % 360;
+  const tone = (deg) => {
+    const t = ((deg % 360) + 360) % 360;
+    const x = 1 - Math.abs(((t / 60) % 2) - 1);
+    if (t < 60) return [1, x, 0];
+    if (t < 120) return [x, 1, 0];
+    if (t < 180) return [0, 1, x];
+    if (t < 240) return [0, x, 1];
+    if (t < 300) return [x, 0, 1];
+    return [1, 0, x];
+  };
+  const [tr, tg, tb] = tone(hueShift);
+  const accent = [
+    Math.round(40 + tr * 140),
+    Math.round(36 + tg * 120),
+    Math.round(48 + tb * 150),
+  ];
+  const accent2 = [
+    Math.round(20 + tr * 70),
+    Math.round(22 + tg * 80),
+    Math.round(30 + tb * 90),
+  ];
+
+  for (let y = 0; y < height; y += 1) {
+    const gy = y / height;
+    for (let x = 0; x < width; x += 1) {
+      const gx = x / width;
+      const vignette = Math.min(
+        1,
+        Math.hypot(gx - 0.5, gy - 0.48) * 1.55,
+      );
+      const wash = 0.35 + 0.45 * (1 - gy) + 0.15 * Math.sin((gx + seed) * 6.2);
+      const o = (y * width + x) * 4;
+      dst.data[o] = Math.max(
+        0,
+        Math.min(255, accent2[0] * wash + accent[0] * (1 - wash) * 0.35 - vignette * 70),
+      );
+      dst.data[o + 1] = Math.max(
+        0,
+        Math.min(255, accent2[1] * wash + accent[1] * (1 - wash) * 0.35 - vignette * 70),
+      );
+      dst.data[o + 2] = Math.max(
+        0,
+        Math.min(255, accent2[2] * wash + accent[2] * (1 - wash) * 0.4 - vignette * 80),
+      );
+      dst.data[o + 3] = 255;
+    }
+  }
+
+  // Soft rule-of-thirds guides + focal rectangle (storyboard framing cues).
+  const thirdX = Math.floor(width / 3);
+  const thirdY = Math.floor(height / 3);
+  fillRect(dst, thirdX, 0, 2, height, 255, 255, 255, 28);
+  fillRect(dst, thirdX * 2, 0, 2, height, 255, 255, 255, 28);
+  fillRect(dst, 0, thirdY, width, 2, 255, 255, 255, 28);
+  fillRect(dst, 0, thirdY * 2, width, 2, 255, 255, 255, 28);
+
+  const focusLeft = Math.floor(width * (0.18 + ((seed * 13) % 7) / 100));
+  const focusTop = Math.floor(height * (0.2 + ((seed * 17) % 9) / 100));
+  const focusW = Math.floor(width * 0.42);
+  const focusH = Math.floor(height * 0.38);
+  fillRect(dst, focusLeft, focusTop, focusW, focusH, accent[0], accent[1], accent[2], 55);
+  fillRect(dst, focusLeft + 8, focusTop + 8, focusW - 16, focusH - 16, 12, 14, 18, 40);
+
+  fillRect(dst, 48, 48, 120, 56, 12, 14, 18, 210);
+  drawText(dst, 64, 60, String(seed).padStart(2, '0'), 4, 244, 244, 245);
+
+  const caption = asciiCaption(title || visual || `SCENE ${seed}`);
+  if (caption) {
+    fillRect(dst, 48, height - 110, Math.min(width - 96, caption.length * 14 + 48), 52, 12, 14, 18, 200);
+    drawText(dst, 64, height - 96, caption, 2, 212, 175, 55);
+  }
+
+  const encoded = jpeg.encode(
+    { data: dst.data, width: dst.width, height: dst.height },
+    88,
+  );
+  return Buffer.from(encoded.data);
+}
+
+/**
  * @param {Array<{ buffer?: Buffer|null, sceneNumber?: number, title?: string }>} panels
  * @returns {Promise<Buffer>}
  */

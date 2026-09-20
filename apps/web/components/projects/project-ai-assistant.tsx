@@ -36,20 +36,23 @@ import {
   AlertTriangle,
   CheckCircle2,
   Circle,
-  Code2,
+  FileText,
   GitCompare,
   History,
   Loader2,
+  MessageSquareWarning,
+  Pencil,
   RefreshCw,
   Send,
   Sparkles,
   Trash2,
   UploadCloud,
   XCircle,
-  MessageSquareWarning,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ALERT_BANNER, ALERT_ICON } from "@/lib/theme-tones";
+import { hasPermission } from "@/lib/rbac";
+import { useMeQuery } from "@/lib/permissions";
 import {
   NarrationFinalView,
   ScenarioFinalView,
@@ -61,6 +64,10 @@ import {
   type CustomerFeedbackItem,
 } from "@/components/projects/customer-feedback-panel";
 import { ContentManualUploadDialog } from "@/components/projects/content-manual-upload-dialog";
+import {
+  ContentSectionInlineEditor,
+  type ContentEditSection,
+} from "@/components/projects/content-section-inline-editor";
 
 type StepStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED";
 
@@ -106,6 +113,9 @@ interface AiOverview {
   generatedContentCount: number;
   customerFeedback?: CustomerFeedbackItem[];
   approvalTimeline?: ApprovalTimelineItem[];
+  projectLanguage?: string | null;
+  projectTone?: string | null;
+  projectTitle?: string | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -161,35 +171,34 @@ function friendlyError(raw?: string | null): string | null {
   if (/insufficient_quota|RESOURCE_EXHAUSTED|quota|سهمیه|اعتبار/i.test(text)) {
     return "سهمیه یا اعتبار سرویس AI تمام شده است. حساب OpenRouter را بررسی کنید.";
   }
-  if (/invalid.?api.?key|API_KEY_INVALID|incorrect api key|کلید API/i.test(text)) {
+  if (
+    /invalid.?api.?key|API_KEY_INVALID|incorrect api key|کلید API/i.test(text)
+  ) {
     return "کلید API نامعتبر است. OPENROUTER_API_KEY را در سرور بررسی کنید.";
   }
   if (/timeout|طول کشید|AbortError/i.test(text)) {
     return "پاسخ هوش مصنوعی بیش از حد طول کشید. دوباره تلاش کنید.";
   }
-  if (/rate.?limit|HTTP 429|محدودیت نرخ/i.test(text) && !/insufficient_quota/i.test(text)) {
+  if (
+    /rate.?limit|HTTP 429|محدودیت نرخ/i.test(text) &&
+    !/insufficient_quota/i.test(text)
+  ) {
     return "محدودیت نرخ درخواست. کمی بعد دوباره تلاش کنید.";
   }
   if (/model.?not.?found|HTTP 404|NOT_FOUND|در دسترس نیست/i.test(text)) {
     return "مدل درخواستی در دسترس نیست. مدل پیش‌فرض یا پشتیبان را بررسی کنید.";
   }
-  if (/unavailable|ECONNREFUSED|ECONNRESET|ERR_CONNECTION_RESET|NETWORK_ERROR|در دسترس نیست|ارتباط با|قطع شد/i.test(text)) {
+  if (
+    /unavailable|ECONNREFUSED|ECONNRESET|ERR_CONNECTION_RESET|NETWORK_ERROR|در دسترس نیست|ارتباط با|قطع شد/i.test(
+      text,
+    )
+  ) {
     return "سرویس AI موقتاً در دسترس نیست. دوباره تلاش کنید.";
   }
   if (text.includes("{") || text.length > 180) {
     return "خطا در تولید محتوا. دوباره تلاش کنید.";
   }
   return text;
-}
-
-function prettyJson(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function stripTechnicalFields(value: unknown): unknown {
@@ -213,7 +222,9 @@ function StepIcon({ status }: { status: StepStatus }) {
   if (status === "COMPLETED")
     return <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />;
   if (status === "RUNNING")
-    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-600" />;
+    return (
+      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-amber-600" />
+    );
   if (status === "FAILED")
     return <XCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />;
   return <Circle className="h-3.5 w-3.5 shrink-0 text-muted-foreground/35" />;
@@ -280,11 +291,7 @@ function ContentBlocks({
     Array.isArray(obj.storyboard) ||
     Array.isArray(raw.scenes)
   ) {
-    return (
-      <StoryboardFinalView
-        value={value}
-      />
-    );
+    return <StoryboardFinalView value={value} />;
   }
 
   const entries = Object.entries(obj).filter(
@@ -306,31 +313,34 @@ function ContentBlocks({
 
   return (
     <div className="space-y-3" dir={dir}>
-      {entries.map(([key, val]) => (
-        <div key={key} className="space-y-1">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {key}
-          </p>
-          {typeof val === "string" || typeof val === "number" ? (
-            <p className="whitespace-pre-wrap text-sm leading-7">{String(val)}</p>
-          ) : Array.isArray(val) ? (
-            <ul className="list-disc space-y-1 pe-4 text-sm leading-6 text-muted-foreground">
-              {val.map((item, i) => (
-                <li key={i}>
-                  {typeof item === "string" ? item : prettyJson(item)}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <pre
-              className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/40 p-3 text-[11px]"
-              dir="ltr"
-            >
-              {prettyJson(val)}
-            </pre>
-          )}
-        </div>
-      ))}
+      {entries.length === 0 ? (
+        <p className="text-sm text-muted-foreground">محتوایی برای نمایش نیست</p>
+      ) : (
+        entries.map(([key, val]) => (
+          <div key={key} className="space-y-1">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {key}
+            </p>
+            {typeof val === "string" || typeof val === "number" ? (
+              <p className="whitespace-pre-wrap text-sm leading-7">
+                {String(val)}
+              </p>
+            ) : Array.isArray(val) ? (
+              <ul className="list-disc space-y-1 pe-4 text-sm leading-6 text-muted-foreground">
+                {val.map((item, i) => (
+                  <li key={i}>
+                    {typeof item === "string" ? item : "محتوای ساختاریافته"}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                این بخش به‌صورت ساختاریافته ذخیره شده است.
+              </p>
+            )}
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -343,7 +353,15 @@ export function ProjectAiAssistant({
   initialPanel?: "content" | "feedback";
 }) {
   const qc = useQueryClient();
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const { data: me } = useMeQuery();
+  const canEditContent = hasPermission(
+    me?.permissions,
+    "content.edit",
+    me?.role,
+  );
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(
+    null,
+  );
   const [workspacePanel, setWorkspacePanel] = useState<"content" | "feedback">(
     initialPanel,
   );
@@ -358,7 +376,9 @@ export function ProjectAiAssistant({
   const [contentTab, setContentTab] = useState<
     "scenario" | "narration" | "storyboard"
   >("scenario");
-  const [showRawJson, setShowRawJson] = useState(false);
+  const [editSection, setEditSection] = useState<ContentEditSection | null>(
+    null,
+  );
 
   useEffect(() => {
     setWorkspacePanel(initialPanel);
@@ -424,16 +444,23 @@ export function ProjectAiAssistant({
         },
       ),
     onSuccess: (data) => {
-      toast.success(data?.async ? "تولید در پس‌زمینه شروع شد" : "محتوا تولید شد");
+      toast.success(
+        data?.async ? "تولید در پس‌زمینه شروع شد" : "محتوا تولید شد",
+      );
       if (data?.version?.id) setSelectedVersionId(data.version.id);
       setGeneratePromptOpen(false);
       invalidateAll();
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "خطا در تولید"),
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : "خطا در تولید"),
   });
 
   const regenerateMut = useMutation({
-    mutationFn: (opts?: { baseVersionId?: string; userPrompt?: string; changeNotes?: string }) =>
+    mutationFn: (opts?: {
+      baseVersionId?: string;
+      userPrompt?: string;
+      changeNotes?: string;
+    }) =>
       apiPost<{ version?: ContentVersion; async?: boolean }>(
         `/ai/${projectId}/regenerate`,
         {
@@ -477,7 +504,9 @@ export function ProjectAiAssistant({
       invalidateAll();
     },
     onError: (e) =>
-      toast.error(e instanceof Error ? e.message : "ارسال برای تأیید ناموفق بود"),
+      toast.error(
+        e instanceof Error ? e.message : "ارسال برای تأیید ناموفق بود",
+      ),
   });
 
   const compareQ = useQuery({
@@ -518,24 +547,43 @@ export function ProjectAiAssistant({
       usedFallback,
       failed: workflowFailed,
       message: fromWorkflow || fromExtras,
-      isQuota: /سهمیه|quota|صورتحساب|اعتبار/i.test(fromWorkflow || fromExtras || ""),
+      isQuota: /سهمیه|quota|صورتحساب|اعتبار/i.test(
+        fromWorkflow || fromExtras || "",
+      ),
       canRetry: workflowFailed || usedFallback,
     };
   }, [activeWorkflow?.error, activeWorkflow?.status, selected?.extras]);
 
-  const narrationDir = useMemo(() => {
-    const n = selected?.narration as { language?: string } | null;
-    const lang = n?.language || "";
-    if (lang === "en" || lang.startsWith("en")) return "ltr" as const;
+  const contentDir = useMemo(() => {
+    const fromNarration = (selected?.narration as { language?: string } | null)
+      ?.language;
+    const fromScenario = (selected?.scenario as { language?: string } | null)
+      ?.language;
+    const lang =
+      fromNarration ||
+      fromScenario ||
+      overviewQ.data?.projectLanguage ||
+      "";
+    if (lang === "en" || String(lang).toLowerCase().startsWith("en")) {
+      return "ltr" as const;
+    }
     return "rtl" as const;
-  }, [selected]);
+  }, [selected, overviewQ.data?.projectLanguage]);
 
   const contentValue = useMemo(() => {
     if (!selected) return null;
     if (contentTab === "scenario") return selected.scenario;
-    if (contentTab === "narration") return selected.narration;
+    if (contentTab === "narration") {
+      const narration = selected.narration as Record<string, unknown> | null;
+      if (!narration || typeof narration !== "object") return selected.narration;
+      const tone =
+        (typeof narration.tone === "string" && narration.tone.trim()) ||
+        overviewQ.data?.projectTone ||
+        "";
+      return { ...narration, tone, toneExplanation: "" };
+    }
     return selected.storyboard;
-  }, [selected, contentTab]);
+  }, [selected, contentTab, overviewQ.data?.projectTone]);
 
   const steps = useMemo(() => {
     const raw = activeWorkflow?.steps || [];
@@ -544,6 +592,7 @@ export function ProjectAiAssistant({
       "scenario",
       "narration",
       "storyboard",
+      "storyboard_images",
       "finalize",
     ]);
     const filtered = raw.filter((s) => allowed.has(s.key));
@@ -556,17 +605,24 @@ export function ProjectAiAssistant({
 
   const contentStageStatus = useMemo(() => {
     const byKey = Object.fromEntries(steps.map((s) => [s.key, s.status]));
-    return (
-      [
-        { key: "scenario", label: "سناریو", status: byKey.scenario || "PENDING" },
-        { key: "narration", label: "نریشن", status: byKey.narration || "PENDING" },
-        {
-          key: "storyboard",
-          label: "استوری‌بورد",
-          status: byKey.storyboard || "PENDING",
-        },
-      ] as const
-    );
+    return [
+      { key: "scenario", label: "سناریو", status: byKey.scenario || "PENDING" },
+      {
+        key: "narration",
+        label: "نریشن",
+        status: byKey.narration || "PENDING",
+      },
+      {
+        key: "storyboard",
+        label: "استوری‌بورد",
+        status: byKey.storyboard || "PENDING",
+      },
+      {
+        key: "storyboard_images",
+        label: "تصاویر",
+        status: byKey.storyboard_images || "PENDING",
+      },
+    ] as const;
   }, [steps]);
 
   const sendBlockReason = selected ? versionSendBlockReason(selected) : null;
@@ -590,10 +646,10 @@ export function ProjectAiAssistant({
 
   return (
     <div className="space-y-4" dir="rtl">
-      <header className="flex flex-col gap-4 rounded-2xl border border-border/70 bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
-        <div className="min-w-0 space-y-1.5">
+      <header className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-3 sm:gap-4 sm:p-4 sm:px-6 sm:py-5">
+        <div className="min-w-0 space-y-1 sm:space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-semibold tracking-tight">
+            <h3 className="text-base font-semibold tracking-tight sm:text-lg">
               فضای کاری تولید محتوا
             </h3>
             <Badge
@@ -603,16 +659,19 @@ export function ProjectAiAssistant({
               {STATUS_LABEL[overview?.processingStatus || "IDLE"]}
             </Badge>
           </div>
-          <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+          <p className="hidden max-w-xl text-sm leading-6 text-muted-foreground sm:block">
             تولید با هوش مصنوعی یا آپلود سناریو، نریشن و استوری‌بورد از منابع
             خارجی — در سه بخش قابل مدیریت
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:grid-cols-4">
           <div
             role="tablist"
             aria-label="فضای کاری هوش مصنوعی"
-            className={getCustomTabListClass("segmented")}
+            className={cn(
+              getCustomTabListClass("segmented"),
+              "col-span-2 grid h-11 grid-cols-2 gap-0.5 p-0.5",
+            )}
           >
             <button
               type="button"
@@ -622,9 +681,11 @@ export function ProjectAiAssistant({
               className={getCustomTabTriggerClass(
                 workspacePanel === "content",
                 "segmented",
+                "h-full min-w-0 justify-center gap-1.5 px-2 text-xs sm:px-3 sm:text-sm",
               )}
             >
-              محتوا
+              <FileText className="h-4 w-4 shrink-0" />
+              <span>محتوا</span>
             </button>
             <button
               type="button"
@@ -634,13 +695,20 @@ export function ProjectAiAssistant({
               className={getCustomTabTriggerClass(
                 workspacePanel === "feedback",
                 "segmented",
-                "inline-flex items-center gap-1.5",
+                "h-full min-w-0 justify-center gap-1.5 px-2 text-xs sm:px-3 sm:text-sm",
               )}
             >
-              <MessageSquareWarning className="h-3.5 w-3.5" />
-              بازخورد مشتری
+              <MessageSquareWarning className="h-4 w-4 shrink-0" />
+              <span className="whitespace-nowrap">بازخورد مشتری</span>
               {feedbackCount > 0 && (
-                <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] tabular-nums text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+                <span
+                  className={cn(
+                    "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums",
+                    workspacePanel === "feedback"
+                      ? "bg-brand/15 text-brand"
+                      : "bg-amber-500/15 text-amber-800 dark:text-amber-200",
+                  )}
+                >
                   {feedbackCount.toLocaleString("fa-AF", {
                     numberingSystem: "latn",
                   })}
@@ -651,24 +719,24 @@ export function ProjectAiAssistant({
           <Button
             variant="outline"
             size="lg"
-            className="h-11 shrink-0 gap-2 px-4"
+            className="h-11 min-w-0 gap-1.5 whitespace-nowrap px-3 text-xs sm:text-sm"
             disabled={isBusy}
             onClick={() => setManualUploadOpen(true)}
           >
-            <UploadCloud className="h-4 w-4" />
+            <UploadCloud className="h-4 w-4 shrink-0" />
             آپلود محتوا
           </Button>
           <Button
             variant="brand"
             size="lg"
-            className="h-11 shrink-0 gap-2 px-6"
+            className="h-11 min-w-0 gap-1.5 whitespace-nowrap px-3 text-xs sm:text-sm"
             disabled={isBusy}
             onClick={() => setGeneratePromptOpen(true)}
           >
             {isBusy ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
             ) : (
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="h-4 w-4 shrink-0" />
             )}
             {isBusy ? "در حال تولید…" : "تولید محتوا"}
           </Button>
@@ -677,56 +745,63 @@ export function ProjectAiAssistant({
 
       {(pipelineNotice.failed || pipelineNotice.usedFallback) &&
         pipelineNotice.message && (
-        <div
-          role="alert"
-          className={cn(
-            "flex gap-3 rounded-2xl border px-4 py-3.5",
-            pipelineNotice.failed
-              ? "border-destructive/30 bg-destructive/5 text-destructive"
-              : ALERT_BANNER,
-          )}
-        >
-          <AlertTriangle
+          <div
+            role="alert"
             className={cn(
-              "mt-0.5 h-4 w-4 shrink-0",
-              pipelineNotice.failed ? "text-destructive" : ALERT_ICON,
+              "flex gap-3 rounded-2xl border px-4 py-3.5",
+              pipelineNotice.failed
+                ? "border-destructive/30 bg-destructive/5 text-destructive"
+                : ALERT_BANNER,
             )}
-          />
-          <div className="min-w-0 flex-1 space-y-2">
-            <p className="text-sm font-medium">
-              {pipelineNotice.failed
-                ? "تولید محتوا ناموفق بود"
-                : "سرویس AI موقتاً در دسترس نبود"}
-            </p>
-            <p
+          >
+            <AlertTriangle
               className={cn(
-                "text-sm leading-6",
-                pipelineNotice.failed
-                  ? "text-destructive/90"
-                  : "opacity-90",
+                "mt-0.5 h-4 w-4 shrink-0",
+                pipelineNotice.failed ? "text-destructive" : ALERT_ICON,
               )}
-            >
-              {pipelineNotice.message}
-            </p>
-            {pipelineNotice.canRetry && (
-              <Button
-                variant={pipelineNotice.failed ? "destructive" : "outline"}
-                size="sm"
-                className="mt-1 gap-1.5"
-                disabled={isBusy}
-                onClick={() => regenerateMut.mutate(undefined)}
-              >
-                {isBusy ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
+            />
+            <div className="min-w-0 flex-1 space-y-2">
+              <p className="text-sm font-medium">
+                {pipelineNotice.failed
+                  ? "تولید محتوا ناموفق بود"
+                  : "سرویس AI موقتاً در دسترس نبود"}
+              </p>
+              <p
+                className={cn(
+                  "text-sm leading-6",
+                  pipelineNotice.failed ? "text-destructive/90" : "opacity-90",
                 )}
-                تلاش مجدد
-              </Button>
-            )}
+              >
+                {pipelineNotice.message}
+              </p>
+              {pipelineNotice.canRetry && (
+                <Button
+                  variant={pipelineNotice.failed ? "destructive" : "outline"}
+                  size="sm"
+                  className="mt-1 gap-1.5"
+                  disabled={isBusy}
+                  onClick={() =>
+                    regenerateMut.mutate(
+                      selected?.id
+                        ? {
+                            baseVersionId: selected.id,
+                            changeNotes: "تلاش مجدد تولید محتوا",
+                          }
+                        : { changeNotes: "تلاش مجدد تولید محتوا" },
+                    )
+                  }
+                >
+                  {isBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  تلاش مجدد
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {isBusy && steps.length > 0 && (
         <section className="rounded-2xl border border-border/70 bg-card p-4 sm:p-5">
@@ -734,11 +809,12 @@ export function ProjectAiAssistant({
             <div>
               <p className="text-sm font-medium">خط تولید محتوا</p>
               <p className="text-xs text-muted-foreground">
-                سناریو ← نریشن ← استوری‌بورد
+                سناریو ← نریشن ← استوری‌بورد ← تصاویر
               </p>
             </div>
             <span className="text-xs tabular-nums text-muted-foreground">
-              {progressPct.toLocaleString("fa-AF", { numberingSystem: "latn" })}٪
+              {progressPct.toLocaleString("fa-AF", { numberingSystem: "latn" })}
+              ٪
             </span>
           </div>
           <div className="mb-5 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -747,7 +823,7 @@ export function ProjectAiAssistant({
               style={{ width: `${progressPct}%` }}
             />
           </div>
-          <ol className="grid gap-3 sm:grid-cols-3">
+          <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {contentStageStatus.map((stage, index) => (
               <li
                 key={stage.key}
@@ -771,7 +847,8 @@ export function ProjectAiAssistant({
                   <span
                     className={cn(
                       "text-sm",
-                      stage.status === "RUNNING" && "font-medium text-foreground",
+                      stage.status === "RUNNING" &&
+                        "font-medium text-foreground",
                       stage.status === "PENDING" && "text-muted-foreground",
                     )}
                   >
@@ -796,350 +873,402 @@ export function ProjectAiAssistant({
           />
         </div>
       ) : (
-      <div className="grid min-h-[32rem] gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="flex flex-col overflow-hidden rounded-2xl border border-border/70 bg-card">
-          <div className="flex items-center justify-between border-b border-border/60 px-4 py-3.5">
-            <div>
-              <p className="text-sm font-semibold">نسخه‌ها</p>
-              <p className="text-[11px] text-muted-foreground">
-                {(overview?.generatedContentCount || versions.length).toLocaleString(
-                  "fa-AF",
-                )}{" "}
-                نسخه
-              </p>
-            </div>
-            {versions.length >= 2 && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 gap-1.5 px-2 text-xs"
-                onClick={() => {
-                  setCompareLeft(versions[1]?.id || versions[0].id);
-                  setCompareRight(versions[0].id);
-                  setCompareOpen(true);
-                }}
-              >
-                <GitCompare className="h-3.5 w-3.5" />
-                مقایسه
-              </Button>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-2">
-            {versions.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 px-3 py-12 text-center">
-                <UploadCloud className="h-7 w-7 text-muted-foreground/35" />
-                <p className="text-sm text-muted-foreground">هنوز محتوایی نیست</p>
-                <p className="text-[11px] leading-5 text-muted-foreground">
-                  تولید با AI یا آپلود از فایل
+        <div className="grid min-h-[32rem] gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <aside className="flex flex-col overflow-hidden rounded-2xl border border-border/70 bg-card">
+            <div className="flex items-center justify-between border-b border-border/60 px-4 py-3.5">
+              <div>
+                <p className="text-sm font-semibold">نسخه‌ها</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {(
+                    overview?.generatedContentCount || versions.length
+                  ).toLocaleString("fa-AF")}{" "}
+                  نسخه
                 </p>
               </div>
-            ) : (
-              <ul className="space-y-1">
-                {versions.map((v) => {
-                  const active = selected?.id === v.id;
-                  const locked =
-                    v.status === "APPROVED" ||
-                    (v.status === "PENDING_CUSTOMER_APPROVAL" &&
-                      v.publishedToClient) ||
-                    (v.status === "REVISION_REQUESTED" && v.isLocked);
-                  const sendable = canSendVersionToCustomer(v);
-                  return (
-                    <li key={v.id}>
-                      <div
-                        className={cn(
-                          "group relative flex items-stretch gap-0.5 rounded-xl transition-colors",
-                          active
-                            ? "bg-brand/10 ring-1 ring-brand/25"
-                            : "hover:bg-muted/50",
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setSelectedVersionId(v.id)}
-                          className="min-w-0 flex-1 rounded-xl px-3 py-2.5 pe-1 text-start"
+              {versions.length >= 2 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 px-2 text-xs"
+                  onClick={() => {
+                    setCompareLeft(versions[1]?.id || versions[0].id);
+                    setCompareRight(versions[0].id);
+                    setCompareOpen(true);
+                  }}
+                >
+                  <GitCompare className="h-3.5 w-3.5" />
+                  مقایسه
+                </Button>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2">
+              {versions.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-3 py-12 text-center">
+                  <UploadCloud className="h-7 w-7 text-muted-foreground/35" />
+                  <p className="text-sm text-muted-foreground">
+                    هنوز محتوایی نیست
+                  </p>
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    تولید با AI یا آپلود از فایل
+                  </p>
+                </div>
+              ) : (
+                <ul className="space-y-1">
+                  {versions.map((v) => {
+                    const active = selected?.id === v.id;
+                    const locked =
+                      v.status === "APPROVED" ||
+                      (v.status === "PENDING_CUSTOMER_APPROVAL" &&
+                        v.publishedToClient) ||
+                      (v.status === "REVISION_REQUESTED" && v.isLocked);
+                    const sendable = canSendVersionToCustomer(v);
+                    return (
+                      <li key={v.id}>
+                        <div
+                          className={cn(
+                            "group relative flex items-stretch gap-0.5 rounded-xl transition-colors",
+                            active
+                              ? "bg-brand/10 ring-1 ring-brand/25"
+                              : "hover:bg-muted/50",
+                          )}
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-semibold tabular-nums">
-                              نسخه {v.versionNumber.toLocaleString("fa-AF", { numberingSystem: "latn" })}
-                            </span>
-                            <div className="flex flex-wrap items-center justify-end gap-1">
-                              <Badge
-                                variant={statusBadgeVariant(v.status)}
-                                className="text-[10px] font-normal"
-                              >
-                                {STATUS_LABEL[v.status] || v.status}
-                              </Badge>
-                              {(v.status === "APPROVED" ||
-                                (v.status === "PENDING_CUSTOMER_APPROVAL" &&
-                                  v.publishedToClient)) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditSection(null);
+                              setSelectedVersionId(v.id);
+                            }}
+                            className="min-w-0 flex-1 rounded-xl px-3 py-2.5 pe-1 text-start"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-semibold tabular-nums">
+                                نسخه{" "}
+                                {v.versionNumber.toLocaleString("fa-AF", {
+                                  numberingSystem: "latn",
+                                })}
+                              </span>
+                              <div className="flex flex-wrap items-center justify-end gap-1">
                                 <Badge
-                                  variant="secondary"
+                                  variant={statusBadgeVariant(v.status)}
                                   className="text-[10px] font-normal"
                                 >
-                                  قفل محتوا
+                                  {STATUS_LABEL[v.status] || v.status}
                                 </Badge>
-                              )}
-                              {v.status === "PENDING_CUSTOMER_APPROVAL" &&
-                                v.publishedToClient && (
+                                {(v.status === "APPROVED" ||
+                                  (v.status === "PENDING_CUSTOMER_APPROVAL" &&
+                                    v.publishedToClient)) && (
                                   <Badge
-                                    variant="brand"
+                                    variant="secondary"
                                     className="text-[10px] font-normal"
                                   >
-                                    ارسال‌شده به مشتری
+                                    قفل محتوا
                                   </Badge>
                                 )}
-                              {sendable &&
-                                !(
-                                  v.status === "PENDING_CUSTOMER_APPROVAL" &&
-                                  v.publishedToClient
-                                ) && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] font-normal"
-                                  >
-                                    آماده ارسال
-                                  </Badge>
-                                )}
+                                {v.status === "PENDING_CUSTOMER_APPROVAL" &&
+                                  v.publishedToClient && (
+                                    <Badge
+                                      variant="brand"
+                                      className="text-[10px] font-normal"
+                                    >
+                                      ارسال‌شده به مشتری
+                                    </Badge>
+                                  )}
+                                {sendable &&
+                                  !(
+                                    v.status === "PENDING_CUSTOMER_APPROVAL" &&
+                                    v.publishedToClient
+                                  ) && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] font-normal"
+                                    >
+                                      آماده ارسال
+                                    </Badge>
+                                  )}
+                              </div>
                             </div>
-                          </div>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            {formatDate(v.createdAt)}
-                          </p>
-                        </button>
-                        {!locked && (
-                          <div className="flex items-center pe-1.5">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              disabled={deleteMut.isPending}
-                              title="حذف نسخه"
-                              aria-label={`حذف نسخه ${v.versionNumber}`}
-                              className={cn(
-                                "h-8 w-8 shrink-0 rounded-lg text-muted-foreground transition-all",
-                                "opacity-100 hover:bg-destructive/10 hover:text-destructive",
-                                "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100",
-                                active && "sm:opacity-100",
-                              )}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget(v);
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </aside>
-
-        <section className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card">
-          {!selected ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
-                <Sparkles className="h-6 w-6" />
-              </div>
-              <p className="text-base font-medium">آماده تولید یا ورود محتوا</p>
-              <p className="max-w-sm text-sm leading-6 text-muted-foreground">
-                محتوا را با هوش مصنوعی تولید کنید، یا سناریو، نریشن و
-                استوری‌بورد را از فایل‌های خارجی مستقیماً آپلود کنید.
-              </p>
-              <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
-                <Button
-                  variant="outline"
-                  className="gap-2"
-                  disabled={isBusy}
-                  onClick={() => setManualUploadOpen(true)}
-                >
-                  <UploadCloud className="h-4 w-4" />
-                  آپلود از فایل
-                </Button>
-                <Button
-                  variant="brand"
-                  className="gap-2"
-                  disabled={isBusy}
-                  onClick={() => setGeneratePromptOpen(true)}
-                >
-                  <Sparkles className="h-4 w-4" />
-                  شروع تولید
-                </Button>
-              </div>
+                            <p className="mt-1 text-[11px] text-muted-foreground">
+                              {formatDate(v.createdAt)}
+                            </p>
+                          </button>
+                          {!locked && (
+                            <div className="flex items-center pe-1.5">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                disabled={deleteMut.isPending}
+                                title="حذف نسخه"
+                                aria-label={`حذف نسخه ${v.versionNumber}`}
+                                className={cn(
+                                  "h-8 w-8 shrink-0 rounded-lg text-muted-foreground transition-all",
+                                  "opacity-100 hover:bg-destructive/10 hover:text-destructive",
+                                  "sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100",
+                                  active && "sm:opacity-100",
+                                )}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget(v);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
-          ) : (
-            <>
-              <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold">
-                    نسخه {selected.versionNumber.toLocaleString("fa-AF", { numberingSystem: "latn" })}
-                  </p>
-                  {selected.changeNotes && (
-                    <p className="truncate text-xs text-muted-foreground">
-                      {selected.changeNotes}
-                    </p>
-                  )}
+          </aside>
+
+          <section className="flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border/70 bg-card">
+            {!selected ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10 text-brand">
+                  <Sparkles className="h-6 w-6" />
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <p className="text-base font-medium">
+                  آماده تولید یا ورود محتوا
+                </p>
+                <p className="max-w-sm text-sm leading-6 text-muted-foreground">
+                  محتوا را با هوش مصنوعی تولید کنید، یا سناریو، نریشن و
+                  استوری‌بورد را از فایل‌های خارجی مستقیماً آپلود کنید.
+                </p>
+                <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
                   <Button
                     variant="outline"
-                    size="sm"
-                    className="gap-1.5"
+                    className="gap-2"
                     disabled={isBusy}
-                    onClick={() => regenerateMut.mutate(undefined)}
+                    onClick={() => setManualUploadOpen(true)}
                   >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    تولید مجدد
+                    <UploadCloud className="h-4 w-4" />
+                    آپلود از فایل
                   </Button>
                   <Button
                     variant="brand"
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={!canSendForApproval || sendMut.isPending}
-                    title={sendBlockReason || undefined}
-                    onClick={() => setSendConfirmOpen(true)}
+                    className="gap-2"
+                    disabled={isBusy}
+                    onClick={() => setGeneratePromptOpen(true)}
                   >
-                    {sendMut.isPending ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Send className="h-3.5 w-3.5" />
-                    )}
-                    ارسال برای تأیید مشتری
+                    <Sparkles className="h-4 w-4" />
+                    شروع تولید
                   </Button>
                 </div>
               </div>
-
-              {selected.status === "REVISION_REQUESTED" &&
-                selected.rejectionReason && (
-                  <div className={cn("mx-4 mt-4 flex gap-3 px-3.5 py-3 sm:mx-5", ALERT_BANNER)}>
-                    <MessageSquareWarning className={cn("mt-0.5 h-4 w-4 shrink-0", ALERT_ICON)} />
-                    <div className="min-w-0 space-y-1">
-                      <p className="text-sm font-medium">بازخورد مشتری برای این نسخه</p>
-                      <p className="whitespace-pre-wrap text-sm leading-6">
-                        {selected.rejectionReason}
+            ) : (
+              <>
+                <div className="flex flex-col gap-3 border-b border-border/60 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">
+                      نسخه{" "}
+                      {selected.versionNumber.toLocaleString("fa-AF", {
+                        numberingSystem: "latn",
+                      })}
+                    </p>
+                    {selected.changeNotes && (
+                      <p className="truncate text-xs text-muted-foreground">
+                        {selected.changeNotes}
                       </p>
-                      <button
-                        type="button"
-                        className="text-xs font-medium text-brand underline-offset-2 hover:underline"
-                        onClick={() => setWorkspacePanel("feedback")}
-                      >
-                        مشاهده همه بازخوردها
-                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={isBusy}
+                      onClick={() =>
+                        regenerateMut.mutate(
+                          selected?.id
+                            ? {
+                                baseVersionId: selected.id,
+                                changeNotes: "تولید مجدد بر اساس نسخه فعلی",
+                                userPrompt: generationPrompt,
+                              }
+                            : {
+                                changeNotes: "تولید مجدد نتیجه توسط مدیر",
+                                userPrompt: generationPrompt,
+                              },
+                        )
+                      }
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      تولید مجدد
+                    </Button>
+                    <Button
+                      variant="brand"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={!canSendForApproval || sendMut.isPending}
+                      title={sendBlockReason || undefined}
+                      onClick={() => setSendConfirmOpen(true)}
+                    >
+                      {sendMut.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5" />
+                      )}
+                      ارسال برای تأیید مشتری
+                    </Button>
+                  </div>
+                </div>
+
+                {selected.status === "REVISION_REQUESTED" &&
+                  selected.rejectionReason && (
+                    <div
+                      className={cn(
+                        "mx-4 mt-4 flex gap-3 px-3.5 py-3 sm:mx-5",
+                        ALERT_BANNER,
+                      )}
+                    >
+                      <MessageSquareWarning
+                        className={cn("mt-0.5 h-4 w-4 shrink-0", ALERT_ICON)}
+                      />
+                      <div className="min-w-0 space-y-1">
+                        <p className="text-sm font-medium">
+                          بازخورد مشتری برای این نسخه
+                        </p>
+                        <p className="whitespace-pre-wrap text-sm leading-6">
+                          {selected.rejectionReason}
+                        </p>
+                        <button
+                          type="button"
+                          className="text-xs font-medium text-brand underline-offset-2 hover:underline"
+                          onClick={() => setWorkspacePanel("feedback")}
+                        >
+                          مشاهده همه بازخوردها
+                        </button>
+                      </div>
                     </div>
+                  )}
+
+                {selected.status === "PENDING_CUSTOMER_APPROVAL" &&
+                  selected.publishedToClient && (
+                    <div className="mx-4 mt-4 rounded-xl border border-brand/20 bg-brand/5 px-3.5 py-3 text-sm text-foreground sm:mx-5">
+                      این نسخه برای مشتری ارسال شده و در انتظار تأیید است.
+                      {selected.publishedAt && (
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          ارسال‌شده در {formatDate(selected.publishedAt)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                {selected.status === "PENDING_CUSTOMER_APPROVAL" &&
+                  !selected.publishedToClient && (
+                    <div className="mx-4 mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-3 text-sm text-muted-foreground sm:mx-5">
+                      این نسخه قبلاً برای مشتری ارسال شده بود. می‌توانید دوباره
+                      ارسال کنید تا در پورتال مشتری فعال شود.
+                    </div>
+                  )}
+
+                {selected.status === "SUPERSEDED" && (
+                  <div className="mx-4 mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-3 text-sm text-muted-foreground sm:mx-5">
+                    این نسخه در بایگانی است و هنوز برای مشتری ارسال نشده یا نسخه
+                    جدیدتری جایگزین آن شده است. در صورت نیاز می‌توانید همین نسخه
+                    را برای تأیید مشتری ارسال کنید.
                   </div>
                 )}
 
-              {selected.status === "PENDING_CUSTOMER_APPROVAL" &&
-                selected.publishedToClient && (
-                <div className="mx-4 mt-4 rounded-xl border border-brand/20 bg-brand/5 px-3.5 py-3 text-sm text-foreground sm:mx-5">
-                  این نسخه برای مشتری ارسال شده و در انتظار تأیید است.
-                  {selected.publishedAt && (
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      ارسال‌شده در {formatDate(selected.publishedAt)}
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {selected.status === "PENDING_CUSTOMER_APPROVAL" &&
-                !selected.publishedToClient && (
-                <div className="mx-4 mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-3 text-sm text-muted-foreground sm:mx-5">
-                  این نسخه قبلاً برای مشتری ارسال شده بود. می‌توانید دوباره
-                  ارسال کنید تا در پورتال مشتری فعال شود.
-                </div>
-              )}
-
-              {selected.status === "SUPERSEDED" && (
-                <div className="mx-4 mt-4 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-3 text-sm text-muted-foreground sm:mx-5">
-                  این نسخه در بایگانی است و هنوز برای مشتری ارسال نشده یا نسخه
-                  جدیدتری جایگزین آن شده است. در صورت نیاز می‌توانید همین نسخه را
-                  برای تأیید مشتری ارسال کنید.
-                </div>
-              )}
-
-              <div
-                className={cn(
-                  getCustomTabListClass("line"),
-                  "items-center gap-1 px-3 sm:px-4",
-                )}
-              >
-                <div
-                  role="tablist"
-                  aria-label="بخش‌های محتوا"
-                  className="flex min-w-0 flex-1 items-center gap-0 border-0 bg-transparent p-0 shadow-none"
-                >
-                  {(
-                    [
-                      ["scenario", "سناریو"],
-                      ["narration", "نریشن"],
-                      ["storyboard", "استوری‌بورد"],
-                    ] as const
-                  ).map(([id, label]) => {
-                    const active = contentTab === id && !showRawJson;
-                    return (
-                      <button
-                        key={id}
+                <div className="flex flex-col gap-2 border-b border-border/60 px-3 pb-3 pt-2 sm:px-4">
+                  <div className="flex flex-wrap items-end justify-between gap-2">
+                    <div
+                      role="tablist"
+                      aria-label="بخش‌های محتوا"
+                      className={cn(
+                        getCustomTabListClass("line"),
+                        "w-auto min-w-0 shrink-0 justify-start gap-0 border-0 bg-transparent p-0 shadow-none",
+                      )}
+                    >
+                      {(
+                        [
+                          ["scenario", "سناریو"],
+                          ["narration", "نریشن"],
+                          ["storyboard", "استوری‌بورد"],
+                        ] as const
+                      ).map(([id, label]) => {
+                        const active = contentTab === id;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            role="tab"
+                            aria-selected={active}
+                            onClick={() => {
+                              if (editSection && editSection !== id) {
+                                setEditSection(null);
+                              }
+                              setContentTab(id);
+                            }}
+                            className={getCustomTabTriggerClass(
+                              active,
+                              "line",
+                              "text-sm",
+                            )}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {canEditContent &&
+                    selected &&
+                    editSection !== contentTab ? (
+                      <Button
                         type="button"
-                        role="tab"
-                        aria-selected={active}
-                        onClick={() => {
-                          setContentTab(id);
-                          setShowRawJson(false);
-                        }}
-                        className={getCustomTabTriggerClass(
-                          active,
-                          "line",
-                          "text-sm",
-                        )}
+                        variant="outline"
+                        size="sm"
+                        className="mb-1 h-8 shrink-0 gap-1.5"
+                        disabled={isBusy}
+                        onClick={() => setEditSection(contentTab)}
                       >
-                        {label}
-                      </button>
-                    );
-                  })}
+                        <Pencil className="h-3.5 w-3.5" />
+                        <span className="hidden min-[420px]:inline">
+                          {contentTab === "scenario"
+                            ? "ویرایش سناریو"
+                            : contentTab === "narration"
+                              ? "ویرایش نریشن"
+                              : "ویرایش استوری‌بورد"}
+                        </span>
+                        <span className="min-[420px]:hidden">ویرایش</span>
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowRawJson((v) => !v)}
-                  className={cn(
-                    "mb-1 inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors",
-                    showRawJson
-                      ? "bg-brand/10 font-medium text-brand"
-                      : "text-muted-foreground hover:bg-muted/60",
-                  )}
-                >
-                  <Code2 className="h-3 w-3" />
-                  JSON
-                </button>
-              </div>
 
-              <div className="min-h-[24rem] flex-1 overflow-auto p-4 sm:p-6">
-                {showRawJson ? (
-                  <pre
-                    className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-muted-foreground"
-                    dir="ltr"
-                  >
-                    {prettyJson(stripTechnicalFields(contentValue)) || "—"}
-                  </pre>
-                ) : (
-                  <ContentBlocks
-                    value={contentValue}
-                    dir={
-                      contentTab === "narration"
-                        ? narrationDir
-                        : "rtl"
-                    }
-                  />
-                )}
-              </div>
-            </>
-          )}
-        </section>
-      </div>
+                <div className="min-h-[24rem] flex-1 overflow-auto p-4 sm:p-6">
+                  {editSection === contentTab && selected ? (
+                    <ContentSectionInlineEditor
+                      key={`${selected.id}-${contentTab}`}
+                      projectId={projectId}
+                      baseVersionId={selected.id}
+                      section={contentTab}
+                      scenario={selected.scenario}
+                      narration={selected.narration}
+                      storyboard={selected.storyboard}
+                      dir={contentDir}
+                      onCancel={() => setEditSection(null)}
+                      onSaved={(version) => {
+                        setSelectedVersionId(version.id);
+                        setEditSection(null);
+                        invalidateAll();
+                      }}
+                    />
+                  ) : (
+                    <ContentBlocks
+                      value={contentValue}
+                      dir={contentDir}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
       )}
 
       <Dialog
@@ -1320,7 +1449,9 @@ export function ProjectAiAssistant({
               ["راست", compareRight, setCompareRight],
             ].map(([label, value, setter]) => (
               <div key={label as string} className="space-y-2">
-                <p className="text-xs text-muted-foreground">{label as string}</p>
+                <p className="text-xs text-muted-foreground">
+                  {label as string}
+                </p>
                 <Select
                   value={value as string}
                   onValueChange={setter as (v: string) => void}

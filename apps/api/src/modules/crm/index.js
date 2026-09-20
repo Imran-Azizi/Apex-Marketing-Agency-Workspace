@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { requireAuth } from "../../middleware/auth.js";
-import { requirePermission, requireInternal } from "../../middleware/rbac.js";
+import { requirePermission, requireInternal, requireRoles } from "../../middleware/rbac.js";
 import { requireCsrf } from "../../middleware/csrf.js";
 import { validate } from "../../middleware/validate.js";
 import { ok, created } from "../../utils/response.js";
@@ -182,6 +182,7 @@ router.get(
 router.post(
   "/customers/:id/reveal-portal-password",
   requireCsrf,
+  requireRoles("MANAGER", "ADMIN"),
   requirePermission("crm.portal_credentials"),
   async (req, res, next) => {
     try {

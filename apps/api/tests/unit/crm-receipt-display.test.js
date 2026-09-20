@@ -54,6 +54,16 @@ test('parses video count from agreed terms when invoice is missing', () => {
   );
 });
 
+test('resolves video count from opportunity when invoice is missing', () => {
+  assert.equal(
+    resolveReceiptVideoCount({
+      opportunityVideoCount: 5,
+      projectCount: 1,
+    }),
+    5,
+  );
+});
+
 test('falls back to project count last', () => {
   assert.equal(resolveReceiptVideoCount({ projectCount: 2 }), 2);
   assert.equal(formatReceiptVideoCount(2), '2');

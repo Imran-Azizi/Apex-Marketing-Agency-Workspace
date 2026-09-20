@@ -6,6 +6,7 @@ import { PortfolioActions } from "./portfolio-actions";
 import { PortfolioThumbnail } from "./portfolio-thumbnail";
 import type { PortfolioAdminItem } from "./types";
 
+/** Compact horizontal list row for small screens (replaces large cards). */
 export function PortfolioCard({
   item,
   canEdit,
@@ -32,28 +33,36 @@ export function PortfolioCard({
   return (
     <article
       dir="rtl"
-      className="flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card text-start shadow-sm md:hidden"
+      className="flex items-center gap-3 rounded-xl border border-border/70 bg-card p-2.5 text-start shadow-sm md:hidden"
     >
-      <div className="relative">
+      <div className="relative h-14 w-[4.75rem] shrink-0 overflow-hidden rounded-lg">
         <PortfolioThumbnail
           thumbnailUrl={item.thumbnailUrl}
           title={item.title}
           onPreview={onPreview}
         />
-        <Badge
-          variant={published ? "success" : "secondary"}
-          className="absolute start-3 top-3 z-10 shadow-sm"
-        >
-          {published ? "فعال" : "غیرفعال"}
-        </Badge>
       </div>
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <h3 className="line-clamp-1 text-sm font-semibold">{item.title}</h3>
-        <p className="line-clamp-1 text-xs text-muted-foreground">{categoryLabel}</p>
+
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="line-clamp-1 text-sm font-semibold leading-snug">
+            {item.title}
+          </h3>
+          <Badge
+            variant={published ? "success" : "secondary"}
+            className="shrink-0 font-normal"
+          >
+            {published ? "فعال" : "غیرفعال"}
+          </Badge>
+        </div>
+        <p className="line-clamp-1 text-xs text-muted-foreground">
+          {categoryLabel}
+          {item.inMixed ? " · در مختلط" : ""}
+        </p>
         <p className="text-[11px] text-muted-foreground">
           ترتیب {item.sortOrder} · {formatDate(item.publishedAt || item.createdAt)}
         </p>
-        <div className="mt-auto pt-2">
+        <div className="pt-0.5">
           <PortfolioActions
             item={item}
             canEdit={canEdit}

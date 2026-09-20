@@ -34,11 +34,13 @@ export type CrmDetailTabValue = (typeof CRM_DETAIL_TABS)[number]["value"];
 
 interface CustomerDetailTabsNavProps {
   hasOpportunity: boolean;
+  showPortalTab?: boolean;
   className?: string;
 }
 
 export function CustomerDetailTabsNav({
   hasOpportunity,
+  showPortalTab = false,
   className,
 }: CustomerDetailTabsNavProps) {
   return (
@@ -53,7 +55,9 @@ export function CustomerDetailTabsNav({
         variant="premium"
         className="w-max min-w-full items-stretch justify-start md:w-full"
       >
-        {CRM_DETAIL_TABS.map((tab) => {
+        {CRM_DETAIL_TABS.filter((tab) =>
+          tab.value === "portal" ? showPortalTab : true,
+        ).map((tab) => {
           const Icon = tab.icon as LucideIcon;
           const disabled = tab.requiresOpp && !hasOpportunity;
           return (

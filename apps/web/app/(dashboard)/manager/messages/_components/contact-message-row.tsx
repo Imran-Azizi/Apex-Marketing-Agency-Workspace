@@ -92,7 +92,7 @@ export function ContactMessageRow({
         </p>
       </TableCell>
 
-      <TableCell className="hidden md:table-cell">
+      <TableCell className="whitespace-nowrap">
         <p
           className="max-w-[9rem] truncate text-sm text-muted-foreground"
           title={message.company || undefined}
@@ -101,13 +101,13 @@ export function ContactMessageRow({
         </p>
       </TableCell>
 
-      <TableCell className="hidden sm:table-cell">
+      <TableCell className="whitespace-nowrap">
         <span dir="ltr" className="block whitespace-nowrap text-sm tabular-nums">
           {formatPhoneDisplay(message.phone)}
         </span>
       </TableCell>
 
-      <TableCell className="hidden lg:table-cell">
+      <TableCell className="whitespace-nowrap">
         <span
           dir="ltr"
           className="block max-w-[13rem] truncate text-sm text-muted-foreground"

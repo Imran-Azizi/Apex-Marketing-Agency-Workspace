@@ -262,6 +262,7 @@ export default function CrmPage() {
         inline
         title="مدیریت مشتری"
         subtitle="فقط مشتریان فعال که از CRM و فروش منتقل شده‌اند — پس از تحویل پروژه از فهرست فعال خارج می‌شوند"
+        subtitleClassName="hidden sm:block"
         actions={
           canCreate || (canDelete && selectedCount > 0) ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -487,7 +488,7 @@ export default function CrmPage() {
                 isFetching ? "opacity-70 transition-opacity" : undefined
               }
             >
-              <Table className="min-w-[48rem]">
+              <Table scrollContainer={false} className="min-w-[56rem]">
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     {canDelete ? (
@@ -502,10 +503,10 @@ export default function CrmPage() {
                         />
                       </TableHead>
                     ) : null}
-                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       مشتری
                     </TableHead>
-                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       تماس
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
@@ -591,7 +592,6 @@ export default function CrmPage() {
                         <CustomerPipelineStatusBadge
                           stage={customer.pipelineStage}
                           label={customer.pipelineStageLabel}
-                          showControlHint
                         />
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">

@@ -237,6 +237,23 @@ export function canSendFinalVideos(
   return hasPermission(permissions, "video.send", role);
 }
 
+/** Portal invite tab / send — Sales, Manager, and Admin with crm.invite. */
+export function canManagePortalInvite(
+  permissions?: string[] | null,
+  role?: string | null,
+): boolean {
+  return hasPermission(permissions, "crm.invite", role);
+}
+
+/** Portal WhatsApp + password on customer details are exclusive to Manager (and Admin). */
+export function canViewPortalCredentials(
+  permissions?: string[] | null,
+  role?: string | null,
+): boolean {
+  if (!isFullAccessRole(role)) return false;
+  return hasPermission(permissions, "crm.portal_credentials", role);
+}
+
 export function getHomePath(role: string | null | undefined): string {
   if (isInternalRole(role)) return ROLE_HOME[role];
   return "/login";

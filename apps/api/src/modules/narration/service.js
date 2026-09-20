@@ -1,4 +1,5 @@
 import { mergeStorageMeta } from '../../services/storage/media-manager.js';
+import { storage } from '../../services/storage.js';
 import { prisma } from '../../db/prisma.js';
 import { AppError } from '../../utils/response.js';
 import { writeAudit } from '../../middleware/audit.js';
@@ -23,20 +24,10 @@ import {
   serializeNarratorTaskSummary,
   serializeNarratorWorkspace,
 } from './narratorView.js';
-
-const AUDIO_MIME = new Set([
-  'audio/mpeg',
-  'audio/mp3',
-  'audio/wav',
-  'audio/x-wav',
-  'audio/wave',
-  'audio/mp4',
-  'audio/m4a',
-  'audio/x-m4a',
-  'audio/aac',
-]);
-
-const AUDIO_EXT = /\.(mp3|wav|m4a)$/i;
+import {
+  assertNarrationAudioFile,
+  assertNarrationAudioStorageKey,
+} from './audio.js';
 
 const taskInclude = {
   narratorUser: { select: { id: true, fullName: true, email: true } },
@@ -72,14 +63,6 @@ const taskInclude = {
     },
   },
 };
-
-function assertAudioFile({ name, mimeType }) {
-  const okMime = mimeType && AUDIO_MIME.has(String(mimeType).toLowerCase());
-  const okExt = name && AUDIO_EXT.test(name);
-  if (!okMime && !okExt) {
-    throw new AppError('فقط فایل‌های MP3، WAV یا M4A مجاز است', 400, 'INVALID_AUDIO');
-  }
-}
 
 async function loadApprovedContentVersion(projectId, tx = prisma) {
   return tx.contentVersion.findFirst({
@@ -757,7 +740,7 @@ export const narrationService = {
     req,
   ) {
     if (!storageKey) throw new AppError('فایل الزامی است', 400, 'VALIDATION');
-    assertAudioFile({ name, mimeType });
+    assertNarrationAudioFile({ name, mimeType, sizeBytes });
 
     const task = await prisma.narrationTask.findFirst({
       where: { projectId, status: { not: 'APPROVED' } },
@@ -842,6 +825,137 @@ export const narrationService = {
       entityType: 'NarrationTask',
       entityId: task.id,
       after: { storageKey, version: nextVersion },
+      req,
+    });
+
+    return this.getProjectTask(projectId, auth);
+  },
+
+  /**
+   * Delete a narration take's audio from storage + DB so the narrator can
+   * upload a replacement without a new narration assignment.
+   */
+  async deleteTakeAudio(projectId, takeId, auth, req) {
+    if (!takeId) throw new AppError('شناسه فایل صوتی الزامی است', 400, 'VALIDATION');
+
+    const task = await prisma.narrationTask.findFirst({
+      where: { projectId, status: { not: 'APPROVED' } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        project: { select: { id: true, title: true, code: true } },
+      },
+    });
+    if (!task) throw new AppError('تکلیف نریشن یافت نشد', 404, 'NOT_FOUND');
+
+    if (auth.roleCode === 'NARRATOR') {
+      if (!task.narratorUserId || task.narratorUserId !== auth.userId) {
+        throw new AppError('اجازه حذف این فایل صوتی را ندارید', 403, 'FORBIDDEN');
+      }
+    }
+
+    if (task.status === 'APPROVED') {
+      throw new AppError('نریشن تأییدشده قابل حذف نیست', 400, 'INVALID_STATUS');
+    }
+
+    const take = await prisma.narrationTake.findFirst({
+      where: { id: takeId, taskId: task.id },
+      include: { projectFile: true },
+    });
+    if (!take?.projectFile || take.projectFile.deletedAt) {
+      throw new AppError('فایل صوتی یافت نشد', 404, 'NOT_FOUND');
+    }
+    if (take.projectFile.projectId !== projectId) {
+      throw new AppError('اجازه حذف این فایل صوتی را ندارید', 403, 'FORBIDDEN');
+    }
+
+    const storageKey = assertNarrationAudioStorageKey(
+      take.projectFile.storageKey,
+      projectId,
+    );
+
+    await storage.deleteStoredObject(storageKey, {
+      required: true,
+      logTag: 'narration-audio',
+    });
+
+    const deletedVersion = take.version;
+    const deletedFileId = take.projectFileId;
+
+    await prisma.$transaction(async (tx) => {
+      const wasCurrent = task.audioFileId === deletedFileId;
+
+      if (wasCurrent) {
+        await tx.narrationTask.update({
+          where: { id: task.id },
+          data: { audioFileId: null },
+        });
+      }
+
+      await tx.narrationTake.delete({ where: { id: take.id } });
+
+      await tx.projectFile.update({
+        where: { id: deletedFileId },
+        data: { deletedAt: new Date() },
+      });
+
+      const remaining = await tx.narrationTake.findMany({
+        where: { taskId: task.id },
+        orderBy: { version: 'desc' },
+        select: { projectFileId: true },
+      });
+
+      let nextAudioFileId = null;
+      let nextStatus = task.status;
+      let nextSubmittedAt = task.submittedAt;
+
+      if (remaining.length > 0) {
+        nextAudioFileId = remaining[0].projectFileId;
+      } else {
+        nextAudioFileId = null;
+        nextSubmittedAt = null;
+      }
+
+      // Re-open upload after removing the current/submitted take so a
+      // replacement can be uploaded without a new narration assignment.
+      if (wasCurrent && task.status === 'NARRATION_SUBMITTED') {
+        nextStatus = 'RECORDING_IN_PROGRESS';
+        if (!remaining.length) nextSubmittedAt = null;
+      } else if (!remaining.length && task.status === 'NARRATION_SUBMITTED') {
+        nextStatus = 'RECORDING_IN_PROGRESS';
+        nextSubmittedAt = null;
+      }
+
+      await tx.narrationTask.update({
+        where: { id: task.id },
+        data: {
+          audioFileId: nextAudioFileId,
+          status: nextStatus,
+          submittedAt: nextSubmittedAt,
+        },
+      });
+
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId,
+          type: 'VOICE_DELETE',
+          title: 'حذف فایل صوتی نریشن',
+          body: `نسخه ${deletedVersion} حذف شد`,
+          actorId: auth.userId,
+        },
+      });
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'NARRATION_AUDIO_DELETE',
+      entityType: 'NarrationTask',
+      entityId: task.id,
+      before: {
+        takeId,
+        projectFileId: deletedFileId,
+        version: deletedVersion,
+        storageKey,
+      },
       req,
     });
 

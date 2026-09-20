@@ -146,4 +146,126 @@ export const geminiService = {
     }
     throw lastError;
   },
+
+  /**
+   * Generate one image via Gemini native image models (generateContent).
+   * Uses GEMINI_API_KEY directly — independent of OpenRouter credits.
+   */
+  async generateImage({
+    prompt,
+    model,
+    aspectRatio = '16:9',
+    timeoutMs,
+  } = {}) {
+    if (!env.geminiApiKey) {
+      throw createAiError('GEMINI_API_KEY is not configured', {
+        code: 'invalid_api_key',
+        status: 401,
+        provider: 'gemini',
+      });
+    }
+
+    const cfg = getModelConfig();
+    const imageModel =
+      mapGeminiModel(model) ||
+      env.geminiImageModel ||
+      'gemini-2.5-flash-image';
+    const baseUrl = (
+      env.geminiBaseUrl || 'https://generativelanguage.googleapis.com/v1beta'
+    ).replace(/\/$/, '');
+    const url = `${baseUrl}/models/${encodeURIComponent(imageModel)}:generateContent?key=${encodeURIComponent(env.geminiApiKey)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      timeoutMs || Math.max(cfg.timeoutMs, 90_000),
+    );
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  text: String(prompt || '').slice(0, 3200),
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+              aspectRatio: aspectRatio || '16:9',
+            },
+          },
+        }),
+        signal: controller.signal,
+      });
+
+      const errText = !res.ok ? await res.text() : null;
+      if (!res.ok) {
+        const error = createAiError(`Gemini image HTTP ${res.status}`, {
+          code: res.status === 429 ? 'insufficient_quota' : 'gemini_http',
+          status: res.status,
+          provider: 'gemini',
+        });
+        error.body = errText;
+        Object.assign(error, formatAiError(error, 'gemini'));
+        throw error;
+      }
+
+      const data = await res.json();
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      let b64 = null;
+      let mimeType = 'image/png';
+      for (const part of parts) {
+        const inline = part.inlineData || part.inline_data;
+        if (inline?.data) {
+          b64 = inline.data;
+          mimeType = inline.mimeType || inline.mime_type || mimeType;
+          break;
+        }
+      }
+
+      if (!b64) {
+        throw createAiError('Gemini image response missing image data', {
+          code: 'invalid_response',
+          status: 400,
+          provider: 'gemini',
+        });
+      }
+
+      return {
+        provider: 'gemini',
+        model: data.modelVersion || imageModel,
+        url: null,
+        b64,
+        mimeType,
+      };
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        const timeoutErr = createAiError('Gemini image request timed out', {
+          code: 'timeout',
+          status: 504,
+          provider: 'gemini',
+        });
+        Object.assign(timeoutErr, formatAiError(timeoutErr, 'gemini'));
+        throw timeoutErr;
+      }
+      if (err?.provider === 'gemini' && err?.status) throw err;
+      const wrapped = createAiError(err.message || 'Gemini image unavailable', {
+        code: 'server_error',
+        status: 503,
+        provider: 'gemini',
+        cause: err,
+      });
+      Object.assign(wrapped, formatAiError(wrapped, 'gemini'));
+      throw wrapped;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
 };

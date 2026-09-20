@@ -9,9 +9,16 @@ import { prisma } from '../../db/prisma.js';
 export const FREE_MODELS_SETTING_KEY = 'openrouter_free_models';
 export const FREE_CATALOG_TTL_MS = 30 * 60 * 1000;
 export const FREE_MODEL_COOLDOWN_MS = 10 * 60 * 1000;
-export const MAX_FREE_MODEL_ATTEMPTS = 8;
+/** Hard cap across all free-model tasks (admin tooling / non-content). */
+export const MAX_FREE_MODEL_ATTEMPTS = 6;
+/**
+ * Content pipeline (Scenario / Narration / Storyboard): fewer attempts = much faster
+ * wall-clock while still covering the best-ranked free models.
+ */
+export const CONTENT_FREE_MODEL_ATTEMPTS = 4;
 
 export const DEFAULT_FREE_MODELS_SETTINGS = {
+  // Scenario / Narration / Storyboard use free OpenRouter models by default.
   freeModelsOnly: true,
   allowPaidFallback: false,
   defaultModelId: null,
@@ -20,9 +27,24 @@ export const DEFAULT_FREE_MODELS_SETTINGS = {
 };
 
 const TASK_NEEDS = {
-  SCENARIO: { needsJson: true, minContext: 8000, minCompletion: 1024 },
-  NARRATION: { needsJson: true, minContext: 8000, minCompletion: 512 },
-  STORYBOARD: { needsJson: true, minContext: 16000, minCompletion: 2048 },
+  SCENARIO: {
+    needsJson: true,
+    needsCreative: true,
+    minContext: 8000,
+    minCompletion: 1024,
+  },
+  NARRATION: {
+    needsJson: true,
+    needsCreative: true,
+    minContext: 8000,
+    minCompletion: 512,
+  },
+  STORYBOARD: {
+    needsJson: true,
+    needsCreative: true,
+    minContext: 16000,
+    minCompletion: 1536,
+  },
   PORTFOLIO: { needsJson: true, minContext: 8000, minCompletion: 512 },
   SALES_ASSISTANT: { needsJson: true, minContext: 8000, minCompletion: 512 },
   CODE: { needsCode: true, minContext: 8000, minCompletion: 512 },
@@ -134,6 +156,7 @@ export function isCatalogModelFree(model) {
 export function scoreFreeModel(model, needs = TASK_NEEDS.TEXT, admin = {}) {
   if (!model?.id || !isCatalogModelFree(model)) return -1000;
   let score = 0;
+  const idName = `${model.id} ${model.name}`.toLowerCase();
   if (model.id.endsWith(':free')) score += 12;
   const outputs = Array.isArray(model.outputModalities) ? model.outputModalities : [];
   const inputs = Array.isArray(model.inputModalities) ? model.inputModalities : [];
@@ -142,7 +165,23 @@ export function scoreFreeModel(model, needs = TASK_NEEDS.TEXT, admin = {}) {
     score += model.supportsJson ? 40 : -25;
   }
   if (needs.needsCode) {
-    score += /code|coder|instruct|dev/i.test(`${model.id} ${model.name}`) ? 20 : 0;
+    score += /code|coder|instruct|dev/i.test(idName) ? 20 : 0;
+  }
+  // Prefer capable free chat/instruct models for Scenario / Narration / Storyboard.
+  if (needs.needsCreative) {
+    if (
+      /gemini|llama|qwen|mistral|mixtral|deepseek|phi|gemma|command|claude|gpt-oss|nemotron|wizard|yi-|hunyuan|glm|katalyst|mythomax|nous|dolphin/i.test(
+        idName,
+      )
+    ) {
+      score += 28;
+    }
+    if (/instruct|chat|it\b|creative|writer|roleplay/i.test(idName)) score += 10;
+    if (/tiny|nano|micro|1b|2b|3b|edge|whisper|embed|tts|vision-only/i.test(idName)) {
+      score -= 35;
+    }
+    if (model.contextLength >= 16000) score += 10;
+    if (model.contextLength >= 32000) score += 8;
   }
   if (needs.minContext) {
     score += model.contextLength >= needs.minContext ? 16 : -20;
@@ -168,8 +207,14 @@ export function mergeAdminConfig(raw) {
       ? obj.defaultModelId.trim()
       : null;
   return {
-    freeModelsOnly: obj.freeModelsOnly !== false,
-    allowPaidFallback: obj.allowPaidFallback === true,
+    freeModelsOnly:
+      typeof obj.freeModelsOnly === 'boolean'
+        ? obj.freeModelsOnly
+        : DEFAULT_FREE_MODELS_SETTINGS.freeModelsOnly,
+    allowPaidFallback:
+      typeof obj.allowPaidFallback === 'boolean'
+        ? obj.allowPaidFallback
+        : DEFAULT_FREE_MODELS_SETTINGS.allowPaidFallback,
     defaultModelId,
     disabledIds: asStringArray(obj.disabledIds),
     priorityIds: asStringArray(obj.priorityIds),
@@ -411,7 +456,13 @@ export async function resolveFreeModelsForTask(agentType, modelOverride) {
       ...ranked.filter((m) => m.id !== override),
     ].filter(Boolean);
   }
-  return ranked.slice(0, MAX_FREE_MODEL_ATTEMPTS);
+  const limit =
+    agentType === 'SCENARIO' ||
+    agentType === 'NARRATION' ||
+    agentType === 'STORYBOARD'
+      ? CONTENT_FREE_MODEL_ATTEMPTS
+      : MAX_FREE_MODEL_ATTEMPTS;
+  return ranked.slice(0, limit);
 }
 
 export async function buildFreeModelsAdminPayload({ forceRefresh = false } = {}) {

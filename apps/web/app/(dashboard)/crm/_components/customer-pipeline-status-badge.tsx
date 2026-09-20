@@ -17,7 +17,7 @@ interface CustomerPipelineStatusBadgeProps {
 }
 
 const CONTROL_HINT: Partial<Record<StageControl, string>> = {
-  automatic: "خودکار",
+  // automatic stages intentionally have no visible tag — only the status label
   completed: "تکمیل",
   canceled: "لغو",
   repeat: "تکراری",

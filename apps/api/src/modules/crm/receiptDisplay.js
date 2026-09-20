@@ -35,10 +35,11 @@ export function videoCountFromInvoiceItems(items) {
 }
 
 /**
- * Prefer invoice.videoCount, then line-item quantities, then order/project text, then project count.
+ * Prefer invoice.videoCount, then opportunity, then line items, then text, then project count.
  */
 export function resolveReceiptVideoCount({
   invoiceVideoCount,
+  opportunityVideoCount,
   invoiceItems,
   invoiceNotes,
   invoiceDescription,
@@ -47,6 +48,7 @@ export function resolveReceiptVideoCount({
 } = {}) {
   return (
     toPositiveInt(invoiceVideoCount) ||
+    toPositiveInt(opportunityVideoCount) ||
     videoCountFromInvoiceItems(invoiceItems) ||
     parseVideoCountFromText(invoiceDescription) ||
     parseVideoCountFromText(invoiceNotes) ||

@@ -9,6 +9,8 @@ import {
   canSendProjectPosters,
   canReviewFinalVideos,
   canSendFinalVideos,
+  canManagePortalInvite,
+  canViewPortalCredentials,
 } from '../../src/services/permissions/effective.js';
 import {
   ALL_PERMISSION_CODES,
@@ -180,6 +182,23 @@ test('editor cannot approve or send final videos even if those codes were grante
   assert.equal(canSendFinalVideos([], 'MANAGER'), true);
   assert.equal(canReviewFinalVideos([], 'ADMIN'), true);
   assert.equal(canSendFinalVideos(codes, 'PROJECT_MANAGER'), false);
+});
+
+test('sales can manage portal invite with crm.invite but never view portal credentials', () => {
+  const codes = computeEffectivePermissions({
+    roleCode: 'SALES',
+    rolePermissionCodes: [
+      ...ROLE_DEFAULT_PERMISSIONS.SALES,
+      'crm.invite',
+      'crm.portal_credentials',
+    ],
+  });
+  assert.equal(hasAnyPermission(codes, ['crm.invite'], 'SALES'), true);
+  assert.equal(hasAnyPermission(codes, ['crm.portal_credentials'], 'SALES'), true);
+  assert.equal(canManagePortalInvite(codes, 'SALES'), true);
+  assert.equal(canViewPortalCredentials(codes, 'SALES'), false);
+  assert.equal(canManagePortalInvite([], 'MANAGER'), true);
+  assert.equal(canViewPortalCredentials([], 'ADMIN'), true);
 });
 
 test('editor defaults keep production workflow without manager modules', () => {

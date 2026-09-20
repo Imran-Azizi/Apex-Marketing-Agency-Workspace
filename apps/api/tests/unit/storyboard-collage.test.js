@@ -7,6 +7,7 @@ import {
 import {
   composeStoryboardSheet,
   storyboardSheetLayout,
+  renderLocalSceneStill,
 } from '../../src/services/ai/storyboard-sheet.js';
 
 const jpeg = createRequire(import.meta.url)('jpeg-js');
@@ -75,4 +76,37 @@ test('composeStoryboardSheet builds one jpeg matching the 5-scene layout', async
   const [r2, g2] = px(layout.pad + layout.panelW + layout.gutter + 80, layout.pad + 80);
   assert.ok(r1 > 150, 'scene 1 panel should stay red');
   assert.ok(g2 > 120 && r2 < 120, 'scene 2 panel should stay green');
+});
+
+test('renderLocalSceneStill produces a distinct jpeg per scene', () => {
+  const a = renderLocalSceneStill({
+    sceneNumber: 1,
+    title: 'Opening shot',
+    visual: 'Wide product hero',
+  });
+  const b = renderLocalSceneStill({
+    sceneNumber: 2,
+    title: 'Detail',
+    visual: 'Close-up texture',
+  });
+  assert.ok(a.length > 8_000);
+  assert.ok(b.length > 8_000);
+  assert.notEqual(a.compare(b), 0);
+  const decoded = jpeg.decode(a);
+  assert.equal(decoded.width, 1920);
+  assert.equal(decoded.height, 1080);
+});
+
+test('composeStoryboardSheet works with local reference stills only', async () => {
+  const panels = [1, 2, 3].map((n) => ({
+    buffer: renderLocalSceneStill({ sceneNumber: n, title: `Scene ${n}` }),
+    sceneNumber: n,
+    title: `Scene ${n}`,
+  }));
+  const sheet = await composeStoryboardSheet(panels);
+  const decoded = jpeg.decode(sheet);
+  const layout = storyboardSheetLayout(3);
+  assert.equal(decoded.width, layout.width);
+  assert.equal(decoded.height, layout.height);
+  assert.ok(sheet.length > 30_000);
 });

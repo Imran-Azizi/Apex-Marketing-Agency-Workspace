@@ -308,15 +308,15 @@ function SectionCard({
       dir="rtl"
       className="overflow-hidden rounded-2xl border border-border/70 bg-card text-start shadow-sm transition-shadow hover:shadow-md"
     >
-      <div className="flex items-start gap-3 border-b border-border/50 px-4 py-3.5 sm:px-5">
+      <div className="flex items-start gap-2.5 border-b border-border/50 px-3 py-2.5 sm:gap-3 sm:px-5 sm:py-3.5">
         <span
           className={cn(
-            "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+            "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl sm:h-10 sm:w-10",
             iconTone,
           )}
           aria-hidden
         >
-          <Icon className="h-5 w-5" />
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -326,13 +326,13 @@ function SectionCard({
             {badge}
           </div>
           {subtitle ? (
-            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+            <p className="mt-0.5 hidden text-xs leading-5 text-muted-foreground sm:block">
               {subtitle}
             </p>
           ) : null}
         </div>
       </div>
-      <div className="px-4 py-4 text-start sm:px-5">{children}</div>
+      <div className="px-3 py-3 text-start sm:px-5 sm:py-4">{children}</div>
     </section>
   );
 }
@@ -578,14 +578,14 @@ function CustomerInfoSubTabBar({
   onChange: (tab: ProjectInfoTabId) => void;
 }) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5 sm:space-y-3">
       <div className="sm:hidden">
         <Select
           value={value}
           onValueChange={(v) => onChange(v as ProjectInfoTabId)}
         >
           <SelectTrigger
-            className="h-11 w-full"
+            className="h-10 w-full text-sm"
             aria-label="انتخاب زیربخش مشتری"
           >
             <SelectValue>
@@ -694,7 +694,7 @@ export function CustomerInfoTab(ctx: MaterialsCtx) {
   const showLoading = canFetchProjectDetail && projectQ.isLoading && !projectQ.data;
 
   return (
-    <div className="space-y-4 text-start" dir="rtl">
+    <div className="space-y-3 text-start sm:space-y-4" dir="rtl">
       <ProjectSectionShell
         tone="customer"
         title="اطلاعات ارائه‌شده توسط مشتری"
@@ -715,15 +715,15 @@ export function CustomerInfoTab(ctx: MaterialsCtx) {
           ) : (
             <>
               {infoTab === "brief" && ctx.task?.instructions ? (
-                <div className="mb-4">
+                <div className="mb-3 sm:mb-4">
                   <SectionCard
                     icon={BookOpen}
                     title="دستورالعمل مدیر"
                     subtitle="راهنمای اختصاصی این ارجاع"
                     tone="info"
                   >
-                    <div className="rounded-2xl border border-sky-200/70 border-s-4 border-s-sky-500 bg-sky-50/70 p-4 dark:border-sky-900/50 dark:bg-sky-950/25">
-                      <p className="max-w-[42rem] whitespace-pre-wrap text-[15px] leading-8">
+                    <div className="rounded-2xl border border-sky-200/70 border-s-4 border-s-sky-500 bg-sky-50/70 p-3 dark:border-sky-900/50 dark:bg-sky-950/25 sm:p-4">
+                      <p className="max-w-[42rem] whitespace-pre-wrap text-sm leading-7 sm:text-[15px] sm:leading-8">
                         {ctx.task.instructions}
                       </p>
                     </div>

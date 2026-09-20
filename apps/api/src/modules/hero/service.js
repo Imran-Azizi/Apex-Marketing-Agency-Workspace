@@ -46,10 +46,16 @@ const buttonDestinationField = z
   .optional()
   .transform((v) => (v ? v : null));
 
+const optionalImageKey = z
+  .union([z.string().trim().max(500), z.literal(""), z.null()])
+  .optional()
+  .transform((v) => (v ? v : null));
+
 const heroSlideObject = z.object({
   title: z.string().trim().min(2, "عنوان اسلاید الزامی است").max(160),
   description: optionalText(600, "توضیحات نباید بیشتر از ۶۰۰ کاراکتر باشد"),
-  imageKey: z.string().trim().min(1, "تصویر اسلاید الزامی است").max(500),
+  imageKey: z.string().trim().min(1, "تصویر دسکتاپ اسلاید الزامی است").max(500),
+  mobileImageKey: optionalImageKey,
   altText: optionalText(160),
   durationSeconds: durationSecondsField,
   isPublished: z.boolean().optional().default(true),
@@ -104,13 +110,21 @@ function refineHeroButton(data, ctx) {
 export const createHeroSlideSchema = heroSlideObject.superRefine(refineHeroButton);
 
 export const updateHeroSlideSchema = heroSlideObject
-  .omit({ imageKey: true })
+  .omit({ imageKey: true, mobileImageKey: true })
   .partial()
   .extend({
     imageKey: z
       .union([z.string().trim().max(500), z.literal(""), z.null()])
       .optional()
       .transform((v) => (v ? v : undefined)),
+    /** null/"" clears the mobile image; omit to leave unchanged. */
+    mobileImageKey: z
+      .union([z.string().trim().max(500), z.literal(""), z.null()])
+      .optional()
+      .transform((v) => {
+        if (v === undefined) return undefined;
+        return v ? v : null;
+      }),
     buttonEnabled: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
@@ -165,6 +179,7 @@ export function serializeHeroSlide(row, { publicView = false } = {}) {
     title: row.title,
     description: row.description || null,
     imageUrl: imageUrlFor(row.imageKey),
+    mobileImageUrl: imageUrlFor(row.mobileImageKey) || null,
     altText: row.altText || row.title,
     durationSeconds: clampDurationSeconds(
       row.durationSeconds ?? row.durationMs,
@@ -177,6 +192,7 @@ export function serializeHeroSlide(row, { publicView = false } = {}) {
   return {
     ...payload,
     imageKey: row.imageKey || null,
+    mobileImageKey: row.mobileImageKey || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -235,6 +251,7 @@ export const heroService = {
         title: true,
         description: true,
         imageKey: true,
+        mobileImageKey: true,
         altText: true,
         durationSeconds: true,
         sortOrder: true,
@@ -275,6 +292,7 @@ export const heroService = {
         title: data.title,
         description: data.description ?? null,
         imageKey: data.imageKey,
+        mobileImageKey: data.mobileImageKey || null,
         altText: data.altText ?? null,
         durationSeconds: data.durationSeconds ?? DEFAULT_DURATION_SECONDS,
         isPublished: data.isPublished ?? true,
@@ -314,6 +332,12 @@ export const heroService = {
     if (data.imageKey && data.imageKey !== existing.imageKey) {
       await tryDeleteMedia(existing.imageKey);
     }
+    if (data.mobileImageKey !== undefined) {
+      const nextMobile = data.mobileImageKey || null;
+      if (existing.mobileImageKey && existing.mobileImageKey !== nextMobile) {
+        await tryDeleteMedia(existing.mobileImageKey);
+      }
+    }
 
     const patch = {
       ...(data.title != null ? { title: data.title } : {}),
@@ -321,6 +345,9 @@ export const heroService = {
         ? { description: data.description }
         : {}),
       ...(data.imageKey ? { imageKey: data.imageKey } : {}),
+      ...(data.mobileImageKey !== undefined
+        ? { mobileImageKey: data.mobileImageKey || null }
+        : {}),
       ...(data.altText !== undefined ? { altText: data.altText } : {}),
       ...(data.durationSeconds != null
         ? { durationSeconds: data.durationSeconds }
@@ -436,6 +463,9 @@ export const heroService = {
       required: true,
       logTag: "hero",
     });
+    if (existing.mobileImageKey) {
+      await tryDeleteMedia(existing.mobileImageKey);
+    }
 
     await prisma.heroSlide.update({
       where: { id },

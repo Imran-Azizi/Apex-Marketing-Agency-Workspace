@@ -200,8 +200,10 @@ export default function EditorProjectsPage() {
       <PageHeader
         title="پروژه‌های ادیت"
         subtitle="فقط پروژه‌هایی که مدیر به شما ارجاع داده — بدون اطلاعات محرمانه یا پرداخت"
+        subtitleClassName="hidden sm:block"
+        inline
         actions={
-          <Button variant="outline" className="gap-2" asChild>
+          <Button variant="outline" size="sm" className="gap-2 sm:h-10 sm:px-4 sm:text-sm" asChild>
             <Link href="/editor/dashboard">بازگشت به داشبورد</Link>
           </Button>
         }
@@ -361,54 +363,97 @@ export default function EditorProjectsPage() {
           ))}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card">
-          <div className="hidden grid-cols-[1.4fr_1fr_auto_auto_auto] gap-3 border-b bg-muted/30 px-4 py-2.5 text-xs font-medium text-muted-foreground md:grid">
-            <span>عنوان</span>
-            <span>دستورالعمل</span>
-            <span>وضعیت</span>
-            <span>مهلت</span>
-            <span>عملیات</span>
-          </div>
-          <ul className="divide-y divide-border/60">
-            {items.map((task) => (
-              <li
-                key={task.id}
-                className="grid gap-3 px-4 py-3 md:grid-cols-[1.4fr_1fr_auto_auto_auto] md:items-center"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium">{task.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground md:hidden">
-                    {task.deadline ? formatDate(task.deadline) : "بدون مهلت"}
-                  </p>
-                </div>
-                <p className="line-clamp-2 text-xs leading-6 text-muted-foreground">
-                  {task.instructionsPreview || "—"}
-                </p>
-                <Badge
-                  variant={
-                    task.projectStatus === "COMPLETED"
-                      ? "success"
-                      : editingStatusVariant(task.status)
-                  }
-                  className="w-fit font-normal"
+        <>
+          {/* Compact list rows on small screens */}
+          <ul className="space-y-2 md:hidden">
+            {items.map((task) => {
+              const projectCompleted = task.projectStatus === "COMPLETED";
+              const statusLabel = projectCompleted
+                ? "تکمیل‌شده"
+                : EDITING_STATUS_LABEL[task.status] || task.status;
+              const statusVariant = projectCompleted
+                ? "success"
+                : editingStatusVariant(task.status);
+              return (
+                <li
+                  key={task.id}
+                  className="rounded-2xl border border-border/70 bg-card px-3.5 py-3 shadow-sm"
                 >
-                  {task.projectStatus === "COMPLETED"
-                    ? "تکمیل‌شده"
-                    : EDITING_STATUS_LABEL[task.status] || task.status}
-                </Badge>
-                <span className="hidden text-sm tabular-nums text-muted-foreground md:inline">
-                  {task.deadline ? formatDate(task.deadline) : "—"}
-                </span>
-                <Button variant="brand" size="sm" className="w-fit gap-1.5" asChild>
-                  <Link href={`/editor/tasks/${task.projectId}`}>
-                    {editingActionLabel(task.status)}
-                    <ArrowLeft className="h-3.5 w-3.5" />
-                  </Link>
-                </Button>
-              </li>
-            ))}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold leading-6 text-foreground">
+                        {task.title}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {task.deadline
+                          ? formatDate(task.deadline)
+                          : task.assignedAt
+                            ? formatDate(task.assignedAt)
+                            : "بدون مهلت"}
+                      </p>
+                    </div>
+                    <Badge variant={statusVariant} className="shrink-0 font-normal">
+                      {statusLabel}
+                    </Badge>
+                  </div>
+                  <Button variant="brand" size="sm" className="mt-3 gap-1.5" asChild>
+                    <Link href={`/editor/tasks/${task.projectId}`}>
+                      {editingActionLabel(task.status)}
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
-        </div>
+
+          {/* Table-style list on md+ */}
+          <div className="hidden overflow-hidden rounded-2xl border border-border/70 bg-card md:block">
+            <div className="grid grid-cols-[1.4fr_1fr_auto_auto_auto] gap-3 border-b bg-muted/30 px-4 py-2.5 text-xs font-medium text-muted-foreground">
+              <span>عنوان</span>
+              <span>دستورالعمل</span>
+              <span>وضعیت</span>
+              <span>مهلت</span>
+              <span>عملیات</span>
+            </div>
+            <ul className="divide-y divide-border/60">
+              {items.map((task) => (
+                <li
+                  key={task.id}
+                  className="grid grid-cols-[1.4fr_1fr_auto_auto_auto] items-center gap-3 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{task.title}</p>
+                  </div>
+                  <p className="line-clamp-2 text-xs leading-6 text-muted-foreground">
+                    {task.instructionsPreview || "—"}
+                  </p>
+                  <Badge
+                    variant={
+                      task.projectStatus === "COMPLETED"
+                        ? "success"
+                        : editingStatusVariant(task.status)
+                    }
+                    className="w-fit font-normal"
+                  >
+                    {task.projectStatus === "COMPLETED"
+                      ? "تکمیل‌شده"
+                      : EDITING_STATUS_LABEL[task.status] || task.status}
+                  </Badge>
+                  <span className="text-sm tabular-nums text-muted-foreground">
+                    {task.deadline ? formatDate(task.deadline) : "—"}
+                  </span>
+                  <Button variant="brand" size="sm" className="w-fit gap-1.5" asChild>
+                    <Link href={`/editor/tasks/${task.projectId}`}>
+                      {editingActionLabel(task.status)}
+                      <ArrowLeft className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </>
       )}
 
       {data && data.totalPages > 1 && (

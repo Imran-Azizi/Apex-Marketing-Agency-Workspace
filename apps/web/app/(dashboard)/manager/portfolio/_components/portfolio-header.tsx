@@ -14,6 +14,7 @@ export function PortfolioHeader({
     <PageHeader
       title="نمونه‌کارها"
       subtitle="مدیریت و سازمان‌دهی ویدیوهای نمونه‌کار و دسته‌بندی‌های وب‌سایت عمومی"
+      subtitleClassName="hidden sm:block"
       className="mb-0 sm:mb-0"
       actions={
         <div className="flex flex-wrap items-center justify-start gap-2">

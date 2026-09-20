@@ -5,6 +5,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet } from "@/lib/api";
+import { useMeQuery } from "@/lib/permissions";
+import {
+  canManagePortalInvite,
+  canViewPortalCredentials,
+} from "@/lib/rbac";
 import { buildWhatsAppChatUrl, toWhatsAppDigits } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
@@ -97,6 +102,12 @@ export default function CrmDetailPage({
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
+  const { data: me } = useMeQuery();
+  const canInvite = canManagePortalInvite(me?.permissions, me?.role);
+  const canSeePortalCredentials = canViewPortalCredentials(
+    me?.permissions,
+    me?.role,
+  );
   const [inviteUrl, setInviteUrl] = useState("");
   const [activeTab, setActiveTab] = useState<CrmDetailTabValue>("details");
   const [receiptPaymentId, setReceiptPaymentId] = useState<string | null>(null);
@@ -104,14 +115,16 @@ export default function CrmDetailPage({
   useEffect(() => {
     const tab = searchParams.get("tab");
     const receipt = searchParams.get("receipt");
-    if (tab === "history" || tab === "details" || tab === "portal") {
+    if (tab === "history" || tab === "details") {
       setActiveTab(tab);
+    } else if (tab === "portal" && canInvite) {
+      setActiveTab("portal");
     }
     if (receipt) {
       setActiveTab("history");
       setReceiptPaymentId(receipt);
     }
-  }, [searchParams]);
+  }, [searchParams, canInvite]);
 
   const clearReceiptHandoff = useCallback(() => {
     setReceiptPaymentId(null);
@@ -155,7 +168,7 @@ export default function CrmDetailPage({
       apiGet<InviteEligibility>(
         `/crm/opportunities/${opp!.id}/invite-eligibility`,
       ),
-    enabled: !!opp?.id,
+    enabled: canInvite && !!opp?.id,
     refetchInterval: () => {
       if (data?.portalCredentials?.isRegistered) return false;
       if (
@@ -234,6 +247,10 @@ export default function CrmDetailPage({
   };
 
   const handleTabChange = (value: string) => {
+    if (value === "portal" && !canInvite) {
+      setActiveTab("details");
+      return;
+    }
     setActiveTab(value as CrmDetailTabValue);
   };
 
@@ -267,7 +284,10 @@ export default function CrmDetailPage({
         dir="rtl"
       >
         <div className="sticky top-0 z-20 -mx-1 bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-          <CustomerDetailTabsNav hasOpportunity={!!opp} />
+          <CustomerDetailTabsNav
+            hasOpportunity={!!opp}
+            showPortalTab={canInvite}
+          />
         </div>
 
         <TabsContent
@@ -303,24 +323,28 @@ export default function CrmDetailPage({
           )}
         </TabsContent>
 
-        <TabsContent
-          value="portal"
-          className="mt-0 focus-visible:outline-none"
-        >
-          {opp ? (
-            <PortalInviteSection
-              opportunityId={opp.id}
-              customerId={data.id}
-              eligibility={eligibility}
-              portalCredentials={data.portalCredentials}
-              inviteUrl={inviteUrl}
-              onInviteUrlChange={setInviteUrl}
-              onChanged={invalidate}
-            />
-          ) : (
-            <EmptyOpportunityState />
-          )}
-        </TabsContent>
+        {canInvite ? (
+          <TabsContent
+            value="portal"
+            className="mt-0 focus-visible:outline-none"
+          >
+            {opp ? (
+              <PortalInviteSection
+                opportunityId={opp.id}
+                customerId={data.id}
+                eligibility={eligibility}
+                portalCredentials={
+                  canSeePortalCredentials ? data.portalCredentials : null
+                }
+                inviteUrl={inviteUrl}
+                onInviteUrlChange={setInviteUrl}
+                onChanged={invalidate}
+              />
+            ) : (
+              <EmptyOpportunityState />
+            )}
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );

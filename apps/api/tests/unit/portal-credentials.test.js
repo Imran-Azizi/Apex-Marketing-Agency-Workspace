@@ -142,7 +142,8 @@ test("serializePortalInvite does not let sales reveal the portal password", () =
     { roleCode: "SALES", permissions: ["crm.invite"] },
     { now },
   );
-  assert.equal(row.hasPassword, true);
+  assert.equal(row.whatsappNumber, "");
+  assert.equal(row.hasPassword, false);
   assert.equal(row.canRevealPassword, false);
 });
 
@@ -162,6 +163,30 @@ test("serializePortalCredentials hides login fields until the account exists", (
   assert.equal(row.canRevealPassword, false);
   assert.equal(row.passwordCipher, undefined);
   assert.equal(row.statusLabel, "دعوت ارسال شده");
+});
+
+test("serializePortalCredentials hides WhatsApp and password from sales", () => {
+  const cipher = encryptCredential("Customer!2026xx");
+  const row = serializePortalCredentials(
+    {
+      portalStatus: "REGISTERED",
+      normalizedWhatsapp: "93700000001",
+      portalAccount: {
+        normalizedWhatsapp: "93711111111",
+        passwordCipher: cipher,
+        isActive: true,
+        registeredAt: now,
+        createdAt: now,
+        deletedAt: null,
+      },
+    },
+    { roleCode: "SALES", permissions: ["crm.invite", "crm.view"] },
+  );
+  assert.equal(row.exists, true);
+  assert.equal(row.isRegistered, true);
+  assert.equal(row.whatsappNumber, null);
+  assert.equal(row.hasPassword, false);
+  assert.equal(row.canRevealPassword, false);
 });
 
 test("serializePortalCredentials binds WhatsApp and reveal flags to that customer", () => {

@@ -244,6 +244,7 @@ export default function EmployeesPage() {
         inline
         title="مدیریت کارمندان"
         subtitle="ایجاد و مدیریت کاربران فروش، ادیتور، نریتور و مالی"
+        subtitleClassName="hidden sm:block"
         actions={
           canCreate ? (
           <Button
@@ -420,19 +421,19 @@ export default function EmployeesPage() {
                 isFetching ? "opacity-70 transition-opacity" : undefined
               }
             >
-              <Table className="min-w-[48rem]">
+              <Table scrollContainer={false} className="min-w-[48rem]">
                   <TableHeader>
                     <TableRow className="bg-muted/40 hover:bg-muted/40">
-                      <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      <TableHead className="sticky top-0 z-[1] min-w-[10rem] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                         نام کامل
                       </TableHead>
                       <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                         ایمیل / نام کاربری
                       </TableHead>
-                      <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                         نقش
                       </TableHead>
-                      <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                         وضعیت
                       </TableHead>
                       <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">

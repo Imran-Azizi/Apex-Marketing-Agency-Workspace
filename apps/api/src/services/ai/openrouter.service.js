@@ -228,28 +228,35 @@ export const openRouterService = {
     const timer = setTimeout(() => controller.abort(), timeout);
 
     try {
+      const imageModelId = String(imageModel || '');
+      const isGeminiFlashImage = /gemini.*flash.*image|flash-image|nano-banana/i.test(
+        imageModelId,
+      );
+
+      // Keep the request compatible with OpenRouter Image API models.
+      // Gemini Flash Image rejects unsupported fields like resolution/size.
       const body = {
         model: imageModel,
-        prompt: String(prompt || '').slice(0, 4000),
-        aspect_ratio: aspectRatio,
-        output_format: 'png',
+        prompt: String(prompt || '').slice(0, 3200),
+        aspect_ratio: aspectRatio || '16:9',
         n: 1,
       };
 
-      if (size === '1024x1024') {
+      if (!isGeminiFlashImage) {
+        body.output_format = 'png';
+        if (size === '1024x1024') {
+          body.aspect_ratio = '1:1';
+          body.size = size;
+        } else if (size === '1920x1080' || size === '1792x1024' || size === '1536x1024') {
+          body.aspect_ratio = '16:9';
+          body.size = size;
+        } else if (size) {
+          body.size = size;
+        }
+      } else if (size === '1024x1024') {
         body.aspect_ratio = '1:1';
-        body.resolution = '1K';
-      } else if (
-        size === '1920x1080' ||
-        size === '1792x1024' ||
-        size === '1536x1024'
-      ) {
-        body.aspect_ratio = '16:9';
-        body.resolution = size === '1920x1080' ? '2K' : '1K';
-      } else if (size) {
-        body.size = size;
       } else {
-        body.resolution = '1K';
+        body.aspect_ratio = '16:9';
       }
 
       const res = await fetch(`${baseUrl}/images`, {
@@ -289,6 +296,13 @@ export const openRouterService = {
         } else {
           b64 = item.image;
         }
+      }
+
+      // Some providers nest the payload under images[0]
+      if (!b64 && !url && Array.isArray(item?.images) && item.images[0]) {
+        const nested = item.images[0];
+        b64 = nested.b64_json || nested.b64 || null;
+        url = nested.url || null;
       }
 
       if (!b64 && !url) {

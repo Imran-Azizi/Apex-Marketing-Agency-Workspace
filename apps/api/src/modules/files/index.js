@@ -3,7 +3,7 @@ import multer from "multer";
 import path from "path";
 import crypto from "crypto";
 import { tmpdir } from "os";
-import { unlink } from "fs/promises";
+import { unlink, readFile, writeFile } from "fs/promises";
 import { requireAuth } from "../../middleware/auth.js";
 import { requireCsrf } from "../../middleware/csrf.js";
 import { uploadLimiter } from "../../middleware/rateLimit.js";
@@ -18,6 +18,12 @@ import { prisma } from "../../db/prisma.js";
 import { normalizeDigitsDeep } from "../../utils/toEnglishDigits.js";
 import { SECURITY, BLOCKED_UPLOAD_EXTENSIONS } from "../../config/security.js";
 import { assertRawStorageAccess } from "./rawAccess.js";
+import {
+  assertClientAssetImageFile,
+  isClientAssetImageKind,
+  isSvgUpload,
+} from "./image-formats.js";
+import { sanitizeSvgContent } from "./svg-sanitize.js";
 
 const ALLOWED_MIME_PREFIXES = [
   "image/",
@@ -47,7 +53,25 @@ const OCTET_STREAM_EXTS = new Set([
   "m4a",
   "aac",
   "ogg",
+  "oga",
+  "flac",
   "zip",
+  "jpg",
+  "jpeg",
+  "jfif",
+  "jpe",
+  "jif",
+  "png",
+  "webp",
+  "gif",
+  "svg",
+  "bmp",
+  "tif",
+  "tiff",
+  "avif",
+  "ai",
+  "eps",
+  "psd",
 ]);
 
 function fileExtension(name) {
@@ -61,9 +85,23 @@ function isBlockedUploadName(name) {
 function isAllowedMime(mime, originalname) {
   if (isBlockedUploadName(originalname)) return false;
   const ext = fileExtension(originalname);
-  if (ext === "svg") return false;
   const value = String(mime || "").toLowerCase();
-  if (!value || value === "image/svg+xml") return false;
+
+  // SVG is allowed only with a matching extension (sanitized later on upload).
+  if (ext === "svg") {
+    return (
+      !value ||
+      value === "image/svg+xml" ||
+      value === "application/octet-stream" ||
+      value === "text/xml" ||
+      value === "application/xml"
+    );
+  }
+  if (value === "image/svg+xml") {
+    return ext === "svg";
+  }
+
+  if (!value) return false;
   if (value === "application/octet-stream") {
     return OCTET_STREAM_EXTS.has(ext);
   }
@@ -292,6 +330,10 @@ async function streamStoredFile(
     head.contentType ||
     "application/octet-stream";
 
+  const isSvg =
+    String(contentType).toLowerCase().includes("svg") ||
+    inferredExt === "svg";
+
   /**
    * After ACL, send AV players to a short-lived CDN URL when the driver can
    * sign it (Bunny token auth / Cloudinary signed URL). Otherwise proxy/stream
@@ -320,6 +362,15 @@ async function streamStoredFile(
   res.setHeader("Accept-Ranges", "bytes");
   res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
   res.setHeader("Content-Type", contentType);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (isSvg) {
+    // Defense-in-depth if SVG is opened directly in a tab (scripts still
+    // sanitized on upload; <img> embedding does not execute scripts).
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; img-src 'none'; style-src 'unsafe-inline'; script-src 'none'; sandbox",
+    );
+  }
   res.setHeader(
     "Content-Disposition",
     `inline; filename*=UTF-8''${encodeURIComponent(
@@ -411,17 +462,46 @@ router.post(
           throw new AppError(check.message, 400, "FILE_TYPE_NOT_ALLOWED");
         }
       }
+
+      const assetKind = String(
+        req.body?.assetKind || uploadContext.assetKind || "",
+      ).toUpperCase();
+      if (
+        uploadContext.purpose === UPLOAD_PURPOSE.PORTAL_ASSET &&
+        isClientAssetImageKind(assetKind)
+      ) {
+        assertClientAssetImageFile({
+          name: req.file.originalname,
+          mimeType: req.file.mimetype,
+          sizeBytes: req.file.size,
+          kind: assetKind,
+        });
+      }
+
+      let mimeType = req.file.mimetype;
+      let sizeBytes = req.file.size;
+
+      if (isSvgUpload(req.file)) {
+        const raw = await readFile(req.file.path);
+        const sanitized = sanitizeSvgContent(raw);
+        await writeFile(req.file.path, sanitized);
+        mimeType = "image/svg+xml";
+        sizeBytes = sanitized.length;
+        req.file.size = sizeBytes;
+        req.file.mimetype = mimeType;
+      }
+
       const saved = await storage.saveUploadedFile(req.file, {
         filename: req.file.originalname,
         folder: uploadContext.folder,
-        contentType: req.file.mimetype,
+        contentType: mimeType,
         uploadContext,
       });
       created(res, {
         key: saved.key,
         url: saved.url,
-        mimeType: req.file.mimetype,
-        sizeBytes: req.file.size,
+        mimeType,
+        sizeBytes,
         name: req.file.originalname,
         folderPath: saved.folderPath || null,
         category: saved.category || null,
@@ -483,8 +563,36 @@ router.get("/media/:fileId", requireAuth, async (req, res, next) => {
     });
     await assertMediaAccess(file, req.auth);
 
+    const ext = path.extname(String(file.name || file.storageKey || ""))
+      .slice(1)
+      .toLowerCase();
+    const audioExts = new Set([
+      "mp3",
+      "wav",
+      "m4a",
+      "aac",
+      "ogg",
+      "oga",
+      "flac",
+      "webm",
+    ]);
+    const fallbackMime =
+      file.kind === "AUDIO" || audioExts.has(ext)
+        ? ext === "wav"
+          ? "audio/wav"
+          : ext === "m4a" || ext === "aac"
+            ? "audio/mp4"
+            : ext === "ogg" || ext === "oga"
+              ? "audio/ogg"
+              : ext === "flac"
+                ? "audio/flac"
+                : ext === "webm"
+                  ? "audio/webm"
+                  : "audio/mpeg"
+        : "video/mp4";
+
     await streamStoredFile(req, res, file.storageKey, {
-      mimeType: file.mimeType || "video/mp4",
+      mimeType: file.mimeType || fallbackMime,
       downloadName: file.name,
     });
   } catch (e) {

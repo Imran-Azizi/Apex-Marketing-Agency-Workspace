@@ -139,7 +139,7 @@ export function ThemeToggle({
       <div className={cn("w-full", className)}>
         <p
           className={cn(
-            "mb-2 px-0.5 text-[11px] font-medium",
+            "mb-2.5 px-0.5 text-[11px] font-semibold tracking-[0.12em]",
             isSidebar
               ? "text-sidebar-foreground/55"
               : "text-muted-foreground",
@@ -150,7 +150,7 @@ export function ThemeToggle({
         <div
           className={cn(
             "grid grid-cols-3 gap-1 rounded-xl p-1",
-            isSidebar ? "bg-sidebar-border/60" : "bg-muted/70",
+            isSidebar ? "bg-sidebar-border/60" : "bg-muted/80",
           )}
           role="tablist"
           aria-label="انتخاب تم"

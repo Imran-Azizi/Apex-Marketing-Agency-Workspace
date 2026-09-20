@@ -76,11 +76,13 @@ function ExactManualText({
   dir,
   className,
   emptyLabel,
+  embedded,
 }: {
   text: string;
   dir?: "rtl" | "ltr";
   className?: string;
   emptyLabel: string;
+  embedded?: boolean;
 }) {
   if (!text) {
     return (
@@ -92,7 +94,10 @@ function ExactManualText({
   return (
     <article
       className={cn(
-        "rounded-xl border border-border/60 bg-card p-4 text-start sm:p-5",
+        "text-start",
+        embedded
+          ? "p-0"
+          : "rounded-xl border border-border/60 bg-card p-4 sm:p-5",
         className,
       )}
       dir={dir}
@@ -427,10 +432,13 @@ export function ScenarioFinalView({
   value,
   dir = "rtl",
   className,
+  embedded = false,
 }: {
   value: unknown;
   dir?: "rtl" | "ltr";
   className?: string;
+  /** Flatten card chrome when nested inside another panel/tabs. */
+  embedded?: boolean;
 }) {
   const manualRaw = getManualRaw(value);
   if (manualRaw !== null) {
@@ -440,6 +448,7 @@ export function ScenarioFinalView({
         dir={dir}
         className={className}
         emptyLabel="سناریویی ثبت نشده"
+        embedded={embedded}
       />
     );
   }
@@ -456,13 +465,16 @@ export function ScenarioFinalView({
   return (
     <article
       className={cn(
-        "space-y-4 rounded-xl border border-border/60 bg-card p-4 text-start sm:p-5",
+        "space-y-3.5 text-start sm:space-y-4",
+        embedded
+          ? "p-0"
+          : "rounded-xl border border-border/60 bg-card p-4 sm:p-5",
         className,
       )}
       dir={dir}
     >
       <div className="space-y-1">
-        <h3 className="text-base font-semibold tracking-tight">
+        <h3 className="text-[15px] font-semibold leading-7 tracking-tight sm:text-base">
           {scenario.title || "سناریوی تبلیغاتی"}
         </h3>
         {scenario.totalDurationSec ? (
@@ -472,7 +484,7 @@ export function ScenarioFinalView({
         ) : null}
       </div>
 
-      <div className="space-y-4">
+      <div className="space-y-3.5 sm:space-y-4">
         <Field label="مفهوم اصلی" value={scenario.concept} />
         <Field label="مشکل" value={scenario.problem} />
         <Field label="راه‌حل" value={scenario.solution} />
@@ -517,10 +529,12 @@ export function NarrationFinalView({
   value,
   dir = "rtl",
   className,
+  embedded = false,
 }: {
   value: unknown;
   dir?: "rtl" | "ltr";
   className?: string;
+  embedded?: boolean;
 }) {
   const manualRaw = getManualRaw(value);
   if (manualRaw !== null) {
@@ -530,6 +544,7 @@ export function NarrationFinalView({
         dir={dir}
         className={className}
         emptyLabel="نریشنی ثبت نشده"
+        embedded={embedded}
       />
     );
   }
@@ -549,15 +564,16 @@ export function NarrationFinalView({
     );
   }
 
-  const tone = typeof obj?.tone === "string" ? obj.tone : null;
-  const toneExplanation =
-    typeof obj?.toneExplanation === "string" ? obj.toneExplanation : null;
+  const tone = typeof obj?.tone === "string" && obj.tone.trim() ? obj.tone.trim() : null;
   const estimatedSeconds = Number(obj?.estimatedSeconds) || null;
 
   return (
     <article
       className={cn(
-        "space-y-4 rounded-xl border border-border/60 bg-card p-4 text-start sm:p-5",
+        "space-y-3.5 text-start sm:space-y-4",
+        embedded
+          ? "p-0"
+          : "rounded-xl border border-border/60 bg-card p-4 sm:p-5",
         className,
       )}
       dir={dir}
@@ -573,9 +589,6 @@ export function NarrationFinalView({
       <p className="whitespace-pre-wrap break-words text-[15px] leading-8">
         {script}
       </p>
-      {toneExplanation ? (
-        <p className="text-xs leading-6 text-muted-foreground">{toneExplanation}</p>
-      ) : null}
     </article>
   );
 }
@@ -584,10 +597,12 @@ export function StoryboardFinalView({
   value,
   dir = "rtl",
   className,
+  embedded = false,
 }: {
   value: unknown;
   dir?: "rtl" | "ltr";
   className?: string;
+  embedded?: boolean;
 }) {
   const exactRaw = getManualRaw(value);
   const uploadedImages = useMemo(() => getUploadedImages(value), [value]);
@@ -627,6 +642,7 @@ export function StoryboardFinalView({
             text={exactRaw}
             dir={dir}
             emptyLabel="استوری‌بوردی ثبت نشده"
+            embedded={embedded}
           />
         ) : null}
         {!hasText && !uploadedImages.length ? (
@@ -680,12 +696,12 @@ export function StoryboardFinalView({
   }
 
   return (
-    <div className={cn("space-y-4", className)} dir={dir}>
+    <div className={cn(embedded ? "space-y-3" : "space-y-4", className)} dir={dir}>
       <ManualUploadedImagesGallery images={uploadedImages} />
 
       {(collage.src || collage.error) && !collageIsUploadedDuplicate ? (
-        <section className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-4 py-3">
+        <section className="overflow-hidden rounded-xl border border-border/70 bg-card sm:rounded-2xl sm:shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5 sm:px-4 sm:py-3">
             <h4 className="text-sm font-semibold tracking-tight">
               استوری‌بورد تصویری
             </h4>
@@ -708,7 +724,7 @@ export function StoryboardFinalView({
       ) : null}
 
       {meaningfulScenes.length ? (
-      <ol className="space-y-4">
+      <ol className={cn(embedded ? "space-y-3" : "space-y-4")}>
         {meaningfulScenes.map((scene, i) => {
           const sceneNo = sceneNumberOf(scene, i);
           const camera = scene.camera || scene.cameraAngle;
@@ -720,17 +736,47 @@ export function StoryboardFinalView({
             scene.notes ||
             "—";
           const imageError = scene.imageError || null;
+          const techFields = (
+            <>
+              <Field label="نوع پلان / زاویه دوربین" value={camera} />
+              <Field label="راهنمای بصری" value={scene.visualDirection} />
+              <Field label="محیط" value={scene.environment} />
+              <Field label="نورپردازی" value={scene.lighting} />
+              <Field label="اکشن" value={action} />
+              <Field label="انتقال" value={scene.transition} />
+              <Field label="یادداشت تدوین" value={scene.editingNotes} />
+            </>
+          );
+          const hasTech =
+            Boolean(camera) ||
+            Boolean(scene.visualDirection) ||
+            Boolean(scene.environment) ||
+            Boolean(scene.lighting) ||
+            Boolean(action) ||
+            Boolean(scene.transition) ||
+            Boolean(scene.editingNotes);
+
           const details = (
-            <div className="flex flex-col gap-3 p-4 sm:p-5">
-              <div className="min-w-0 space-y-1">
-                <h5 className="text-sm font-semibold tracking-tight">
-                  {scene.title?.trim() || `صحنه ${faNum(sceneNo)}`}
-                </h5>
-                {scene.duration ? (
-                  <p className="text-xs tabular-nums text-muted-foreground">
-                    مدت: {scene.duration}
-                  </p>
-                ) : null}
+            <div
+              className={cn(
+                "flex flex-col gap-3",
+                embedded ? "p-3.5 sm:p-4" : "p-4 sm:p-5",
+              )}
+            >
+              <div className="flex items-start gap-2.5">
+                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-xs font-semibold tabular-nums">
+                  {faNum(sceneNo)}
+                </span>
+                <div className="min-w-0 space-y-0.5">
+                  <h5 className="text-sm font-semibold leading-6 tracking-tight">
+                    {scene.title?.trim() || `صحنه ${faNum(sceneNo)}`}
+                  </h5>
+                  {scene.duration ? (
+                    <p className="text-xs tabular-nums text-muted-foreground">
+                      مدت: {scene.duration}
+                    </p>
+                  ) : null}
+                </div>
               </div>
 
               {imageError && showLegacySceneImages ? (
@@ -741,16 +787,23 @@ export function StoryboardFinalView({
 
               <p className="whitespace-pre-wrap text-sm leading-7">{visual}</p>
 
-              <div className="space-y-2">
-                <Field label="عنوان صحنه" value={scene.title} />
-                <Field label="نوع پلان / زاویه دوربین" value={camera} />
-                <Field label="راهنمای بصری" value={scene.visualDirection} />
-                <Field label="محیط" value={scene.environment} />
-                <Field label="نورپردازی" value={scene.lighting} />
-                <Field label="اکشن" value={action} />
-                <Field label="انتقال" value={scene.transition} />
-                <Field label="یادداشت تدوین" value={scene.editingNotes} />
-              </div>
+              {hasTech ? (
+                embedded ? (
+                  <>
+                    <details className="rounded-lg border border-border/50 bg-muted/20 open:bg-muted/30 sm:hidden">
+                      <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground marker:content-none [&::-webkit-details-marker]:hidden">
+                        جزئیات فنی صحنه
+                      </summary>
+                      <div className="space-y-2.5 border-t border-border/40 px-3 py-3">
+                        {techFields}
+                      </div>
+                    </details>
+                    <div className="hidden space-y-2 sm:block">{techFields}</div>
+                  </>
+                ) : (
+                  <div className="space-y-2">{techFields}</div>
+                )
+              ) : null}
             </div>
           );
 
@@ -758,7 +811,12 @@ export function StoryboardFinalView({
             return (
               <li
                 key={`${sceneNo}-${i}`}
-                className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm"
+                className={cn(
+                  "overflow-hidden border border-border/70 bg-card",
+                  embedded
+                    ? "rounded-xl"
+                    : "rounded-2xl shadow-sm",
+                )}
               >
                 {details}
               </li>
@@ -768,7 +826,12 @@ export function StoryboardFinalView({
           return (
             <li
               key={`${sceneNo}-${i}`}
-              className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm"
+              className={cn(
+                "overflow-hidden border border-border/70 bg-card",
+                embedded
+                  ? "rounded-xl"
+                  : "rounded-2xl shadow-sm",
+              )}
             >
               <div className="grid gap-0 md:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]">
                 <div className="relative bg-muted/30 md:min-h-[280px]">

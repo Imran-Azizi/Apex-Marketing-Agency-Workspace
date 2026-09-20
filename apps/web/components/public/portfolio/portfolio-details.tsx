@@ -1,17 +1,40 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CalendarDays, Check, ChevronLeft, Share2, Tag } from "lucide-react";
-import { VideoPlayer } from "@/components/media/video-player";
+import {
+  VideoPlayer,
+  VideoPlayerSkeleton,
+} from "@/components/media/video-player";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { portfolioPublicPlaybackUrl } from "@/lib/media";
 import type { PublicPortfolioDetail } from "@/lib/portfolio";
 import { cn, formatDate } from "@/lib/utils";
-import { PortfolioRelated } from "./portfolio-related";
 import { PortfolioSuccessStory } from "./portfolio-success-story";
+
+const PortfolioRelated = dynamic(
+  () =>
+    import("./portfolio-related").then((m) => ({
+      default: m.PortfolioRelated,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="border-t border-border/60 pt-10 sm:pt-12" aria-hidden>
+        <div className="mb-7 h-8 w-40 rounded-md bg-muted/60 sm:mb-8" />
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <VideoPlayerSkeleton key={i} className="rounded-2xl" />
+          ))}
+        </div>
+      </div>
+    ),
+  },
+);
 
 export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
   const [copied, setCopied] = useState(false);
@@ -50,6 +73,7 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
         >
           <Link
             href="/"
+            prefetch={false}
             className="rounded-md transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             خانه
@@ -57,6 +81,7 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
           <ChevronLeft className="h-4 w-4 shrink-0 opacity-60" aria-hidden />
           <Link
             href="/#portfolio"
+            prefetch={false}
             className="rounded-md transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             نمونه های کاری
@@ -73,6 +98,8 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
             poster={item.thumbnailUrl || undefined}
             title={item.title}
             type={item.video?.mimeType || "video/mp4"}
+            eager
+            loadingLabel="در حال بارگذاری"
             className="rounded-none"
           />
         </div>
@@ -138,7 +165,9 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
               {copied ? "کپی شد" : "اشتراک‌گذاری"}
             </Button>
             <Button variant="brand" className="rounded-full" asChild>
-              <Link href="/#portfolio">بازگشت به نمونه های کاری</Link>
+              <Link href="/#portfolio" prefetch={false}>
+                بازگشت به نمونه های کاری
+              </Link>
             </Button>
           </div>
         </div>

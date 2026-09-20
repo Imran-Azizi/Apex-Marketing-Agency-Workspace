@@ -12,6 +12,10 @@ import {
 import { writeAudit } from "../../middleware/audit.js";
 import { randomToken } from "../../utils/tokens.js";
 import {
+  assertClientAssetImageFile,
+  isClientAssetImageKind,
+} from "../files/image-formats.js";
+import {
   notifyManagersOnce,
   buildLeadCreatedNotification,
   buildCustomerConvertedNotification,
@@ -46,12 +50,16 @@ import {
   CRM_STAGES,
   canManuallySetStage,
   canonicalizeStage,
+  isManagerRole,
   pipelineCatalog,
   buildCategoryWhere,
   isClosedStage,
 } from "./pipeline.js";
 import { serializeListItem, withCrmView } from "./serialize.js";
-import { serializePortalCredentials } from "./portalInvites.js";
+import {
+  canRevealPortalPassword,
+  serializePortalCredentials,
+} from "./portalInvites.js";
 import { customerListScopeCondition } from "./visibility.js";
 import {
   assertSalesCustomerAccess,
@@ -611,11 +619,14 @@ export const crmService = {
     });
 
     const portal = customer.portalAccount;
+    const canSeePortalLogin = canRevealPortalPassword(extras.auth);
     const portalAccount = portal
       ? {
           id: portal.id,
           crmCustomerId: portal.crmCustomerId,
-          normalizedWhatsapp: portal.normalizedWhatsapp,
+          normalizedWhatsapp: canSeePortalLogin
+            ? portal.normalizedWhatsapp
+            : null,
           isActive: portal.isActive,
           registeredAt: portal.registeredAt,
           createdAt: portal.createdAt,
@@ -1362,7 +1373,8 @@ export const crmService = {
       throw new AppError("مبلغ فاکتور نامعتبر است", 400, "VALIDATION");
     }
 
-    const qty = body.videoCount ? Number(body.videoCount) : 1;
+    const qty =
+      toPositiveInt(body.videoCount) || toPositiveInt(opp.videoCount) || 1;
     const unit = qty > 0 ? roundMoney(total / qty) : total;
     const items =
       Array.isArray(body.items) && body.items.length
@@ -2113,7 +2125,7 @@ export const crmService = {
             paymentMethod: true,
             items: { select: { quantity: true, description: true } },
             opportunity: {
-              select: { id: true, title: true, agreedTerms: true },
+              select: { id: true, title: true, agreedTerms: true, videoCount: true },
             },
           },
         },
@@ -2139,6 +2151,7 @@ export const crmService = {
                 agreedPrice: true,
                 advancePayment: true,
                 agreedTerms: true,
+                videoCount: true,
               },
             },
           },
@@ -2181,7 +2194,7 @@ export const crmService = {
           paymentMethod: true,
           items: { select: { quantity: true, description: true } },
           opportunity: {
-            select: { id: true, title: true, agreedTerms: true },
+            select: { id: true, title: true, agreedTerms: true, videoCount: true },
           },
         },
       });
@@ -2193,6 +2206,8 @@ export const crmService = {
 
     const videoCount = resolveReceiptVideoCount({
       invoiceVideoCount: relatedInvoice?.videoCount,
+      opportunityVideoCount:
+        relatedInvoice?.opportunity?.videoCount ?? opportunity?.videoCount,
       invoiceItems: relatedInvoice?.items,
       invoiceNotes: relatedInvoice?.notes,
       invoiceDescription: relatedInvoice?.items?.[0]?.description,
@@ -2616,6 +2631,13 @@ export const crmService = {
   },
 
   async createPortalInvite(opportunityId, auth, req) {
+    if (!isManagerRole(auth?.roleCode)) {
+      throw new AppError(
+        "دعوت پورتال فقط توسط مدیر انجام می‌شود",
+        403,
+        "FORBIDDEN",
+      );
+    }
     const eligibility = await this.getInviteEligibility(opportunityId);
     if (!eligibility.eligible) {
       let message = "دعوت پورتال پس از تأیید بیعانه و ایجاد مشتری فعال می‌شود";
@@ -2751,6 +2773,16 @@ export const crmService = {
     await this.getCustomer(customerId, { auth });
     if (!storageKey || !name)
       throw new AppError("نام و مسیر فایل الزامی است", 400, "VALIDATION");
+
+    const assetKind = String(kind || "OTHER").toUpperCase();
+    if (isClientAssetImageKind(assetKind)) {
+      assertClientAssetImageFile({
+        name,
+        mimeType,
+        sizeBytes,
+        kind: assetKind,
+      });
+    }
 
     const asset = await prisma.clientAsset.create({
       data: {

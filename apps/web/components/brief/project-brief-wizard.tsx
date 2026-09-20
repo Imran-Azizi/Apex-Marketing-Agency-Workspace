@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { cn, toEnglishDigits } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,9 +68,6 @@ export type ProjectBriefSubmitPayload = {
   title: string;
   /** One-time key so duplicate submits reuse the same project. */
   idempotencyKey: string;
-  /** Internal create only — contract price for ProjectFinance / dashboards */
-  agreedPrice?: number | null;
-  serviceId?: string | null;
   notes?: string | null;
 };
 
@@ -94,13 +91,6 @@ export type ProjectBriefWizardProps = {
   initialOpportunityId?: string;
   profile?: ProjectBriefWizardProfile | null;
   formats?: Array<{ id: string; name: string; ratio: string }>;
-  /** Catalog for internal create (service picker) */
-  services?: Array<{ id: string; name: string; revisionCount?: number }>;
-  /** Prefill from CRM open opportunity when available */
-  initialAgreedPrice?: number | null;
-  initialServiceId?: string | null;
-  /** When true, price comes from CRM and should not be cleared */
-  contractPriceLocked?: boolean;
   assets?: ClientAssetItem[];
   onRefreshAssets?: () => void;
   assetsCreatePath?: string;
@@ -196,18 +186,28 @@ function StepIndicator({
       : (currentIndex / (WIZARD_STEPS.length - 1)) * 100;
 
   return (
-    <div className="space-y-4 rounded-2xl border bg-card p-4 shadow-sm sm:p-5">
+    <div className="space-y-3 rounded-2xl border bg-card p-3 shadow-sm sm:space-y-4 sm:p-5">
       <div className="flex items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground">پیشرفت فرم</p>
-          <p className="mt-0.5 text-sm font-semibold">
+          <p className="mt-0.5 truncate text-sm font-semibold">
             گام{" "}
-            {(currentIndex + 1).toLocaleString("fa-AF", { numberingSystem: "latn" })} از{" "}
-            {WIZARD_STEPS.length.toLocaleString("fa-AF", { numberingSystem: "latn" })}
+            {(currentIndex + 1).toLocaleString("fa-AF", {
+              numberingSystem: "latn",
+            })}{" "}
+            از{" "}
+            {WIZARD_STEPS.length.toLocaleString("fa-AF", {
+              numberingSystem: "latn",
+            })}
+            <span className="mx-1.5 text-muted-foreground">·</span>
+            <span className="text-foreground">{WIZARD_STEPS[currentIndex]?.label}</span>
           </p>
         </div>
-        <span className="rounded-full bg-brand/10 px-2.5 py-1 text-xs font-semibold tabular-nums text-brand">
-          {Math.round(progressPct).toLocaleString("fa-AF", { numberingSystem: "latn" })}٪
+        <span className="shrink-0 rounded-full bg-brand/10 px-2.5 py-1 text-xs font-semibold tabular-nums text-brand">
+          {Math.round(progressPct).toLocaleString("fa-AF", {
+            numberingSystem: "latn",
+          })}
+          ٪
         </span>
       </div>
 
@@ -218,7 +218,81 @@ function StepIndicator({
         />
       </div>
 
-      <ol className="grid grid-cols-4 gap-2">
+      {/* Mobile: horizontal scrollable step tabs */}
+      <div className="sm:hidden">
+        <div className="apex-h-scroll -mx-1 overflow-x-auto overscroll-x-contain px-1 pb-1 [scrollbar-width:thin]">
+          <ol className="flex w-max min-w-full gap-2">
+            {WIZARD_STEPS.map((step, index) => {
+              const Icon = step.icon;
+              const isActive = index === currentIndex;
+              const isCompleted = index < currentIndex;
+              const isReachable = index <= highestReached;
+              const stepNumber = (index + 1).toLocaleString("fa-AF", {
+                numberingSystem: "latn",
+              });
+
+              return (
+                <li key={step.id} className="shrink-0">
+                  <button
+                    type="button"
+                    disabled={!isReachable}
+                    onClick={() => isReachable && onStepSelect(index)}
+                    className={cn(
+                      "inline-flex h-11 items-center gap-2 rounded-xl border px-3 text-start transition-all",
+                      isActive &&
+                        "border-brand/40 bg-brand/10 shadow-sm ring-1 ring-brand/20",
+                      isCompleted &&
+                        !isActive &&
+                        "border-emerald-500/30 bg-emerald-500/5",
+                      !isActive &&
+                        !isCompleted &&
+                        isReachable &&
+                        "border-border/80 bg-muted/20",
+                      !isReachable &&
+                        "cursor-not-allowed border-transparent bg-muted/10 opacity-50",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold",
+                        isActive && "bg-brand text-brand-foreground",
+                        isCompleted &&
+                          !isActive &&
+                          "bg-emerald-500 text-white",
+                        !isActive &&
+                          !isCompleted &&
+                          "bg-background text-muted-foreground ring-1 ring-border/60",
+                      )}
+                    >
+                      {isCompleted && !isActive ? (
+                        <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+                      ) : (
+                        <Icon className="h-3.5 w-3.5" />
+                      )}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[10px] text-muted-foreground">
+                        گام {stepNumber}
+                      </span>
+                      <span
+                        className={cn(
+                          "block whitespace-nowrap text-xs font-semibold",
+                          isActive ? "text-foreground" : "text-muted-foreground",
+                        )}
+                      >
+                        {step.label}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </div>
+
+      {/* Tablet / desktop: equal grid */}
+      <ol className="hidden grid-cols-4 gap-2 sm:grid">
         {WIZARD_STEPS.map((step, index) => {
           const Icon = step.icon;
           const isActive = index === currentIndex;
@@ -235,7 +309,7 @@ function StepIndicator({
                 disabled={!isReachable}
                 onClick={() => isReachable && onStepSelect(index)}
                 className={cn(
-                  "group flex w-full flex-col items-center gap-2 rounded-xl border px-1.5 py-2.5 text-center transition-all duration-200 sm:px-2 sm:py-3",
+                  "group flex w-full flex-col items-center gap-2 rounded-xl border px-2 py-3 text-center transition-all duration-200",
                   isActive &&
                     "border-brand/35 bg-brand/5 shadow-sm ring-1 ring-brand/20",
                   isCompleted &&
@@ -245,13 +319,15 @@ function StepIndicator({
                     !isCompleted &&
                     isReachable &&
                     "border-border/80 bg-muted/20 hover:bg-muted/40",
-                  !isReachable && "cursor-not-allowed border-transparent bg-muted/10 opacity-55",
+                  !isReachable &&
+                    "cursor-not-allowed border-transparent bg-muted/10 opacity-55",
                 )}
               >
                 <span
                   className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-full border text-xs font-bold transition-all duration-200 sm:h-10 sm:w-10",
-                    isActive && "border-brand bg-brand text-brand-foreground shadow-sm",
+                    "flex h-10 w-10 items-center justify-center rounded-full border text-xs font-bold transition-all duration-200",
+                    isActive &&
+                      "border-brand bg-brand text-brand-foreground shadow-sm",
                     isCompleted &&
                       !isActive &&
                       "border-emerald-500/40 bg-emerald-500 text-white",
@@ -264,19 +340,18 @@ function StepIndicator({
                     <Check className="h-4 w-4" strokeWidth={2.5} />
                   ) : (
                     <span className="flex flex-col items-center leading-none">
-                      <Icon className="mb-0.5 hidden h-3.5 w-3.5 opacity-80 sm:block" />
+                      <Icon className="mb-0.5 h-3.5 w-3.5 opacity-80" />
                       <span>{stepNumber}</span>
                     </span>
                   )}
                 </span>
                 <span
                   className={cn(
-                    "line-clamp-2 text-[10px] font-medium leading-tight sm:text-[11px]",
+                    "line-clamp-2 text-[11px] font-medium leading-tight",
                     isActive ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
-                  <span className="sm:hidden">{step.shortLabel}</span>
-                  <span className="hidden sm:inline">{step.label}</span>
+                  {step.label}
                 </span>
               </button>
             </li>
@@ -294,10 +369,6 @@ export function ProjectBriefWizard({
   initialOpportunityId = "",
   profile,
   formats,
-  services,
-  initialAgreedPrice = null,
-  initialServiceId = null,
-  contractPriceLocked = false,
   assets,
   onRefreshAssets,
   assetsCreatePath,
@@ -336,12 +407,6 @@ export function ProjectBriefWizard({
   const [assetUploadState, setAssetUploadState] = useState<AssetUploadState>(
     IDLE_ASSET_UPLOAD_STATE,
   );
-  const [agreedPrice, setAgreedPrice] = useState(
-    initialAgreedPrice != null && initialAgreedPrice > 0
-      ? String(initialAgreedPrice)
-      : "",
-  );
-  const [serviceId, setServiceId] = useState(initialServiceId || "");
   const [notes, setNotes] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSucceeded, setSubmitSucceeded] = useState(false);
@@ -357,18 +422,6 @@ export function ProjectBriefWizard({
       setOpportunityId(initialOpportunityId);
     }
   }, [initialOpportunityId]);
-
-  useEffect(() => {
-    if (initialAgreedPrice != null && initialAgreedPrice > 0) {
-      setAgreedPrice(String(initialAgreedPrice));
-    }
-  }, [initialAgreedPrice]);
-
-  useEffect(() => {
-    if (initialServiceId) {
-      setServiceId(initialServiceId);
-    }
-  }, [initialServiceId]);
 
   useEffect(() => {
     if (mode !== "portal") return;
@@ -450,16 +503,6 @@ export function ProjectBriefWizard({
       }
       if (customAspectRatio && !/^\d{1,3}:\d{1,3}$/.test(customAspectRatio)) {
         return "نسبت تصویر سفارشی معتبر نیست.";
-      }
-      if (mode === "internal" && !contractPriceLocked) {
-        const priceRaw = toEnglishDigits(agreedPrice).replace(/,/g, "").trim();
-        if (!priceRaw) {
-          return "مبلغ توافق‌شده برای همگام‌سازی داشبورد مالی الزامی است.";
-        }
-        const n = Number(priceRaw);
-        if (!Number.isFinite(n) || n <= 0) {
-          return "مبلغ توافق‌شده باید عددی بزرگ‌تر از صفر باشد.";
-        }
       }
       return null;
     }
@@ -571,9 +614,6 @@ export function ProjectBriefWizard({
     }
 
     if (mode === "internal") {
-      const priceRaw = toEnglishDigits(agreedPrice).replace(/,/g, "").trim();
-      payload.agreedPrice = priceRaw ? Number(priceRaw) : null;
-      payload.serviceId = serviceId || null;
       payload.notes = notes.trim() || null;
     }
 
@@ -640,10 +680,15 @@ export function ProjectBriefWizard({
   }
 
   return (
-    <div dir="rtl" className="mx-auto max-w-4xl space-y-5 sm:space-y-6">
+    <div
+      dir="rtl"
+      className="mx-auto max-w-4xl space-y-5 pb-36 sm:space-y-6 sm:pb-10"
+    >
       <div className="space-y-1">
-        <h1 className="text-2xl font-bold tracking-tight">فرم اطلاعات پروژه</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
+          فرم اطلاعات پروژه
+        </h1>
+        <p className="hidden text-sm text-muted-foreground sm:block">
           اطلاعات را مرحله‌به‌مرحله تکمیل کنید. فیلدهای دارای{" "}
           <span className="text-destructive">*</span> الزامی هستند.
         </p>
@@ -655,7 +700,10 @@ export function ProjectBriefWizard({
         onStepSelect={goToStep}
       />
 
-      <div key={currentStep.id} className="animate-fade-slide space-y-4">
+      <div
+        key={currentStep.id}
+        className="animate-fade-slide space-y-4 pb-2"
+      >
           <div className="flex items-start gap-3">
             <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-brand/20 bg-brand/10 text-brand">
               <StepIcon className="h-5 w-5" />
@@ -679,7 +727,7 @@ export function ProjectBriefWizard({
           )}
 
           {currentStep.id === "contact" && (
-            <Card className="overflow-hidden border shadow-sm">
+            <Card className="border shadow-sm">
               <CardContent className="grid gap-5 p-4 sm:grid-cols-2 sm:p-6">
                 <Field>
                   <FieldLabel htmlFor="personName" required>
@@ -792,7 +840,7 @@ export function ProjectBriefWizard({
           )}
 
           {currentStep.id === "content" && (
-            <Card className="overflow-hidden border shadow-sm">
+            <Card className="border shadow-sm">
               <CardContent className="space-y-5 p-4 sm:p-6">
                 <Field>
                   <FieldLabel htmlFor="productName">نام محصول / خدمت</FieldLabel>
@@ -913,7 +961,7 @@ export function ProjectBriefWizard({
           )}
 
           {currentStep.id === "video" && (
-            <Card className="overflow-hidden border shadow-sm">
+            <Card className="border shadow-sm">
               <CardContent className="grid gap-5 p-4 sm:grid-cols-2 sm:p-6">
                 <Field className="sm:col-span-2">
                   <FieldLabel required>مدت ویدیو</FieldLabel>
@@ -966,65 +1014,17 @@ export function ProjectBriefWizard({
                 </Field>
 
                 {mode === "internal" ? (
-                  <>
-                    <Field>
-                      <FieldLabel>سرویس</FieldLabel>
-                      <Select
-                        value={serviceId || "__none__"}
-                        onValueChange={(v) =>
-                          setServiceId(v === "__none__" ? "" : v)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="انتخاب سرویس" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">بدون سرویس</SelectItem>
-                          {(services || []).map((service) => (
-                            <SelectItem key={service.id} value={service.id}>
-                              {service.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="agreed-price" required={!contractPriceLocked}>
-                        مبلغ توافق‌شده (افغانی)
-                      </FieldLabel>
-                      <Input
-                        id="agreed-price"
-                        inputMode="decimal"
-                        value={agreedPrice}
-                        disabled={contractPriceLocked}
-                        onChange={(e) => {
-                          setAgreedPrice(e.target.value);
-                          setStepError(null);
-                        }}
-                        placeholder="مثال: ۵۰۰۰۰"
-                      />
-                      {contractPriceLocked ? (
-                        <p className="text-xs text-muted-foreground">
-                          مبلغ از قرارداد CRM این مشتری خوانده شده است.
-                        </p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">
-                          این مبلغ در داشبورد مدیریت و داشبورد مالی ثبت می‌شود.
-                        </p>
-                      )}
-                    </Field>
-                    <Field className="sm:col-span-2">
-                      <FieldLabel htmlFor="manager-notes">یادداشت مدیر</FieldLabel>
-                      <Textarea
-                        id="manager-notes"
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className="min-h-[4rem] resize-none"
-                        rows={2}
-                        placeholder="توضیحات داخلی (اختیاری)"
-                      />
-                    </Field>
-                  </>
+                  <Field className="sm:col-span-2">
+                    <FieldLabel htmlFor="manager-notes">یادداشت مدیر</FieldLabel>
+                    <Textarea
+                      id="manager-notes"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      className="min-h-[4rem] resize-none"
+                      rows={2}
+                      placeholder="توضیحات داخلی (اختیاری)"
+                    />
+                  </Field>
                 ) : null}
 
                 <Field className="sm:col-span-2">
@@ -1056,7 +1056,7 @@ export function ProjectBriefWizard({
             )}
             aria-hidden={currentStep.id !== "assets"}
           >
-            <Card className="overflow-hidden border shadow-sm">
+            <Card className="border shadow-sm">
               <CardContent className="p-4 sm:p-6">
                 <ClientAssetsUploader
                   assets={assets || []}
@@ -1074,7 +1074,7 @@ export function ProjectBriefWizard({
           </div>
         </div>
 
-      <div className="sticky bottom-20 z-30 -mx-1 rounded-2xl border bg-background/95 p-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 lg:bottom-4">
+      <div className="sticky bottom-20 z-30 -mx-1 rounded-2xl border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 sm:bottom-4 sm:pb-3">
         {!assetUploadState.canSubmit && isLastStep ? (
           <p
             className={cn(
@@ -1090,7 +1090,83 @@ export function ProjectBriefWizard({
               : "آپلود ناموفق وجود دارد — ابتدا خطا را برطرف کنید."}
           </p>
         ) : null}
-        <div dir="ltr" className="flex items-center justify-between gap-3">
+
+        {isLastStep ? (
+          <div className="flex flex-col gap-2 sm:hidden" dir="rtl">
+            <Button
+              type="button"
+              variant="brand"
+              size="lg"
+              disabled={submitBusy || !assetUploadState.canSubmit}
+              onClick={handleSubmit}
+              className="w-full gap-2 transition-all hover:brightness-105"
+            >
+              {submitBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  در حال ساخت پروژه...
+                </>
+              ) : assetUploadState.isUploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  در انتظار آپلود...
+                </>
+              ) : (
+                "ارسال نهایی و ساخت پروژه"
+              )}
+            </Button>
+            {!isFirstStep ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={goPrev}
+                disabled={submitBusy}
+                className="w-full gap-1.5"
+              >
+                <ChevronRight className="h-4 w-4" />
+                قبلی
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 sm:hidden" dir="rtl">
+            <Button
+              type="button"
+              variant="brand"
+              onClick={goNext}
+              disabled={
+                submitBusy ||
+                (currentStep.id === "assets" && !assetUploadState.canSubmit)
+              }
+              className="min-w-0 flex-1 gap-1.5 transition-all hover:brightness-105"
+            >
+              بعدی
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <p className="min-w-0 flex-[1.2] truncate text-center text-xs text-muted-foreground">
+              {currentStep.label}
+            </p>
+            {!isFirstStep ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={goPrev}
+                disabled={submitBusy}
+                className="shrink-0 gap-1.5 px-3"
+              >
+                <ChevronRight className="h-4 w-4" />
+                قبلی
+              </Button>
+            ) : (
+              <span className="inline-block w-[4.75rem] shrink-0" />
+            )}
+          </div>
+        )}
+
+        <div
+          dir="ltr"
+          className="hidden items-center justify-between gap-3 sm:flex"
+        >
           <div className="min-w-[7.5rem]">
             {!isFirstStep ? (
               <Button
@@ -1120,9 +1196,7 @@ export function ProjectBriefWizard({
                 type="button"
                 variant="brand"
                 size="lg"
-                disabled={
-                  submitBusy || !assetUploadState.canSubmit
-                }
+                disabled={submitBusy || !assetUploadState.canSubmit}
                 onClick={handleSubmit}
                 className="gap-2 transition-all hover:brightness-105"
               >

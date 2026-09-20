@@ -14,6 +14,7 @@ import {
 import {
   attachStoryboardImages,
 } from '../../services/ai/storyboard-images.js';
+import { extractProjectBrandContext } from '../../services/ai/storyboard-image-prompt.js';
 import { rebuildProjectContext } from '../../services/projectContext.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { env, getActiveAiConfig } from '../../config/env.js';
@@ -40,8 +41,8 @@ export const AGENT_DEFINITIONS = [
     code: 'NARRATION',
     name: 'Narration Agent',
     nameFa: 'عامل نریشن',
-    description: 'One production-ready voice-over script with auto-selected tone',
-    descriptionFa: 'یک متن گویندگی نهایی آماده تولید با انتخاب خودکار لحن',
+    description: 'One production-ready voice-over script in the project language using the selected tone',
+    descriptionFa: 'یک متن گویندگی نهایی آماده تولید به زبان و لحن انتخاب‌شده پروژه',
     sortOrder: 2,
   },
   {
@@ -59,6 +60,7 @@ const PIPELINE_STEPS = [
   { key: 'scenario', label: 'تولید سناریو', labelEn: 'Generating scenario', agentType: 'SCENARIO' },
   { key: 'narration', label: 'ایجاد نریشن', labelEn: 'Creating narration', agentType: 'NARRATION' },
   { key: 'storyboard', label: 'ساخت استوری‌بورد', labelEn: 'Building storyboard', agentType: 'STORYBOARD' },
+  { key: 'storyboard_images', label: 'تولید تصاویر استوری‌بورد', labelEn: 'Generating storyboard images' },
   { key: 'finalize', label: 'ذخیره نسخه محتوا', labelEn: 'Saving content version' },
 ];
 
@@ -113,15 +115,40 @@ async function loadProjectInput(projectId) {
   const project = await prisma.project.findFirst({
     where: { id: projectId, deletedAt: null },
     include: {
-      context: true,
-      crmCustomer: true,
-      service: true,
-      format: true,
-      files: { where: { deletedAt: null } },
-      assetRefs: { include: { clientAsset: true } },
+      context: {
+        select: { contextJson: true, contextMd: true },
+      },
+      crmCustomer: {
+        select: {
+          personName: true,
+          companyName: true,
+          city: true,
+        },
+      },
+      service: { select: { name: true } },
+      format: { select: { ratio: true } },
+      files: {
+        where: { deletedAt: null },
+        select: { id: true, kind: true, name: true, storageKey: true },
+        take: 40,
+      },
+      assetRefs: {
+        include: {
+          clientAsset: {
+            select: {
+              id: true,
+              kind: true,
+              name: true,
+              storageKey: true,
+            },
+          },
+        },
+        take: 40,
+      },
+      // sanitizeAiInput only keeps 2 summarized versions — avoid over-fetching.
       contentVersions: {
         orderBy: { versionNumber: 'desc' },
-        take: 5,
+        take: 2,
         select: {
           id: true,
           versionNumber: true,
@@ -134,8 +161,26 @@ async function loadProjectInput(projectId) {
           createdAt: true,
         },
       },
-      feedback: { orderBy: { createdAt: 'desc' }, take: 10 },
-      approvals: { orderBy: { createdAt: 'desc' }, take: 10 },
+      feedback: {
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          scope: true,
+          body: true,
+          createdAt: true,
+        },
+      },
+      approvals: {
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          type: true,
+          decision: true,
+          comment: true,
+          createdAt: true,
+        },
+      },
     },
   });
   if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
@@ -157,9 +202,9 @@ async function loadProjectInput(projectId) {
       service: project.service?.name || null,
       format: project.format?.ratio || null,
       customer: {
-        personName: project.crmCustomer.personName,
-        companyName: project.crmCustomer.companyName,
-        city: project.crmCustomer.city,
+        personName: project.crmCustomer?.personName || null,
+        companyName: project.crmCustomer?.companyName || null,
+        city: project.crmCustomer?.city || null,
       },
       assets: [
         ...project.files.map((f) => ({
@@ -169,13 +214,15 @@ async function loadProjectInput(projectId) {
           name: f.name,
           storageKey: f.storageKey,
         })),
-        ...project.assetRefs.map((r) => ({
-          source: 'client_asset',
-          id: r.clientAssetId,
-          kind: r.clientAsset.kind,
-          name: r.clientAsset.name,
-          storageKey: r.clientAsset.storageKey,
-        })),
+        ...project.assetRefs
+          .filter((r) => r.clientAsset)
+          .map((r) => ({
+            source: 'client_asset',
+            id: r.clientAssetId,
+            kind: r.clientAsset.kind,
+            name: r.clientAsset.name,
+            storageKey: r.clientAsset.storageKey,
+          })),
       ],
       previousVersions: project.contentVersions,
       clientFeedback: project.feedback,
@@ -204,7 +251,7 @@ async function executePipelineJob({
   };
 
   try {
-    const { input } = await loadProjectInput(projectId);
+    const { input, project } = await loadProjectInput(projectId);
     const normalizedPrompt = normalizeUserPrompt(userPrompt);
 
     if (normalizedPrompt) {
@@ -398,7 +445,7 @@ async function executePipelineJob({
     const outputs = pipeline.outputs || {};
 
     await touch(
-      markStep(steps, 'finalize', {
+      markStep(steps, 'storyboard_images', {
         status: 'RUNNING',
         startedAt: new Date().toISOString(),
       }),
@@ -412,13 +459,45 @@ async function executePipelineJob({
           projectId,
           scenario: outputs.scenario || null,
           narration: outputs.narration || null,
+          projectContext: extractProjectBrandContext(project || {}),
         });
         storyboardImagesMeta = storyboardOutput.imagesMeta || null;
         delete storyboardOutput.imagesMeta;
+        const imageWarning = storyboardOutput.collageImageError || null;
+        await touch(
+          markStep(steps, 'storyboard_images', {
+            status: storyboardOutput.collageImageUrl ? 'COMPLETED' : 'COMPLETED',
+            finishedAt: new Date().toISOString(),
+            warning: Boolean(imageWarning),
+            error: imageWarning,
+          }),
+        );
       } catch (imgErr) {
         console.warn('[AI storyboard images]', imgErr.message);
+        await touch(
+          markStep(steps, 'storyboard_images', {
+            status: 'COMPLETED',
+            finishedAt: new Date().toISOString(),
+            warning: true,
+            error: imgErr.message || 'تولید تصاویر صحنه‌ها ناموفق بود',
+          }),
+        );
       }
+    } else {
+      await touch(
+        markStep(steps, 'storyboard_images', {
+          status: 'COMPLETED',
+          finishedAt: new Date().toISOString(),
+        }),
+      );
     }
+
+    await touch(
+      markStep(steps, 'finalize', {
+        status: 'RUNNING',
+        startedAt: new Date().toISOString(),
+      }),
+    );
 
     const last = await prisma.contentVersion.findFirst({
       where: { projectId, kind: 'BUNDLE' },
@@ -544,7 +623,18 @@ async function executePipelineJob({
 }
 
 export const aiService = {
+  _agentsSeededAt: 0,
+  _agentsSeededVersion: null,
+
   async ensureAgentsSeeded() {
+    // Avoid re-upserting on every overview poll — prompts only change with PROMPT_VERSION.
+    if (
+      this._agentsSeededVersion === PROMPT_VERSION &&
+      Date.now() - this._agentsSeededAt < 10 * 60 * 1000
+    ) {
+      return;
+    }
+
     for (const def of AGENT_DEFINITIONS) {
       const prompt = AGENT_PROMPTS[def.code];
       await prisma.aiAgent.upsert({
@@ -614,39 +704,49 @@ export const aiService = {
         },
       },
     });
+
+    this._agentsSeededVersion = PROMPT_VERSION;
+    this._agentsSeededAt = Date.now();
   },
 
   async getOverview(projectId) {
     await this.ensureAgentsSeeded();
-    const [lastWorkflow, versions, running, feedback, approvals] = await Promise.all([
-      prisma.aiWorkflowExecution.findFirst({
-        where: { projectId },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.contentVersion.count({ where: { projectId } }),
-      prisma.aiWorkflowExecution.findFirst({
-        where: { projectId, status: { in: ['PENDING', 'RUNNING'] } },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.clientFeedback.findMany({
-        where: { projectId, scope: 'CONTENT' },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        include: {
-          contentVersion: {
-            select: { id: true, versionNumber: true, status: true },
+    const [project, lastWorkflow, versions, running, feedback, approvals] =
+      await Promise.all([
+        prisma.project.findUnique({
+          where: { id: projectId },
+          select: { id: true, language: true, tone: true, title: true },
+        }),
+        prisma.aiWorkflowExecution.findFirst({
+          where: { projectId },
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.contentVersion.count({ where: { projectId } }),
+        prisma.aiWorkflowExecution.findFirst({
+          where: { projectId, status: { in: ['PENDING', 'RUNNING'] } },
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.clientFeedback.findMany({
+          where: { projectId, scope: 'CONTENT' },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+          include: {
+            contentVersion: {
+              select: { id: true, versionNumber: true, status: true },
+            },
           },
-        },
-      }),
-      prisma.approval.findMany({
-        where: {
-          projectId,
-          type: { in: ['MANAGER_CONTENT', 'CLIENT_CONTENT'] },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
-    ]);
+        }),
+        prisma.approval.findMany({
+          where: {
+            projectId,
+            type: { in: ['MANAGER_CONTENT', 'CLIENT_CONTENT'] },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+      ]);
+
+    if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
 
     return {
       lastExecution: lastWorkflow,
@@ -656,6 +756,9 @@ export const aiService = {
       pipelineSteps: PIPELINE_STEPS,
       customerFeedback: feedback,
       approvalTimeline: approvals,
+      projectLanguage: project.language || 'fa',
+      projectTone: project.tone || '',
+      projectTitle: project.title || null,
     };
   },
 
@@ -817,9 +920,14 @@ export const aiService = {
   ) {
     const project = await prisma.project.findUnique({
       where: { id: projectId },
-      select: { id: true },
+      select: { id: true, language: true, tone: true },
     });
     if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+
+    const langToneContext = {
+      language: project.language || 'fa',
+      tone: project.tone || '',
+    };
 
     const hasScenario = scenario != null;
     const hasNarration = narration != null;
@@ -864,7 +972,7 @@ export const aiService = {
 
     const normalizeOrThrow = (fn, value, label) => {
       try {
-        return fn(value, projectId);
+        return fn(value, projectId, langToneContext);
       } catch (err) {
         throw new AppError(
           `محتوای ${label} نامعتبر است`,
@@ -1045,6 +1153,169 @@ export const aiService = {
         },
         fileCount: fileMeta.length,
       },
+    });
+
+    return version;
+  },
+
+  async createEditedVersion(
+    projectId,
+    { baseVersionId, section, scenario, narration, storyboard, changeNotes } = {},
+    auth,
+    req,
+  ) {
+    const allowed = new Set(['scenario', 'narration', 'storyboard']);
+    if (!allowed.has(section)) {
+      throw new AppError('بخش ویرایش نامعتبر است', 400, 'VALIDATION');
+    }
+    if (!baseVersionId) {
+      throw new AppError('نسخه پایه لازم است', 400, 'VALIDATION');
+    }
+
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, language: true, tone: true },
+    });
+    if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+
+    const langToneContext = {
+      language: project.language || 'fa',
+      tone: project.tone || '',
+    };
+
+    const base = await prisma.contentVersion.findFirst({
+      where: { id: baseVersionId, projectId, kind: 'BUNDLE' },
+    });
+    if (!base) throw new AppError('نسخه پایه یافت نشد', 404, 'NOT_FOUND');
+
+    const isExactManual = (value) =>
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      value.preserveExact === true &&
+      typeof value.manualRaw === 'string';
+
+    const preserveExactPayload = (value, pid, label) => {
+      const raw = value.manualRaw;
+      if (label !== 'استوری‌بورد' && (!raw || !String(raw).trim())) {
+        throw new AppError(`محتوای ${label} خالی است`, 400, 'VALIDATION');
+      }
+      return {
+        ...value,
+        projectId: value.projectId || pid,
+        preserveExact: true,
+        manualRaw: typeof raw === 'string' ? raw : '',
+      };
+    };
+
+    const normalizeOrThrow = (fn, value, label) => {
+      try {
+        return fn(value, projectId, langToneContext);
+      } catch (err) {
+        throw new AppError(`محتوای ${label} نامعتبر است`, 400, 'VALIDATION', {
+          cause: err?.message || null,
+        });
+      }
+    };
+
+    let nextScenario = base.scenario;
+    let nextNarration = base.narration;
+    let nextStoryboard = base.storyboard;
+
+    if (section === 'scenario') {
+      if (scenario == null) {
+        throw new AppError('محتوای سناریو لازم است', 400, 'VALIDATION');
+      }
+      nextScenario = isExactManual(scenario)
+        ? preserveExactPayload(scenario, projectId, 'سناریو')
+        : normalizeOrThrow(normalizeScenarioOutput, scenario, 'سناریو');
+    } else if (section === 'narration') {
+      if (narration == null) {
+        throw new AppError('محتوای نریشن لازم است', 400, 'VALIDATION');
+      }
+      nextNarration = isExactManual(narration)
+        ? preserveExactPayload(narration, projectId, 'نریشن')
+        : normalizeOrThrow(normalizeNarrationOutput, narration, 'نریشن');
+    } else if (section === 'storyboard') {
+      if (storyboard == null) {
+        throw new AppError('محتوای استوری‌بورد لازم است', 400, 'VALIDATION');
+      }
+      nextStoryboard = isExactManual(storyboard)
+        ? preserveExactPayload(storyboard, projectId, 'استوری‌بورد')
+        : normalizeOrThrow(normalizeStoryboardOutput, storyboard, 'استوری‌بورد');
+    }
+
+    const last = await prisma.contentVersion.findFirst({
+      where: { projectId, kind: 'BUNDLE' },
+      orderBy: { versionNumber: 'desc' },
+    });
+    const versionNumber = (last?.versionNumber || 0) + 1;
+    const sectionLabel =
+      section === 'scenario'
+        ? 'سناریو'
+        : section === 'narration'
+          ? 'نریشن'
+          : 'استوری‌بورد';
+    const notes =
+      String(changeNotes || '').trim() ||
+      `ویرایش دستی ${sectionLabel} بر اساس نسخه ${base.versionNumber}`;
+
+    const baseExtras =
+      base.extras && typeof base.extras === 'object' && !Array.isArray(base.extras)
+        ? base.extras
+        : {};
+
+    const version = await prisma.$transaction(async (tx) => {
+      const created = await tx.contentVersion.create({
+        data: {
+          projectId,
+          kind: 'BUNDLE',
+          versionNumber,
+          scenario: nextScenario,
+          narration: nextNarration,
+          storyboard: nextStoryboard,
+          extras: {
+            ...baseExtras,
+            source: 'manual_edit',
+            editedSection: section,
+            baseVersionId: base.id,
+            baseVersionNumber: base.versionNumber,
+          },
+          status: 'EDITED',
+          isLocked: false,
+          publishedToClient: false,
+          createdById: auth.userId,
+          changeNotes: notes,
+        },
+      });
+
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId,
+          type: 'CONTENT_MANUAL_EDITED',
+          title: `ویرایش دستی ${sectionLabel}`,
+          body: `نسخه ${versionNumber} از ویرایش ${sectionLabel} نسخه ${base.versionNumber} ایجاد شد`,
+          actorId: auth.userId,
+        },
+      });
+
+      await rebuildProjectContext(projectId, tx);
+      return created;
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'AI_CONTENT_MANUAL_EDIT',
+      entityType: 'ContentVersion',
+      entityId: version.id,
+      after: {
+        versionNumber,
+        projectId,
+        section,
+        baseVersionId: base.id,
+        status: 'EDITED',
+      },
+      req,
     });
 
     return version;

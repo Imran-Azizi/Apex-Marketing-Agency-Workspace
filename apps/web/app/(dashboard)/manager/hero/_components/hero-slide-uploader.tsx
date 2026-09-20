@@ -18,11 +18,17 @@ export function HeroSlideUploader({
   imageKey,
   disabled,
   onChange,
+  aspectClass = "aspect-[16/9]",
+  emptyHint,
+  allowClear = true,
 }: {
   imageUrl: string | null;
   imageKey: string | null;
   disabled?: boolean;
   onChange: (next: { imageKey: string | null; imageUrl: string | null }) => void;
+  aspectClass?: string;
+  emptyHint?: string;
+  allowClear?: boolean;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -89,7 +95,7 @@ export function HeroSlideUploader({
         }}
       >
         {previewSrc ? (
-          <div className="relative aspect-[16/9]">
+          <div className={cn("relative", aspectClass)}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={previewSrc}
@@ -108,21 +114,23 @@ export function HeroSlideUploader({
                 <Upload className="h-3.5 w-3.5" />
                 تغییر تصویر
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="gap-1.5"
-                disabled={busy}
-                onClick={() => {
-                  if (localPreview) URL.revokeObjectURL(localPreview);
-                  setLocalPreview(null);
-                  onChange({ imageKey: null, imageUrl: null });
-                }}
-              >
-                <X className="h-3.5 w-3.5" />
-                حذف
-              </Button>
+              {allowClear ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="gap-1.5"
+                  disabled={busy}
+                  onClick={() => {
+                    if (localPreview) URL.revokeObjectURL(localPreview);
+                    setLocalPreview(null);
+                    onChange({ imageKey: null, imageUrl: null });
+                  }}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  حذف
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -139,8 +147,8 @@ export function HeroSlideUploader({
               تصویر را بکشید و رها کنید یا انتخاب کنید
             </span>
             <span className="text-xs text-muted-foreground">
-              JPG، PNG، WEBP — ۱۹۲۰×۱۰۸۰ (۱۶:۹) — حداکثر{" "}
-              {formatFileSize(MAX_IMAGE_BYTES)}
+              {emptyHint ||
+                `JPG، PNG، WEBP — حداکثر ${formatFileSize(MAX_IMAGE_BYTES)}`}
             </span>
           </button>
         )}

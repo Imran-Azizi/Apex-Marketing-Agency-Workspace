@@ -549,7 +549,7 @@ export function getAllowedActions(customer, auth = {}, extras = {}) {
   const canEdit = manager || perms.has('crm.edit');
   const canCreate = manager || perms.has('crm.create');
   const canDelete = manager || perms.has('crm.delete');
-  const canInvite = manager || perms.has('crm.invite');
+  const canInvite = manager;
   const canFinance = manager || perms.has('finance.create') || perms.has('crm.opportunity');
   const canViewFinance = manager || perms.has('finance.view') || perms.has('crm.view');
   const rank = stageRank(stage);

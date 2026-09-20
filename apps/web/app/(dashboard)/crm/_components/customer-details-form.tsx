@@ -293,7 +293,7 @@ export function CustomerDetailsForm({
                   </Badge>
                 )}
               </div>
-              <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 hidden max-w-xl text-[13px] leading-relaxed text-muted-foreground sm:block">
                 قیمت پروژه و شرایط تجاری را مدیریت کنید
               </p>
             </div>

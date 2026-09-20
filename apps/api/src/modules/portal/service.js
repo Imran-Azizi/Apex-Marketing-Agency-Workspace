@@ -28,6 +28,10 @@ import {
 } from "../../services/notifications.js";
 import { narrationService } from "../narration/service.js";
 import {
+  assertClientAssetImageFile,
+  isClientAssetImageKind,
+} from "../files/image-formats.js";
+import {
   syncProjectFinanceFromPayments,
   hydrateProjectsFinanceFromOpportunities,
 } from "../crm/paymentFinance.js";
@@ -119,7 +123,7 @@ export const portalService = {
       );
     }
     return {
-      message: "کد یک‌بارمصرف تولید شد. آن را وارد کنید یا از طریق واتساپ دریافت کنید.",
+      message: "کد OTP تولید شد. آن را وارد کنید یا از طریق واتساپ دریافت کنید.",
       otpDev: env.portalExposeOtp ? otp : undefined,
       expiresInMinutes: 15,
     };
@@ -477,22 +481,9 @@ export const portalService = {
         format: true,
         service: { select: { id: true, name: true } },
         contentVersions: {
-          where: {
-            OR: [
-              { publishedToClient: true },
-              {
-                publishedAt: { not: null },
-                status: {
-                  in: [
-                    "APPROVED",
-                    "REVISION_REQUESTED",
-                    "PENDING_CUSTOMER_APPROVAL",
-                    "SUPERSEDED",
-                  ],
-                },
-              },
-            ],
-          },
+          // Customer portal: only versions the manager explicitly sent.
+          // Superseded / internal drafts must never appear here.
+          where: { publishedToClient: true },
           orderBy: { versionNumber: "desc" },
         },
         files: {
@@ -553,6 +544,67 @@ export const portalService = {
       project.brief && typeof project.brief === "object" ? project.brief : {};
     const assetRefs = project.assetRefs || [];
     const snap = deliverySnapshot(evalResult);
+
+    // Heal stuck projects: watermarked already confirmed but status never left
+    // "waiting for your approval" (clean still payment-locked / payment since settled).
+    if (
+      project.status === "WAITING_CLIENT_FINAL_APPROVAL" ||
+      (project.status === "WAITING_PAYMENT" && evalResult.paymentSettled)
+    ) {
+      try {
+        const { tryAutoCompleteProject } = await import(
+          "../../services/projectCompletion.js"
+        );
+        const { isFinalPackageCustomerConfirmed } = await import(
+          "../production/finalProduct.js"
+        );
+        const finals = (project.files || []).filter(
+          (f) =>
+            f.kind === "WATERMARKED_FINAL" || f.kind === "CLEAN_FINAL",
+        );
+        if (isFinalPackageCustomerConfirmed(finals, project.status)) {
+          const auto = await tryAutoCompleteProject(prisma, project.id, {
+            notifyProgress: true,
+            customerApprovedOverride: true,
+          });
+          if (auto.completed) {
+            project.status = "COMPLETED";
+            project.customerFacingStatus = "COMPLETED";
+            project.completedAt = auto.completedAt;
+          } else if (
+            !evalResult.paymentSettled &&
+            project.status === "WAITING_CLIENT_FINAL_APPROVAL"
+          ) {
+            await prisma.project.update({
+              where: { id: project.id },
+              data: {
+                status: "WAITING_PAYMENT",
+                customerFacingStatus: "WAITING_PAYMENT",
+              },
+            });
+            project.status = "WAITING_PAYMENT";
+            project.customerFacingStatus = "WAITING_PAYMENT";
+            try {
+              const { notifyProjectProgressChange } = await import(
+                "../../services/projectProgress.js"
+              );
+              await notifyProjectProgressChange(prisma, {
+                projectId: project.id,
+                previousStatus: "WAITING_CLIENT_FINAL_APPROVAL",
+                nextStatus: "WAITING_PAYMENT",
+              });
+            } catch {
+              /* non-fatal */
+            }
+          }
+        }
+      } catch (err) {
+        console.error(
+          "[portal] final-approval status heal",
+          err?.message || err,
+        );
+      }
+    }
 
     const {
       isSentToCustomer,
@@ -675,7 +727,9 @@ export const portalService = {
       videoRevisionUsed: project.videoRevisionUsed,
       videoRevisionMax:
         project.videoRevisionMax + (project.extraVideoRevision ? 1 : 0),
-      contentVersions: project.contentVersions,
+      contentVersions: project.contentVersions.filter(
+        (v) => v.publishedToClient === true && v.status !== "SUPERSEDED",
+      ),
       watermarkedFiles: watermarkedVisible.map(mapPortalFinal),
       cleanFiles: cleanVisible.map(mapPortalFinal),
       finalVideos: allVisibleSorted.map(mapPortalFinal),
@@ -1083,7 +1137,7 @@ export const portalService = {
       isCustomerApprovedFile,
       resolveVideoStatus,
       markCustomerApprovedMeta,
-      allSentFilesCustomerApproved,
+      isFinalPackageCustomerConfirmed,
       VIDEO_TYPE_LABELS,
     } = await import("../production/finalProduct.js");
 
@@ -1231,10 +1285,11 @@ export const portalService = {
       },
     });
 
-    // Clean approval counts as package confirmation; watermarked needs all sent files.
+    // Clean approval always confirms the package. Watermarked preview approval
+    // is enough when clean is still payment-locked (same deliverable).
     const packageApproved =
       file.kind === "CLEAN_FINAL" ||
-      allSentFilesCustomerApproved(refreshedFiles, project.status);
+      isFinalPackageCustomerConfirmed(refreshedFiles, project.status);
 
     if (!packageApproved) {
       await writeAudit({
@@ -1840,6 +1895,17 @@ export const portalService = {
   ) {
     if (!storageKey || !name)
       throw new AppError("نام و مسیر فایل الزامی است", 400, "VALIDATION");
+
+    const assetKind = String(kind || "OTHER").toUpperCase();
+    if (isClientAssetImageKind(assetKind)) {
+      assertClientAssetImageFile({
+        name,
+        mimeType,
+        sizeBytes,
+        kind: assetKind,
+      });
+    }
+
     const created = await prisma.clientAsset.create({
       data: {
         crmCustomerId: auth.customerId,

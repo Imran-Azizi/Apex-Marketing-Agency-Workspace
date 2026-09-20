@@ -2,13 +2,17 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiGet, apiPatch, apiPost, apiDelete } from "@/lib/api";
 import {
   uploadFileWithProgress,
   downloadStoredFile,
   downloadMediaFile,
 } from "@/lib/upload";
 import { UPLOAD_PURPOSE } from "@/lib/media-manager";
+import {
+  NARRATION_AUDIO_ACCEPT,
+  validateNarrationAudioFile,
+} from "@/lib/narration-audio";
 import { cn, formatDate, formatCurrency } from "@/lib/utils";
 import { hasPermission } from "@/lib/rbac";
 import { useMeQuery } from "@/lib/permissions";
@@ -304,6 +308,10 @@ export function ProjectNarrationPanel({
 
   const submitMut = useMutation({
     mutationFn: async (file: File) => {
+      const validation = validateNarrationAudioFile(file);
+      if (!validation.ok) {
+        throw new Error(validation.message);
+      }
       setUploadPct(0);
       const uploaded = await uploadFileWithProgress(
         file,
@@ -330,6 +338,17 @@ export function ProjectNarrationPanel({
       setUploadPct(null);
       toast.error(e instanceof Error ? e.message : "آپلود ناموفق بود");
     },
+  });
+
+  const deleteAudioMut = useMutation({
+    mutationFn: (takeId: string) =>
+      apiDelete(`/narration/projects/${projectId}/takes/${takeId}`),
+    onSuccess: () => {
+      toast.success("فایل صوتی حذف شد. می‌توانید فایل جایگزین آپلود کنید.");
+      invalidate();
+    },
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : "حذف فایل ناموفق بود"),
   });
 
   const acceptMut = useMutation({
@@ -376,6 +395,18 @@ export function ProjectNarrationPanel({
     [
       "PENDING_NARRATION",
       "RECORDING_IN_PROGRESS",
+      "REVISION_REQUESTED",
+    ].includes(task.status);
+
+  const canDeleteAudio =
+    !!task &&
+    sentToNarrator &&
+    (isNarrator || isManager) &&
+    task.status !== "APPROVED" &&
+    [
+      "PENDING_NARRATION",
+      "RECORDING_IN_PROGRESS",
+      "NARRATION_SUBMITTED",
       "REVISION_REQUESTED",
     ].includes(task.status);
 
@@ -506,65 +537,70 @@ export function ProjectNarrationPanel({
         </div>
       ) : (
         <>
-          <section className="rounded-2xl border border-border/70 bg-card p-4 sm:p-5">
+          <section className="hidden rounded-2xl border border-border/70 bg-card p-4 sm:block sm:p-5">
             <p className="mb-3 text-xs font-medium text-muted-foreground">
               پیشرفت مرحله
             </p>
             <StatusTracker status={task.status} />
           </section>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-4 lg:col-span-1">
+          <div className="grid gap-3 sm:gap-4 lg:grid-cols-3">
+            <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-3 sm:space-y-3 sm:p-4 lg:col-span-1">
               <p className="text-sm font-semibold">جزئیات ارسال</p>
-              <div className="space-y-3 text-sm">
-                <div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-3 text-sm sm:grid-cols-1 sm:gap-y-3">
+                <div className="min-w-0">
                   <p className="text-[11px] text-muted-foreground">نریتور</p>
-                  <p className="font-medium">
+                  <p className="truncate font-medium">
                     {task.narratorTeamProfile?.displayName ||
                       task.narratorUser?.fullName ||
                       "هنوز ارسال نشده"}
                   </p>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-[11px] text-muted-foreground">
                     مهلت ارسال
                   </p>
                   <p
-                    className={cn("font-medium", overdue && "text-destructive")}
+                    className={cn(
+                      "truncate font-medium",
+                      overdue && "text-destructive",
+                    )}
                   >
                     {task.deadline ? formatDate(task.deadline) : "—"}
                   </p>
                 </div>
                 {task.assignedBy && sentToNarrator && (
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-[11px] text-muted-foreground">
                       ارسال‌کننده
                     </p>
-                    <p>{task.assignedBy.fullName}</p>
+                    <p className="truncate">{task.assignedBy.fullName}</p>
                   </div>
                 )}
                 {task.assignedAmount != null && sentToNarrator && (
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-[11px] text-muted-foreground">
                       هزینه نریشن
                     </p>
-                    <p className="font-semibold text-brand">
+                    <p className="truncate font-semibold text-brand">
                       {formatCurrency(Number(task.assignedAmount))}
                     </p>
                   </div>
                 )}
                 {isManager && (
-                  <div className="space-y-1.5 pt-1">
+                  <div className="col-span-2 space-y-1.5 border-t border-border/50 pt-3 sm:col-span-1 sm:pt-1">
                     <Label htmlFor="deadline-edit">به‌روزرسانی مهلت</Label>
-                    <div className="flex gap-2">
+                    <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
                       <Input
                         id="deadline-edit"
                         type="datetime-local"
                         value={deadline}
                         onChange={(e) => setDeadline(e.target.value)}
+                        className="min-w-0 flex-1"
                       />
                       <Button
                         variant="outline"
+                        className="w-full shrink-0 sm:w-auto"
                         disabled={!deadline || deadlineMut.isPending}
                         onClick={() => deadlineMut.mutate(deadline)}
                       >
@@ -641,7 +677,7 @@ export function ProjectNarrationPanel({
                     <input
                       ref={fileRef}
                       type="file"
-                      accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a"
+                      accept={NARRATION_AUDIO_ACCEPT}
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
@@ -653,7 +689,7 @@ export function ProjectNarrationPanel({
                       variant="brand"
                       size="sm"
                       className="gap-1.5"
-                      disabled={submitMut.isPending}
+                      disabled={submitMut.isPending || deleteAudioMut.isPending}
                       onClick={() => fileRef.current?.click()}
                     >
                       {submitMut.isPending ? (
@@ -661,7 +697,7 @@ export function ProjectNarrationPanel({
                       ) : (
                         <Upload className="h-3.5 w-3.5" />
                       )}
-                      آپلود نریشن
+                      {audioVersions.length > 0 ? "آپلود جایگزین" : "آپلود نریشن"}
                     </Button>
                   </>
                 )}
@@ -715,6 +751,18 @@ export function ProjectNarrationPanel({
               takes={audioVersions}
               currentFileId={task.audioFile?.id}
               approved={isNarrationApproved(task.status)}
+              deletingTakeId={
+                deleteAudioMut.isPending
+                  ? deleteAudioMut.variables ?? null
+                  : null
+              }
+              onDelete={
+                canDeleteAudio
+                  ? async (take) => {
+                      await deleteAudioMut.mutateAsync(take.id);
+                    }
+                  : undefined
+              }
               onDownload={async (file) => {
                 try {
                   await handleAudioDownload(file);

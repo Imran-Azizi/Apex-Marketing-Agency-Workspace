@@ -8,6 +8,7 @@ import {
   CONTENT_AGENTS,
   PROMPT_VERSION,
   getModelConfig,
+  isQualityContentAgent,
   resolveGenerationParams,
 } from './models.config.js';
 import { getAgentPrompt } from './prompts/index.js';
@@ -20,6 +21,7 @@ import { openRouterService } from './openrouter.service.js';
 import { extractJson, validateAgentOutput, normalizePipelineOutputs, synthesizeStoryboardFromInput } from './validate.js';
 import { formatAiError, createAiError } from './errors.js';
 import { mockOutput } from './mock.service.js';
+import { buildLanguageToneDirectives } from './language.js';
 import {
   capFreeMaxTokens,
   clearFreeModelCooldown,
@@ -34,8 +36,112 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+const USER_PROMPT_SAFE = 4000;
+
+function clipText(value, max = 600) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function asPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
 /**
- * Shrink project input to control tokens / cost before LLM calls.
+ * Surface the brief fields that drive project-specific creative work.
+ */
+function summarizeBrief(brief) {
+  const b = asPlainObject(brief);
+  if (!b) return null;
+  const pick = (...keys) => {
+    for (const key of keys) {
+      const v = b[key];
+      if (v == null) continue;
+      if (typeof v === 'string' && v.trim()) return v.trim();
+      if (Array.isArray(v) && v.length) {
+        return v
+          .map((item) => (typeof item === 'string' ? item : item?.label || item?.name || ''))
+          .filter(Boolean)
+          .slice(0, 12);
+      }
+      if (typeof v === 'number' || typeof v === 'boolean') return v;
+    }
+    return undefined;
+  };
+  const summary = {
+    productName: pick('productName', 'product', 'brandName', 'brand'),
+    productDescription: clipText(
+      pick('productDescription', 'description', 'about', 'summary'),
+      900,
+    ),
+    features: pick('features', 'keyFeatures', 'benefits'),
+    audience: pick('audience', 'targetAudience', 'target'),
+    goal: pick('goal', 'objective', 'marketingGoal'),
+    mainMessage: pick('mainMessage', 'message', 'keyMessage'),
+    cta: pick('cta', 'callToAction'),
+    contact: pick('contact', 'phone', 'whatsapp', 'website'),
+    allowedClaims: pick('allowedClaims', 'claims'),
+    mandatoryTexts: pick('mandatoryTexts', 'mustInclude', 'requiredTexts'),
+    brandLimits: pick('brandLimits', 'brandGuidelines', 'restrictions'),
+  };
+  // Drop empty keys
+  for (const key of Object.keys(summary)) {
+    const v = summary[key];
+    if (v == null || v === '' || (Array.isArray(v) && !v.length)) delete summary[key];
+  }
+  return Object.keys(summary).length ? summary : null;
+}
+
+function summarizeScenario(scenario) {
+  const s = asPlainObject(scenario);
+  if (!s) return null;
+  return {
+    title: s.title || null,
+    concept: clipText(s.concept, 400) || null,
+    hook: clipText(s.hook, 280) || null,
+    problem: clipText(s.problem, 280) || null,
+    solution: clipText(s.solution, 280) || null,
+    cta: clipText(s.cta, 160) || null,
+    storyFlow: clipText(s.storyFlow || s.content, 900) || null,
+    emotionalDirection: clipText(s.emotionalDirection, 160) || null,
+    marketingAngle: clipText(s.marketingAngle, 200) || null,
+    totalDurationSec: s.totalDurationSec || null,
+    sceneCount: Array.isArray(s.sceneBreakdown) ? s.sceneBreakdown.length : null,
+  };
+}
+
+function summarizeNarration(narration) {
+  const n = asPlainObject(narration);
+  if (!n) return null;
+  return {
+    tone: n.tone || null,
+    language: n.language || null,
+    estimatedSeconds: n.estimatedSeconds || n.estimated_duration || null,
+    script: clipText(n.script, 1200) || null,
+  };
+}
+
+function summarizeStoryboard(storyboard) {
+  const sb = asPlainObject(storyboard);
+  if (!sb) return null;
+  const scenes = Array.isArray(sb.scenes) ? sb.scenes : [];
+  return {
+    visualStyleGuide: clipText(sb.visualStyleGuide, 240) || null,
+    sceneCount: scenes.length,
+    scenes: scenes.slice(0, 8).map((scene, idx) => ({
+      scene_number: scene.scene_number || idx + 1,
+      title: scene.title || null,
+      duration: scene.duration || null,
+      visual: clipText(scene.visual, 180) || null,
+      action: clipText(scene.action, 140) || null,
+    })),
+  };
+}
+
+/**
+ * Shrink project input to control tokens while keeping enough brief/context
+ * for project-specific Scenario → Narration → Storyboard generation.
  */
 export function sanitizeAiInput(input = {}) {
   const previousVersions = Array.isArray(input.previousVersions)
@@ -44,15 +150,27 @@ export function sanitizeAiInput(input = {}) {
         versionNumber: v.versionNumber,
         status: v.status,
         changeNotes: v.changeNotes || null,
+        scenario: summarizeScenario(v.scenario),
+        narration: summarizeNarration(v.narration),
+        storyboard: summarizeStoryboard(v.storyboard),
       }))
     : [];
 
   const assets = Array.isArray(input.assets)
-    ? input.assets.slice(0, 20).map((a) => ({
+    ? input.assets.slice(0, 24).map((a) => ({
         source: a.source,
         kind: a.kind,
         name: a.name,
       }))
+    : [];
+
+  const clientFeedback = Array.isArray(input.clientFeedback)
+    ? input.clientFeedback.slice(0, 5).map((f) => ({
+        section: f.section || f.targetSection || f.scope || null,
+        status: f.status || null,
+        body: clipText(f.body || f.message || f.comment || f.note, 400),
+        createdAt: f.createdAt || null,
+      })).filter((f) => f.body)
     : [];
 
   const priorOutputs = input.priorOutputs
@@ -63,33 +181,76 @@ export function sanitizeAiInput(input = {}) {
       }
     : undefined;
 
+  const briefSummary = summarizeBrief(input.brief);
+  const contextSummary =
+    typeof input.contextMd === 'string'
+      ? input.contextMd.slice(0, 2800)
+      : typeof input.context === 'string'
+        ? clipText(input.context, 2800)
+        : null;
+  const languageTone = buildLanguageToneDirectives({
+    language: input.language,
+    tone: input.tone,
+  });
+
+  // Prefer compact briefSummary for tokens; keep a lean brief only when summary is thin.
+  const leanBrief = briefSummary
+    ? undefined
+    : asPlainObject(input.brief)
+      ? {
+          productName: input.brief.productName || input.brief.product || null,
+          productDescription: clipText(
+            input.brief.productDescription || input.brief.description,
+            500,
+          ),
+          audience: input.brief.audience || input.brief.targetAudience || null,
+          goal: input.brief.goal || input.brief.objective || null,
+          mainMessage: input.brief.mainMessage || input.brief.message || null,
+          cta: input.brief.cta || input.brief.callToAction || null,
+        }
+      : input.brief;
+
   return {
     projectId: input.projectId,
     code: input.code,
     title: input.title,
     status: input.status,
-    brief: input.brief,
+    brief: leanBrief,
+    briefSummary,
     durationSec: input.durationSec,
-    language: input.language,
-    tone: input.tone,
+    language: languageTone.language.code,
+    languageLabel: languageTone.language.label,
+    tone: languageTone.tone.selectedTone || null,
+    languagePolicy: languageTone.language,
+    tonePolicy: languageTone.tone,
+    languageInstruction: languageTone.languageInstruction,
+    toneInstruction: languageTone.toneInstruction,
     platforms: input.platforms,
     service: input.service,
     format: input.format,
     customer: input.customer,
     assets,
     previousVersions,
-    managerNotes: input.managerNotes || null,
-    userInstructions: input.userInstructions || null,
-    // Keep context compact
-    contextSummary:
-      typeof input.contextMd === 'string'
-        ? input.contextMd.slice(0, 4000)
-        : input.context || null,
+    clientFeedback: clientFeedback.length ? clientFeedback : undefined,
+    managerNotes: clipText(input.managerNotes, 1200) || null,
+    userInstructions: clipText(input.userInstructions, USER_PROMPT_SAFE) || null,
+    consistencyRules: input.consistencyRules || {
+      pipeline: 'SCENARIO → NARRATION → STORYBOARD',
+      requireProjectSpecific: true,
+      forbidGenericTemplates: true,
+      alignWithPriorOutputs: Boolean(priorOutputs?.scenario || priorOutputs?.narration),
+      lockLanguage: true,
+      lockTone: true,
+      writingStyle: 'simple-clear-professional',
+    },
+    contextSummary,
     priorOutputs,
+    revisionOfVersionId: input.revisionOfVersionId || null,
+    revisionOfVersionNumber: input.revisionOfVersionNumber || null,
   };
 }
 
-function parseAgentCompletion(agentType, text, projectId) {
+function parseAgentCompletion(agentType, text, projectId, context = {}) {
   const parsed = extractJson(text);
   if (!parsed || typeof parsed !== 'object' || parsed.raw) {
     const err = createAiError('پاسخ هوش مصنوعی معتبر نبود. دوباره تولید کنید.', {
@@ -99,7 +260,7 @@ function parseAgentCompletion(agentType, text, projectId) {
     throw err;
   }
   if (projectId && !parsed.projectId) parsed.projectId = projectId;
-  return validateAgentOutput(agentType, parsed, projectId);
+  return validateAgentOutput(agentType, parsed, projectId, context);
 }
 
 async function completeWithPaidProviders({
@@ -235,7 +396,8 @@ async function completeWithFreeOpenRouterModels({
 
 /**
  * Shared LLM entry used by content pipeline, portfolio copy, and sales assistant.
- * Free-only mode never calls Gemini/OpenAI/paid OpenRouter slugs.
+ * Scenario / Narration / Storyboard always use the ranked OpenRouter free catalog
+ * unless AI_CONTENT_PREFER_QUALITY=true. Other agents follow freeModelsOnly settings.
  */
 export async function completeWithModelFallback({
   agentType,
@@ -246,14 +408,34 @@ export async function completeWithModelFallback({
 }) {
   const params = resolveGenerationParams(agentType);
   const runtime = await getFreeModelRuntime();
+  const cfg = getModelConfig();
+  const contentUsesFree =
+    isQualityContentAgent(agentType) && cfg.contentPreferQuality !== true;
+  const forcePaidQuality =
+    isQualityContentAgent(agentType) &&
+    cfg.contentPreferQuality === true &&
+    listConfiguredLlmProviders().length > 0;
+
+  if (forcePaidQuality) {
+    return completeWithPaidProviders({
+      agentType,
+      system,
+      userContent,
+      modelOverride,
+      params,
+      accept,
+    });
+  }
+
   const override =
-    runtime.freeModelsOnly &&
+    (runtime.freeModelsOnly || contentUsesFree) &&
     modelOverride &&
     !String(modelOverride).endsWith(':free')
       ? undefined
       : modelOverride;
 
-  if (runtime.freeModelsOnly) {
+  // Content pipeline: free models only (professional ranking via resolveFreeModelsForTask).
+  if (contentUsesFree || runtime.freeModelsOnly) {
     return completeWithFreeOpenRouterModels({
       agentType,
       system,
@@ -320,19 +502,42 @@ export async function runAgent({
   const cfg = getModelConfig();
   const providerInfo = getActiveProviderInfo();
   const def = getAgentPrompt(agentType);
+  const safeInput = sanitizeAiInput(input);
+  const outputContext = {
+    language: safeInput.language,
+    tone: safeInput.tone,
+  };
+  const qualityHints = isQualityContentAgent(agentType)
+    ? [
+        'Produce professional, project-specific marketing content in simple clear language.',
+        'Ground every output in briefSummary / brief / customer / assets — never invent an unrelated product.',
+        'Keep Scenario → Narration → Storyboard internally consistent via priorOutputs.',
+        'Avoid generic AI filler, repetition, and complicated wording.',
+        'Return compact, complete JSON (no truncation, no markdown).',
+      ].join(' ')
+    : '';
   const system = [
     promptTemplate || def.system,
     `Prompt version: ${promptVersion}.`,
     `Always include projectId=${input?.projectId} in the JSON response.`,
     'Return valid JSON only.',
-  ].join('\n\n');
+    qualityHints,
+    safeInput.languageInstruction,
+    safeInput.toneInstruction,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
-  const safeInput = sanitizeAiInput(input);
   const started = Date.now();
 
   // Explicit mock provider
   if (cfg.provider === 'mock' || providerInfo.id === 'mock') {
-    const output = validateAgentOutput(agentType, mockOutput(agentType, input), input?.projectId);
+    const output = validateAgentOutput(
+      agentType,
+      mockOutput(agentType, input),
+      input?.projectId,
+      outputContext,
+    );
     return {
       model: 'mock-apex-v5',
       promptVersion,
@@ -351,6 +556,7 @@ export async function runAgent({
         agentType,
         mockOutput(agentType, input),
         input?.projectId,
+        outputContext,
       );
       return {
         model: 'mock-fallback',
@@ -378,12 +584,13 @@ export async function runAgent({
       system,
       userContent: safeInput,
       modelOverride: model,
-      accept: (result) => parseAgentCompletion(agentType, result.text, input?.projectId),
+      accept: (result) =>
+        parseAgentCompletion(agentType, result.text, input?.projectId, outputContext),
     });
 
     const output =
       completion.parsed ||
-      parseAgentCompletion(agentType, completion.text, input?.projectId);
+      parseAgentCompletion(agentType, completion.text, input?.projectId, outputContext);
 
     return {
       model: completion.model,
@@ -403,7 +610,12 @@ export async function runAgent({
     ) {
       try {
         const synthesized = synthesizeStoryboardFromInput(safeInput);
-        const output = validateAgentOutput('STORYBOARD', synthesized, input?.projectId);
+        const output = validateAgentOutput(
+          'STORYBOARD',
+          synthesized,
+          input?.projectId,
+          outputContext,
+        );
         console.warn(
           '[AI] storyboard recovered from scenario after',
           info.code || err.code,
@@ -426,6 +638,7 @@ export async function runAgent({
         agentType,
         mockOutput(agentType, input),
         input?.projectId,
+        outputContext,
       );
       return {
         model: 'mock-fallback',
@@ -524,6 +737,13 @@ export async function generatePipeline({
         ...(initialPriorOutputs || {}),
         ...outputs,
       },
+      consistencyRules: {
+        pipeline: 'SCENARIO → NARRATION → STORYBOARD',
+        requireProjectSpecific: true,
+        forbidGenericTemplates: true,
+        alignWithPriorOutputs: true,
+        completedSteps: Object.keys(outputs),
+      },
     };
 
     if (result.usedFallback) {
@@ -546,7 +766,10 @@ export async function generatePipeline({
     }
   }
 
-  const normalizedOutputs = normalizePipelineOutputs(outputs, input?.projectId);
+  const normalizedOutputs = normalizePipelineOutputs(outputs, input?.projectId, {
+    language: input?.language,
+    tone: input?.tone,
+  });
 
   return {
     provider,
@@ -764,57 +987,73 @@ export const aiProvider = {
         }
       }
 
-      for (let index = 0; index < promptList.length; index += 1) {
-        const rawPrompt = String(promptList[index] || '').replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim();
-        if (!rawPrompt) {
-          images.push({ index, prompt: rawPrompt, error: 'Empty image prompt', url: null });
-          continue;
-        }
-        if (index > 0) await sleep(2000);
-        const seed = Number.isFinite(seeds[index])
-          ? Math.floor(seeds[index])
-          : Math.floor(Math.random() * 1_000_000_000);
-        const encoded = encodeURIComponent(rawPrompt.slice(0, 720));
-        const params = new URLSearchParams({
-          width: String(Math.min(Math.max(width, 1280), 1920)),
-          height: String(Math.min(Math.max(height, 720), 1080)),
-          model,
-          nologo: 'true',
-          enhance: 'false',
-          private: 'true',
-          seed: String(seed),
-        });
-        const headers = {};
-        if (env.pollinationsApiKey) {
-          headers.Authorization = `Bearer ${env.pollinationsApiKey}`;
-        }
-        const endpoints = [
-          `https://image.pollinations.ai/prompt/${encoded}?${params}`,
-          `https://gen.pollinations.ai/image/${encoded}?${params}`,
-        ];
-        let result = null;
-        for (const url of endpoints) {
-          result = await fetchImageBytes(url, headers);
-          if (result?.b64) break;
-        }
-        if (result?.b64) {
-          images.push({
-            index,
-            prompt: rawPrompt,
-            url: null,
-            b64: result.b64,
-            contentType: result.contentType,
-          });
-        } else {
-          images.push({
-            index,
-            prompt: rawPrompt,
-            error: result?.error || 'Pollinations image failed',
-            url: null,
-          });
-        }
+      for (let start = 0; start < promptList.length; start += 2) {
+        if (start > 0) await sleep(200);
+        const batch = promptList.slice(start, start + 2);
+        await Promise.all(
+          batch.map(async (promptText, batchIndex) => {
+            const index = start + batchIndex;
+            const rawPrompt = String(promptText || '')
+              .replace(/[^\x20-\x7E]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            if (!rawPrompt) {
+              images.push({
+                index,
+                prompt: rawPrompt,
+                error: 'Empty image prompt',
+                url: null,
+              });
+              return;
+            }
+            const seed = Number.isFinite(seeds[index])
+              ? Math.floor(seeds[index])
+              : Math.floor(Math.random() * 1_000_000_000);
+            // Keep brand + scene subject first — Pollinations truncates encoded prompts.
+            const encoded = encodeURIComponent(rawPrompt.slice(0, 900));
+            const params = new URLSearchParams({
+              width: String(Math.min(Math.max(width, 1280), 1920)),
+              height: String(Math.min(Math.max(height, 720), 1080)),
+              model,
+              nologo: 'true',
+              enhance: 'false',
+              private: 'true',
+              seed: String(seed),
+            });
+            const headers = {};
+            if (env.pollinationsApiKey) {
+              headers.Authorization = `Bearer ${env.pollinationsApiKey}`;
+            }
+            const endpoints = [
+              `https://image.pollinations.ai/prompt/${encoded}?${params}`,
+              `https://gen.pollinations.ai/image/${encoded}?${params}`,
+            ];
+            let result = null;
+            for (const url of endpoints) {
+              result = await fetchImageBytes(url, headers);
+              if (result?.b64) break;
+            }
+            if (result?.b64) {
+              images.push({
+                index,
+                prompt: rawPrompt,
+                url: null,
+                b64: result.b64,
+                contentType: result.contentType,
+              });
+            } else {
+              images.push({
+                index,
+                prompt: rawPrompt,
+                error: result?.error || 'Pollinations image failed',
+                url: null,
+              });
+            }
+          }),
+        );
       }
 
+      images.sort((a, b) => a.index - b.index);
       return { provider: 'pollinations', model, images };
     }
 
@@ -849,11 +1088,24 @@ export const aiProvider = {
     const mode = env.aiImageProvider || 'auto';
 
     if (preferQuality) {
-      const orResult = await generateViaOpenRouter(list);
-      if (hasSuccess(orResult) && orResult.images.every((img) => img.url || img.b64 || !list[img.index])) {
-        return orResult;
-      }
-      const freeResult = await generateViaPollinations(list);
+      // Run paid + free image providers in parallel — fastest wall-clock and
+      // best fill-rate. Prefer OpenRouter bytes when both succeed.
+      const [orResult, freeResult] = await Promise.all([
+        generateViaOpenRouter(list).catch((err) => {
+          console.warn(
+            '[AI images] OpenRouter parallel attempt failed:',
+            err?.message || err,
+          );
+          return null;
+        }),
+        generateViaPollinations(list).catch((err) => {
+          console.warn(
+            '[AI images] Pollinations parallel attempt failed:',
+            err?.message || err,
+          );
+          return null;
+        }),
+      ]);
       const merged = mergeImageResults(orResult, freeResult);
       if (hasSuccess(merged)) return merged;
       if (hasSuccess(orResult)) return orResult;

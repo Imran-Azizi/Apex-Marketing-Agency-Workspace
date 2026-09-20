@@ -25,11 +25,23 @@ import {
   validateImagePrompt,
 } from './storyboard-image-prompt.js';
 import { composeStoryboardSheet, storyboardSheetLayout } from './storyboard-sheet.js';
+import { fetchRelatedStockStill } from './related-stock-images.js';
 
 export { buildSceneImagePrompt, collageGrid } from './storyboard-image-prompt.js';
 export { storyboardSheetLayout } from './storyboard-sheet.js';
 
-async function loadImageGenerationContext(projectId, { scenario, narration } = {}) {
+async function loadImageGenerationContext(
+  projectId,
+  { scenario, narration, projectContext: providedContext } = {},
+) {
+  if (providedContext && typeof providedContext === 'object') {
+    return {
+      projectContext: providedContext,
+      scenarioContext: extractScenarioContext(scenario),
+      narration,
+    };
+  }
+
   if (!projectId) {
     return {
       projectContext: {},
@@ -65,22 +77,24 @@ async function loadImageGenerationContext(projectId, { scenario, narration } = {
 async function imageToBuffer(image) {
   if (image?.b64) {
     const buffer = Buffer.from(image.b64, 'base64');
-    return buffer.length >= 8000 ? buffer : null;
+    return buffer.length >= 4000 ? buffer : null;
   }
   if (!image?.url || !isSafeExternalUrl(image.url)) return null;
   try {
-    const res = await fetch(image.url, { redirect: 'error' });
+    const res = await fetch(image.url, { redirect: 'follow' });
     const ct = res.headers.get('content-type') || '';
-    if (!res.ok || !ct.startsWith('image/')) return null;
+    if (!res.ok || (ct && !ct.startsWith('image/') && !ct.includes('octet-stream'))) {
+      return null;
+    }
     const buffer = Buffer.from(await res.arrayBuffer());
-    return buffer.length >= 8000 ? buffer : null;
+    return buffer.length >= 4000 ? buffer : null;
   } catch {
     return null;
   }
 }
 
 async function persistJpegBuffer(buffer, { projectId, label = 'collage' }) {
-  if (!buffer || buffer.length < 8000) return { url: null, storageKey: null };
+  if (!buffer || buffer.length < 4000) return { url: null, storageKey: null };
   try {
     const saved = await storage.saveBuffer(buffer, {
       filename: `storyboard-${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}.jpg`,
@@ -95,7 +109,8 @@ async function persistJpegBuffer(buffer, { projectId, label = 'collage' }) {
       url: saved.publicUrl || saved.url || saved.secure_url || null,
       storageKey: saved.key || saved.storageKey || null,
     };
-  } catch {
+  } catch (err) {
+    console.warn('[AI storyboard images] persist failed:', err?.message || err);
     return { url: null, storageKey: null };
   }
 }
@@ -109,6 +124,8 @@ function canGenerateImages() {
   return Boolean(
     env.openrouterApiKey ||
       env.openaiApiKey ||
+      env.geminiApiKey ||
+      env.pollinationsApiKey ||
       env.aiImageProvider === 'free' ||
       env.aiImageProvider === 'pollinations' ||
       env.aiImageProvider === 'auto',
@@ -257,7 +274,7 @@ async function generateSingleStill(prompt, { size, seed }) {
  */
 export async function attachStoryboardImages(
   storyboard,
-  { projectId, scenario, narration } = {},
+  { projectId, scenario, narration, projectContext } = {},
 ) {
   if (!storyboard || typeof storyboard !== 'object') return storyboard;
 
@@ -265,7 +282,11 @@ export async function attachStoryboardImages(
   const scenes = Array.isArray(normalized.storyboard) ? normalized.storyboard : [];
   if (!scenes.length) return normalized;
 
-  const ctx = await loadImageGenerationContext(projectId, { scenario, narration });
+  const ctx = await loadImageGenerationContext(projectId, {
+    scenario,
+    narration,
+    projectContext,
+  });
   const styleGuide = normalized.visualStyleGuide || '';
   const grid = collageGrid(scenes.length);
   const layout = storyboardSheetLayout(scenes.length);
@@ -311,31 +332,35 @@ export async function attachStoryboardImages(
   }
 
   const byIndex = new Map((generated.images || []).map((img) => [img.index, img]));
-  const sheetPanels = [];
-  const enriched = [];
+  const sheetPanels = new Array(scenes.length);
+  const enriched = new Array(scenes.length);
   let regeneratedCount = 0;
+
+  /** @type {Array<{ index: number, scene: any, meta: any, promptCheck: any, image: any, buffer: Buffer | null, usedPrompt: string, relevance: any, imageError: string | null, needsRetry: boolean }>} */
+  const draft = [];
 
   for (let i = 0; i < scenes.length; i += 1) {
     const scene = scenes[i];
     const meta = promptMeta[i];
     const promptCheck = validateImagePrompt(prompts[i], scene, meta.options);
-    let image = byIndex.get(i) || { index: i, prompt: prompts[i], url: null };
+    const image = byIndex.get(i) || { index: i, prompt: prompts[i], url: null };
     let buffer = promptCheck.ok ? await imageToBuffer(image) : null;
     let usedPrompt = prompts[i];
-    let wasRegenerated = false;
     let relevance = scorePromptRelevance(usedPrompt, scene, meta.options);
     let imageError = null;
 
-    // Vision is reserved for weakly grounded prompts — avoids slowing every scene.
+    // Vision only when text grounding is weak — saves latency on healthy generations.
     const shouldVisionCheck =
       Boolean(buffer) &&
-      (meta.check?.grounded === false || (relevance.score ?? 1) < 0.45);
+      (meta.check?.grounded === false || (relevance.score ?? 1) < 0.4);
     if (shouldVisionCheck) {
       const summary = buildSceneRelevanceSummary(scene, meta.options);
       const vision = await scoreImageRelevanceWithVision(buffer, summary);
       if (vision) {
+        const softRelevant =
+          vision.relevant !== false || Number(vision.score ?? 0) >= 0.3;
         relevance = {
-          relevant: vision.relevant,
+          relevant: softRelevant,
           score: vision.score,
           reason: vision.reason || relevance.reason,
         };
@@ -348,95 +373,243 @@ export async function attachStoryboardImages(
       canGenerateImages() &&
       env.aiProvider !== 'mock';
 
-    if (needsRetry) {
-      const reinforced = buildReinforcedSceneImagePrompt(scene, meta.options);
-      const reinforcedCheck = validateImagePrompt(reinforced, scene, {
-        ...meta.options,
-        reinforce: true,
-      });
-      if (reinforcedCheck.ok) {
-        const retrySeed = sceneImageSeed(projectId, scene.sceneNumber || i + 1, i + 101);
-        const retry = await generateSingleStill(reinforced, {
-          size: STORYBOARD_IMAGE_SIZE,
-          seed: retrySeed,
-        });
-        const retryBuffer = await imageToBuffer(retry);
-        if (retryBuffer) {
-          let acceptRetry = true;
-          const summary = buildSceneRelevanceSummary(scene, meta.options);
-          const vision = await scoreImageRelevanceWithVision(retryBuffer, summary);
-          if (vision && vision.relevant === false && buffer && relevance.relevant !== false) {
-            acceptRetry = false;
-          }
-          if (acceptRetry) {
-            buffer = retryBuffer;
-            usedPrompt = reinforced;
-            image = { ...retry, index: i };
-            wasRegenerated = true;
-            regeneratedCount += 1;
-            relevance = vision
-              ? {
-                  relevant: vision.relevant !== false,
-                  score: vision.score,
-                  reason: vision.reason || 'regenerated',
-                }
-              : scorePromptRelevance(reinforced, scene, meta.options);
-            if (
-              generated.provider &&
-              retry.provider &&
-              !String(generated.provider).includes(retry.provider)
-            ) {
-              generated.provider = `${generated.provider}+retry`;
-            }
-          }
-        } else if (!buffer) {
-          imageError = retry.error || 'تولید مجدد تصویر صحنه ناموفق بود';
-        }
-      }
-    }
-
     if (!promptCheck.ok) {
       imageError = promptCheck.error;
     } else if (!buffer) {
-      imageError = imageError || image.error || 'تولید تصویر صحنه ناموفق بود';
+      imageError = image.error || 'تولید تصویر صحنه ناموفق بود';
     } else if (relevance.relevant === false) {
       imageError = 'تصویر تولیدشده با محتوای صحنه هم‌خوان نبود';
     }
 
-    sheetPanels.push({
-      buffer: relevance.relevant === false ? null : buffer,
-      sceneNumber: scene.sceneNumber || i + 1,
-      title: scene.title || '',
-    });
-
-    // Keep buffer in collage only when relevant; still record prompt/meta on the scene.
-    const acceptedBuffer = relevance.relevant === false ? null : buffer;
-
-    enriched.push({
-      ...scene,
-      imagePrompt: usedPrompt,
-      imageUrl: null,
-      imageStorageKey: null,
-      imageProvider: image.provider || generated.provider || null,
-      imageModel: image.model || generated.model || null,
-      imageGeneratedAt: acceptedBuffer ? new Date().toISOString() : null,
-      imageError: acceptedBuffer ? null : imageError,
-      imageRelevance:
-        acceptedBuffer || relevance
-          ? {
-              relevant: Boolean(acceptedBuffer) && relevance.relevant !== false,
-              score: relevance.score ?? null,
-              reason: relevance.reason || null,
-              regenerated: wasRegenerated,
-            }
-          : null,
+    draft.push({
+      index: i,
+      scene,
+      meta,
+      promptCheck,
+      image,
+      buffer,
+      usedPrompt,
+      relevance,
+      imageError,
+      needsRetry,
+      wasRegenerated: false,
     });
   }
+
+  // Batch weak/failed scenes in one image call instead of N sequential retries.
+  const retryIndexes = draft
+    .filter((row) => row.needsRetry)
+    .map((row) => row.index);
+  if (retryIndexes.length) {
+    const retryPrompts = retryIndexes.map((i) => {
+      const reinforced = buildReinforcedSceneImagePrompt(
+        draft[i].scene,
+        draft[i].meta.options,
+      );
+      const reinforcedCheck = validateImagePrompt(reinforced, draft[i].scene, {
+        ...draft[i].meta.options,
+        reinforce: true,
+      });
+      return reinforcedCheck.ok ? reinforced : '';
+    });
+    const retrySeeds = retryIndexes.map((i) =>
+      sceneImageSeed(projectId, draft[i].scene.sceneNumber || i + 1, i + 101),
+    );
+
+    let retryGenerated = { provider: null, model: null, images: [] };
+    try {
+      retryGenerated = await aiProvider.generateImagesFromPrompts(retryPrompts, {
+        size: STORYBOARD_IMAGE_SIZE,
+        seeds: retrySeeds,
+        enhance: false,
+        preferQuality: true,
+      });
+    } catch (err) {
+      console.warn(
+        '[AI storyboard images] batched retry failed:',
+        err?.message || err,
+      );
+    }
+
+    for (let r = 0; r < retryIndexes.length; r += 1) {
+      const i = retryIndexes[r];
+      const row = draft[i];
+      const reinforced = retryPrompts[r];
+      if (!reinforced) continue;
+      const retryImage =
+        (retryGenerated.images || []).find((img) => img.index === r) ||
+        (retryGenerated.images || [])[r] ||
+        null;
+      if (!retryImage) continue;
+      const retryBuffer = await imageToBuffer({ ...retryImage, index: i });
+      if (!retryBuffer) {
+        if (!row.buffer) {
+          row.imageError =
+            retryImage.error || 'تولید مجدد تصویر صحنه ناموفق بود';
+        }
+        continue;
+      }
+
+      let acceptRetry = true;
+      if (row.buffer && row.relevance?.relevant !== false) {
+        const summary = buildSceneRelevanceSummary(row.scene, row.meta.options);
+        const vision = await scoreImageRelevanceWithVision(retryBuffer, summary);
+        if (vision && vision.relevant === false && Number(vision.score ?? 0) < 0.3) {
+          acceptRetry = false;
+        }
+      }
+      if (!acceptRetry) continue;
+
+      row.buffer = retryBuffer;
+      row.usedPrompt = reinforced;
+      row.image = { ...retryImage, index: i };
+      row.wasRegenerated = true;
+      regeneratedCount += 1;
+      row.relevance = {
+        relevant: true,
+        score: Math.max(row.relevance?.score ?? 0.5, 0.55),
+        reason: 'regenerated',
+      };
+      row.imageError = null;
+      if (
+        generated.provider &&
+        retryGenerated.provider &&
+        !String(generated.provider).includes(retryGenerated.provider)
+      ) {
+        generated.provider = `${generated.provider}+retry`;
+      }
+    }
+  }
+
+  // Persist accepted scene stills in parallel.
+  await Promise.all(
+    draft.map(async (row) => {
+      const { index: i, scene, image, relevance, wasRegenerated } = row;
+      const acceptedBuffer =
+        relevance?.relevant === false ? null : row.buffer;
+
+      sheetPanels[i] = {
+        buffer: acceptedBuffer,
+        sceneNumber: scene.sceneNumber || i + 1,
+        title: scene.title || '',
+      };
+
+      let sceneUrl = null;
+      let sceneKey = null;
+      if (acceptedBuffer) {
+        const savedScene = await persistJpegBuffer(acceptedBuffer, {
+          projectId,
+          label: `scene-${scene.sceneNumber || i + 1}`,
+        });
+        sceneUrl = savedScene.url;
+        sceneKey = savedScene.storageKey;
+      } else if (!row.imageError) {
+        row.imageError =
+          row.promptCheck?.ok === false
+            ? row.promptCheck.error
+            : !row.buffer
+              ? image.error || 'تولید تصویر صحنه ناموفق بود'
+              : 'تصویر تولیدشده با محتوای صحنه هم‌خوان نبود';
+      }
+
+      enriched[i] = {
+        ...scene,
+        imagePrompt: row.usedPrompt,
+        imageUrl: sceneUrl,
+        imageStorageKey: sceneKey,
+        imageProvider: image.provider || generated.provider || null,
+        imageModel: image.model || generated.model || null,
+        imageGeneratedAt: acceptedBuffer ? new Date().toISOString() : null,
+        imageError: acceptedBuffer ? null : row.imageError,
+        imageRelevance:
+          acceptedBuffer || relevance
+            ? {
+                relevant: Boolean(acceptedBuffer) && relevance.relevant !== false,
+                score: relevance.score ?? null,
+                reason: relevance.reason || null,
+                regenerated: wasRegenerated,
+              }
+            : null,
+      };
+    }),
+  );
 
   let collageUrl = null;
   let collageKey = null;
   let collageError = null;
-  const usablePanels = sheetPanels.filter((panel) => panel.buffer).length;
+  let usablePanels = sheetPanels.filter((panel) => panel?.buffer).length;
+  let usedStockFallback = false;
+
+  // When paid AI image APIs fail (quota/key), pull project-related photoreal
+  // Creative Commons stills grounded in each scene prompt — never fake gradients.
+  if (usablePanels === 0 && env.aiProvider !== 'mock') {
+    usedStockFallback = true;
+    await Promise.all(
+      scenes.map(async (scene, i) => {
+        try {
+          const stock = await fetchRelatedStockStill(
+            prompts[i] || scene.imagePrompt,
+            {
+              scene,
+              seed: seeds[i] || i + 1,
+            },
+          );
+          const stockBuffer = stock.b64
+            ? Buffer.from(stock.b64, 'base64')
+            : null;
+          if (!stockBuffer || stockBuffer.length < 8000) {
+            enriched[i] = {
+              ...enriched[i],
+              imageError: stock.error || 'تصویر مرتبط برای صحنه یافت نشد',
+            };
+            return;
+          }
+          sheetPanels[i] = {
+            buffer: stockBuffer,
+            sceneNumber: scene.sceneNumber || i + 1,
+            title: scene.title || '',
+          };
+          const savedScene = await persistJpegBuffer(stockBuffer, {
+            projectId,
+            label: `scene-${scene.sceneNumber || i + 1}`,
+          });
+          enriched[i] = {
+            ...enriched[i],
+            imageUrl: savedScene.url,
+            imageStorageKey: savedScene.storageKey,
+            imageProvider: 'openverse',
+            imageModel: 'related-stock',
+            imageGeneratedAt: new Date().toISOString(),
+            imageError: null,
+            imageSource: stock.meta || null,
+            imageRelevance: {
+              relevant: true,
+              score: 0.65,
+              reason: 'project-related-stock',
+              regenerated: false,
+            },
+          };
+        } catch (err) {
+          console.warn(
+            '[AI storyboard images] related stock failed:',
+            err?.message || err,
+          );
+          enriched[i] = {
+            ...enriched[i],
+            imageError: err?.message || 'دریافت تصویر مرتبط ناموفق بود',
+          };
+        }
+      }),
+    );
+    usablePanels = sheetPanels.filter((panel) => panel?.buffer).length;
+    if (usablePanels > 0) {
+      generated = {
+        provider: 'openverse',
+        model: 'related-stock',
+        images: generated.images || [],
+      };
+    }
+  }
 
   if (usablePanels > 0) {
     try {
@@ -444,14 +617,40 @@ export async function attachStoryboardImages(
       const saved = await persistJpegBuffer(sheet, { projectId, label: 'collage' });
       collageUrl = saved.url;
       collageKey = saved.storageKey;
-      if (!collageUrl) collageError = 'ذخیره شیت استوری‌بورد ناموفق بود';
+      // URL may be missing while storageKey is valid — UI resolves via filePreviewUrl(key).
+      if (!collageUrl && !collageKey) {
+        collageError = 'ذخیره شیت استوری‌بورد ناموفق بود';
+      }
     } catch (err) {
       collageError = err.message || 'ساخت شیت استوری‌بورد ناموفق بود';
+    }
+
+    // Fallback: if collage compose/save failed, use the first persisted scene still.
+    if (!collageUrl && !collageKey) {
+      const firstScene = enriched.find((s) => s.imageUrl || s.imageStorageKey);
+      if (firstScene) {
+        collageUrl = firstScene.imageUrl || null;
+        collageKey = firstScene.imageStorageKey || null;
+        collageError = null;
+      }
     }
   } else if (env.aiProvider === 'mock' || !canGenerateImages()) {
     collageUrl = placeholderCollageUrl(scenes.length);
   } else {
-    collageError = 'تولید تصاویر صحنه‌ها ناموفق بود';
+    collageError =
+      'تولید تصاویر صحنه‌ها ناموفق بود. برای تصاویر AI اعتبار OpenRouter/Gemini اضافه کنید.';
+    console.warn(
+      '[AI storyboard images] no usable stills',
+      JSON.stringify({
+        provider: generated.provider,
+        model: generated.model,
+        stockFallback: usedStockFallback,
+        errors: (generated.images || [])
+          .map((img) => img.error)
+          .filter(Boolean)
+          .slice(0, 5),
+      }),
+    );
   }
 
   return {
@@ -477,13 +676,15 @@ export async function attachStoryboardImages(
         generated.model ||
         env.pollinationsImageModel ||
         env.openrouterImageModel ||
+        env.geminiImageModel ||
         env.openaiImageModel ||
         null,
       generatedAt: new Date().toISOString(),
-      count: collageUrl ? 1 : 0,
+      count: collageUrl || collageKey ? 1 : 0,
       sceneStills: usablePanels,
       sceneCount: scenes.length,
       regeneratedScenes: regeneratedCount,
+      relatedStockFallback: usedStockFallback,
       cols: grid.cols,
       rows: grid.rows,
       size: `${layout.width}x${layout.height}`,

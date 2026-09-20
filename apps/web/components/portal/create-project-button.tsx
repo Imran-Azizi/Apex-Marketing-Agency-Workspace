@@ -91,11 +91,12 @@ export function CreateProjectButton({
       aria-disabled={!canCreate || busy}
     >
       {busy ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
       ) : (
-        <PlusCircle className="h-4 w-4" />
+        <PlusCircle className="h-4 w-4 shrink-0" />
       )}
-      ایجاد پروژه جدید
+      <span className="sm:hidden">پروژه جدید</span>
+      <span className="hidden sm:inline">ایجاد پروژه جدید</span>
     </Button>
   );
 }

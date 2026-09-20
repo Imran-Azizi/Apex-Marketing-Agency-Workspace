@@ -1,18 +1,33 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-const Table = React.forwardRef<
-  HTMLTableElement,
-  React.HTMLAttributes<HTMLTableElement>
->(({ className, ...props }, ref) => (
-  <div className="apex-h-scroll relative w-full overflow-x-auto overscroll-x-contain">
-    <table
-      ref={ref}
-      className={cn("w-full caption-bottom text-sm", className)}
-      {...props}
-    />
-  </div>
-));
+type TableProps = React.HTMLAttributes<HTMLTableElement> & {
+  /**
+   * When false, render the bare <table> without the built-in overflow wrapper.
+   * Use this when a parent (e.g. HorizontalScroll) owns horizontal scrolling.
+   */
+  scrollContainer?: boolean;
+};
+
+const Table = React.forwardRef<HTMLTableElement, TableProps>(
+  ({ className, scrollContainer = true, ...props }, ref) => {
+    const table = (
+      <table
+        ref={ref}
+        className={cn("w-full caption-bottom text-sm", className)}
+        {...props}
+      />
+    );
+
+    if (!scrollContainer) return table;
+
+    return (
+      <div className="apex-h-scroll relative w-full overflow-x-auto overscroll-x-contain">
+        {table}
+      </div>
+    );
+  },
+);
 Table.displayName = "Table";
 
 const TableHeader = React.forwardRef<

@@ -16,6 +16,7 @@ import {
   wasExplicitlySent,
   isCustomerApprovedFile,
   allSentFilesCustomerApproved,
+  isFinalPackageCustomerConfirmed,
   markCustomerApprovedMeta,
 } from "../../src/modules/production/finalProduct.js";
 
@@ -265,5 +266,47 @@ test("allSentFilesCustomerApproved requires every sent file to be approved", () 
       status,
     ),
     true,
+  );
+});
+
+test("isFinalPackageCustomerConfirmed accepts watermarked preview when clean still locked", () => {
+  const status = "WAITING_CLIENT_FINAL_APPROVAL";
+  const watermarkedApproved = file({
+    id: "wm",
+    kind: "WATERMARKED_FINAL",
+    meta: markCustomerApprovedMeta(
+      markSentMeta({ videoType: "WATERMARKED" }),
+    ),
+  });
+  const cleanPending = file({
+    id: "cl",
+    kind: "CLEAN_FINAL",
+    name: "clean.mp4",
+    meta: markSentMeta({ videoType: "CLEAN" }),
+  });
+
+  assert.equal(
+    allSentFilesCustomerApproved([watermarkedApproved, cleanPending], status),
+    false,
+  );
+  assert.equal(
+    isFinalPackageCustomerConfirmed(
+      [watermarkedApproved, cleanPending],
+      status,
+    ),
+    true,
+  );
+  assert.equal(
+    isFinalPackageCustomerConfirmed(
+      [
+        file({
+          id: "wm2",
+          meta: markSentMeta({ videoType: "WATERMARKED" }),
+        }),
+        cleanPending,
+      ],
+      status,
+    ),
+    false,
   );
 });

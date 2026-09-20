@@ -161,13 +161,6 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
   const paidAt = receipt.payment.paidAt || receipt.payment.createdAt;
   const paymentNo = receipt.payment.paymentNumber?.trim() || "—";
   const customerName = receipt.customer.personName?.trim() || "—";
-  const videoCount =
-    receipt.videoCount != null && Number(receipt.videoCount) > 0
-      ? String(Math.round(Number(receipt.videoCount)))
-      : receipt.invoice?.videoCount != null &&
-          Number(receipt.invoice.videoCount) > 0
-        ? String(Math.round(Number(receipt.invoice.videoCount)))
-        : "—";
   const totalAmount = receipt.finance?.totalAmount ?? 0;
   const paidAmount = receipt.payment.amount;
   const method =
@@ -190,7 +183,6 @@ function ReceiptPreview({ receipt }: { receipt: PaymentReceipt }) {
     { label: "شماره رسید", value: paymentNo, ltr: true },
     { label: "تاریخ پرداخت", value: formatReceiptDate(paidAt) },
     { label: "نام مشتری", value: customerName },
-    { label: "تعداد ویدیو", value: videoCount },
     {
       label: "مبلغ مجموعی",
       value: formatReceiptAmount(totalAmount),

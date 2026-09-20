@@ -15,7 +15,9 @@ export {
 export {
   PROMPT_VERSION,
   CONTENT_AGENTS,
+  QUALITY_CONTENT_AGENTS,
   getModelConfig,
+  isQualityContentAgent,
   resolveModelsForAgent,
   resolveGenerationParams,
 } from './models.config.js';
@@ -27,6 +29,13 @@ export {
   NARRATION_PROMPT,
   STORYBOARD_PROMPT,
 } from './prompts/index.js';
+
+export {
+  resolveLanguagePolicy,
+  resolveTonePolicy,
+  buildLanguageToneDirectives,
+  isRtlLanguage,
+} from './language.js';
 
 export {
   normalizeScenarioOutput,

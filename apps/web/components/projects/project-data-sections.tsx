@@ -154,33 +154,33 @@ export function ProjectSectionShell({
     >
       <div
         className={cn(
-          "flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3 sm:px-5",
+          "flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5 sm:px-5 sm:py-3",
           isCustomer
             ? "border-border/70"
             : "border-brand/15",
         )}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {isCustomer ? (
-            <UserRound className="h-4 w-4 text-muted-foreground" />
+            <UserRound className="h-4 w-4 shrink-0 text-muted-foreground" />
           ) : (
-            <Sparkles className="h-4 w-4 text-brand" />
+            <Sparkles className="h-4 w-4 shrink-0 text-brand" />
           )}
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="truncate text-sm font-semibold">{title}</h2>
         </div>
         {badge && (
           isCustomer ? (
-            <Badge variant="secondary" className="font-normal">
+            <Badge variant="secondary" className="shrink-0 font-normal">
               {badge}
             </Badge>
           ) : (
-            <Badge className="bg-brand/15 font-normal text-brand hover:bg-brand/15">
+            <Badge className="shrink-0 bg-brand/15 font-normal text-brand hover:bg-brand/15">
               {badge}
             </Badge>
           )
         )}
       </div>
-      <div className="space-y-4 p-4 sm:p-5">{children}</div>
+      <div className="space-y-3 p-3 sm:space-y-4 sm:p-5">{children}</div>
     </section>
   );
 }

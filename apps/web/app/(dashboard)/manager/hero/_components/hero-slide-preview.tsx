@@ -1,7 +1,11 @@
 "use client";
 
 import { HeroSlideView } from "@/components/public/hero-slide";
-import { heroDurationLabel, type HeroSlide } from "@/lib/hero";
+import {
+  HERO_STAGE_CLASSNAME,
+  heroDurationLabel,
+  type HeroSlide,
+} from "@/lib/hero";
 import {
   Dialog,
   DialogContent,
@@ -9,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 export function HeroSlidePreview({
   slide,
@@ -32,7 +37,12 @@ export function HeroSlidePreview({
           </DialogDescription>
         </DialogHeader>
         {slide ? (
-          <div className="relative aspect-[16/9] min-h-[18rem] w-full overflow-hidden bg-background">
+          <div
+            className={cn(
+              HERO_STAGE_CLASSNAME,
+              "!h-[min(70svh,28rem)] !min-h-[18rem] !max-h-[32rem]",
+            )}
+          >
             <HeroSlideView
               slide={slide}
               active

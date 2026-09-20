@@ -165,6 +165,33 @@ export function allSentFilesCustomerApproved(files, projectStatus) {
   return sent.every((f) => isCustomerApprovedFile(f));
 }
 
+/**
+ * Customer confirmed the deliverable they can review (watermarked preview).
+ * Payment-locked clean copies must not block leaving "waiting for your approval"
+ * or auto-complete after settlement — clean is the same file unlocked by payment.
+ */
+export function isWatermarkedPreviewCustomerApproved(files, projectStatus) {
+  const sent = sentToCustomerFiles(files, projectStatus);
+  if (!sent.length) return false;
+  const watermarked = sent.filter((f) => f.kind === 'WATERMARKED_FINAL');
+  if (watermarked.length > 0) {
+    return watermarked.every((f) => isCustomerApprovedFile(f));
+  }
+  // Only clean was sent — require those approvals.
+  return sent.every((f) => isCustomerApprovedFile(f));
+}
+
+/**
+ * Package gate for advancing project status / auto-complete.
+ * Clean approval always counts; otherwise watermarked preview approval is enough.
+ */
+export function isFinalPackageCustomerConfirmed(files, projectStatus) {
+  return (
+    allSentFilesCustomerApproved(files, projectStatus) ||
+    isWatermarkedPreviewCustomerApproved(files, projectStatus)
+  );
+}
+
 function portalSortTimestamp(file) {
   const meta = asMeta(file.meta);
   const raw = meta.sentAt || file.createdAt;
@@ -330,11 +357,14 @@ export function markCustomerApprovedMeta(meta, approvedAt = new Date()) {
 
 /**
  * Mark final videos as approved by the customer (manager panel status).
- * Always upgrades watermarked cards; upgrades clean only when already sent.
+ * By default only upgrades watermarked (and already-approved clean).
+ * Pass includeClean: true when the project is fully completed so clean
+ * cards also show customer confirmation — never while still payment-locked.
  * @returns {Promise<number>} number of files updated
  */
 export async function markSentFinalsApprovedByCustomer(db, projectId, {
   approvedAt = new Date(),
+  includeClean = false,
 } = {}) {
   const files = await db.projectFile.findMany({
     where: {
@@ -348,17 +378,21 @@ export async function markSentFinalsApprovedByCustomer(db, projectId, {
   for (const file of files) {
     const meta = asMeta(file.meta);
     const isWatermarked = file.kind === 'WATERMARKED_FINAL';
-    const cleanWasSent =
-      file.kind === 'CLEAN_FINAL' &&
-      (meta.sentToCustomer === true ||
-        meta.status === 'SENT_TO_CUSTOMER' ||
-        meta.status === 'VIEWED_BY_CUSTOMER' ||
-        meta.status === 'APPROVED_BY_CUSTOMER');
+    const isClean = file.kind === 'CLEAN_FINAL';
 
     // Newly uploaded files are stored with sentToCustomer: false and must
     // stay pending until a manager explicitly releases them.
     if (meta.sentToCustomer === false) continue;
-    if (!isWatermarked && !cleanWasSent) continue;
+    if (isClean && !includeClean) continue;
+    if (isClean) {
+      const cleanWasSent =
+        meta.sentToCustomer === true ||
+        meta.status === 'SENT_TO_CUSTOMER' ||
+        meta.status === 'VIEWED_BY_CUSTOMER' ||
+        meta.status === 'APPROVED_BY_CUSTOMER';
+      if (!cleanWasSent) continue;
+    }
+    if (!isWatermarked && !isClean) continue;
 
     const nextMeta = markCustomerApprovedMeta(file.meta, approvedAt);
     // Force Prisma to persist Json changes even when object shape looks similar.

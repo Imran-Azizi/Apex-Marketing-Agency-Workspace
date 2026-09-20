@@ -19,7 +19,11 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { AuthShell } from "@/components/auth/auth-shell";
-import { whatsappFieldSchema } from "@/lib/phone";
+import { whatsappFieldSchema, toPhoneInputValue } from "@/lib/phone";
+import {
+  PASSWORD_POLICY_HINT,
+  strongPasswordSchema,
+} from "@/lib/passwords";
 import { AuthWhatsAppInput } from "@/components/auth/auth-whatsapp-input";
 import {
   AuthFormError,
@@ -45,7 +49,7 @@ interface OtpResponse {
 const registerSchema = z
   .object({
     whatsapp: whatsappFieldSchema,
-    password: z.string().min(8, "رمز عبور حداقل ۸ کاراکتر باشد"),
+    password: strongPasswordSchema(),
     confirmPassword: z.string().min(1, "تکرار رمز عبور الزامی است"),
     otp: z.string().length(6, "کد باید ۶ رقم باشد"),
   })
@@ -128,9 +132,14 @@ export default function PortalRegisterPage({
   });
 
   useEffect(() => {
-    if (invite?.whatsappNumber) {
-      setValue("whatsapp", invite.whatsappNumber);
-    }
+    if (!invite?.whatsappNumber) return;
+    // Invite API returns digits-only E.164 (no '+'). Sync form state to the same
+    // E.164 value the phone input displays so validation/submit see a valid number.
+    const e164 = toPhoneInputValue(invite.whatsappNumber);
+    setValue("whatsapp", e164 || invite.whatsappNumber, {
+      shouldValidate: false,
+      shouldDirty: false,
+    });
   }, [invite?.whatsappNumber, setValue]);
 
   const awaitingInitialOtp = !!invite && !otpReady && !requestOtp.isError;
@@ -208,21 +217,21 @@ export default function PortalRegisterPage({
       <div className="space-y-3.5">
         {!otpReady ? (
           <div className="space-y-2.5">
-            <AuthFormError message="صدور کد یک‌بارمصرف ناموفق بود. دوباره تلاش کنید." />
+            <AuthFormError message="صدور کد OTP ناموفق بود. دوباره تلاش کنید." />
             <AuthSubmitButton
               type="button"
               loading={requestOtp.isPending}
               loadingText="در حال ارسال..."
               onClick={() => requestOtp.mutate({})}
             >
-              درخواست مجدد کد یک‌بارمصرف
+              درخواست مجدد کد OTP
             </AuthSubmitButton>
           </div>
         ) : (
           <>
             {devOtp ? (
               <p className="rounded-xl border border-amber-200/70 bg-amber-50/90 px-3 py-2 text-[13px] text-amber-950 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
-                کد آزمایشی:{" "}
+                کد OTP:{" "}
                 <span dir="ltr" className="font-mono font-semibold tracking-wider">
                   {devOtp}
                 </span>
@@ -260,7 +269,7 @@ export default function PortalRegisterPage({
               />
               <AuthInput
                 id="otp"
-                label="کد یک‌بارمصرف"
+                label="کد OTP را وارد کنید"
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 dir="ltr"
@@ -280,7 +289,7 @@ export default function PortalRegisterPage({
                 required
                 disabled={register.isPending}
                 error={errors.password?.message}
-                hint="حداقل ۸ کاراکتر"
+                hint={PASSWORD_POLICY_HINT}
                 {...registerField("password")}
               />
               <AuthPasswordField
@@ -314,7 +323,7 @@ export default function PortalRegisterPage({
               loadingText="در حال ارسال..."
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-              ارسال مجدد کد یک‌بارمصرف
+              ارسال مجدد کد OTP
             </Button>
           </>
         )}

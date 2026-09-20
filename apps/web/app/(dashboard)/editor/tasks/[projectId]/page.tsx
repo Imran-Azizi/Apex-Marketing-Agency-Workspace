@@ -56,12 +56,12 @@ export default function EditorTaskPage({
   }
 
   return (
-    <div className="min-w-0 space-y-4 py-2 sm:py-4" dir="rtl">
+    <div className="min-w-0 space-y-3 py-1 sm:space-y-4 sm:py-2" dir="rtl">
       <nav aria-label="بازگشت">
         <Button
           variant="ghost"
           size="sm"
-          className="gap-1.5 text-muted-foreground hover:text-foreground"
+          className="-ms-2 h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
           asChild
         >
           <Link href="/editor/projects">

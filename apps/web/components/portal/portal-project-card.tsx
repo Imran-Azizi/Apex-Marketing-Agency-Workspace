@@ -91,61 +91,61 @@ export function PortalProjectCard({
   return (
     <Card
       dir="rtl"
-      className="flex h-full flex-col overflow-hidden rounded-xl border text-start shadow-sm transition-colors hover:border-brand/30"
+      className="overflow-hidden rounded-2xl border border-border/70 text-start shadow-sm transition-colors hover:border-brand/35"
     >
-      <div className="flex items-start gap-3 p-3.5 pb-3">
-        <Thumb thumb={thumb} title={project.title} size="sm" />
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0 space-y-0.5">
-              <h3 className="line-clamp-2 text-sm font-semibold leading-snug">
-                {project.title}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                <bdi dir="ltr">{project.code}</bdi>
-              </p>
+      <Link
+        href={`/portal/projects/${project.id}`}
+        className="block p-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      >
+        <div className="flex items-start gap-3">
+          <Thumb thumb={thumb} title={project.title} size="sm" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="line-clamp-2 text-sm font-semibold leading-6">
+                  {project.title}
+                </h3>
+                <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
+                  <bdi dir="ltr">{project.code}</bdi>
+                </p>
+              </div>
+              <PortalStatusBadge
+                status={project.status}
+                className="h-5 shrink-0 px-1.5 text-[10px]"
+              />
             </div>
-            <PortalStatusBadge
+
+            <ProjectProgressBar
+              progress={project.progress}
               status={project.status}
-              className="h-5 shrink-0 px-1.5 text-[10px]"
+              variant="compact"
+              showTitle={false}
             />
+
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+              <span>{formatDate(project.createdAt)}</span>
+              <span className="text-border">·</span>
+              <span>{projectPaymentLabel(project.status)}</span>
+              {project.budget != null ? (
+                <>
+                  <span className="text-border">·</span>
+                  <bdi dir="ltr" className="font-medium text-foreground">
+                    {formatCurrency(project.budget)}
+                  </bdi>
+                </>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
+      </Link>
 
-      <div className="space-y-3 px-3.5 pb-3">
-        <ProjectProgressBar
-          progress={project.progress}
-          status={project.status}
-          variant="compact"
-          showTitle={false}
-        />
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <MetaCell label="ایجاد" value={formatDate(project.createdAt)} />
-          <MetaCell label="بروزرسانی" value={formatDate(project.updatedAt)} />
-          <MetaCell
-            label="پرداخت"
-            value={projectPaymentLabel(project.status)}
-          />
-          {project.deadlineAt && (
-            <MetaCell
-              label="مهلت"
-              value={formatDate(project.deadlineAt)}
-            />
-          )}
-          {project.budget != null && (
-            <MetaCell
-              label="بودجه"
-              value={formatCurrency(project.budget)}
-              ltr
-              className="col-span-2"
-            />
-          )}
-        </div>
-      </div>
-
-      <div className="mt-auto border-t bg-muted/20 p-2.5">
-        <Button asChild variant="brand" size="sm" className="h-8 w-full gap-1.5">
+      <div className="border-t border-border/60 px-3 py-2">
+        <Button
+          asChild
+          variant="ghost"
+          size="sm"
+          className="h-8 w-full gap-1.5 text-brand hover:bg-brand/5 hover:text-brand"
+        >
           <Link href={`/portal/projects/${project.id}`}>
             <Eye className="h-3.5 w-3.5" />
             مشاهده جزئیات
@@ -169,7 +169,7 @@ function Thumb({
     <div
       className={cn(
         "relative shrink-0 overflow-hidden rounded-lg border bg-muted",
-        size === "sm" ? "h-12 w-12" : "h-14 w-14",
+        size === "sm" ? "h-11 w-11" : "h-14 w-14",
       )}
     >
       {thumb ? (
@@ -177,30 +177,9 @@ function Thumb({
         <img src={thumb} alt={title} className="h-full w-full object-cover" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-          <FolderKanban className={size === "sm" ? "h-5 w-5" : "h-6 w-6"} />
+          <FolderKanban className={size === "sm" ? "h-4 w-4" : "h-6 w-6"} />
         </div>
       )}
-    </div>
-  );
-}
-
-function MetaCell({
-  label,
-  value,
-  ltr,
-  className,
-}: {
-  label: string;
-  value: string;
-  ltr?: boolean;
-  className?: string;
-}) {
-  return (
-    <div className={cn("rounded-lg bg-muted/40 px-2.5 py-1.5", className)}>
-      <p className="text-[10px] text-muted-foreground">{label}</p>
-      <p className="mt-0.5 font-medium text-foreground">
-        {ltr ? <bdi dir="ltr">{value}</bdi> : value}
-      </p>
     </div>
   );
 }

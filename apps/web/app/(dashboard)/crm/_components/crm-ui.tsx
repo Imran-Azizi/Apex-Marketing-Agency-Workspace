@@ -7,12 +7,15 @@ export function CrmSectionHeader({
   icon: Icon,
   title,
   description,
+  descriptionClassName,
   action,
   className,
 }: {
   icon?: LucideIcon;
   title: string;
   description?: string;
+  /** Extra classes for the description (e.g. hide on mobile: `hidden sm:block`). */
+  descriptionClassName?: string;
   action?: React.ReactNode;
   className?: string;
 }) {
@@ -35,7 +38,12 @@ export function CrmSectionHeader({
             {title}
           </h3>
           {description && (
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground sm:text-sm">
+            <p
+              className={cn(
+                "mt-1 text-xs leading-relaxed text-muted-foreground sm:text-sm",
+                descriptionClassName,
+              )}
+            >
               {description}
             </p>
           )}

@@ -39,6 +39,17 @@ const manualVersionSchema = z
   })
   .passthrough();
 
+const editVersionSchema = z
+  .object({
+    baseVersionId: z.string().min(1).max(64),
+    section: z.enum(['scenario', 'narration', 'storyboard']),
+    changeNotes: z.string().trim().max(4000).optional(),
+    scenario: z.unknown().optional(),
+    narration: z.unknown().optional(),
+    storyboard: z.unknown().optional(),
+  })
+  .passthrough();
+
 router.get('/workflows/:id', requirePermission('content.view'), async (req, res, next) => {
   try {
     const wf = await aiService.getWorkflow(req.params.id);
@@ -189,6 +200,29 @@ router.post(
       created(
         res,
         await aiService.createManualVersion(
+          req.params.projectId,
+          req.body || {},
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/:projectId/versions/edit',
+  requireCsrf,
+  requirePermission('content.edit'),
+  requireProjectParam,
+  validate(editVersionSchema),
+  async (req, res, next) => {
+    try {
+      created(
+        res,
+        await aiService.createEditedVersion(
           req.params.projectId,
           req.body || {},
           req.auth,

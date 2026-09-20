@@ -133,7 +133,7 @@ export function PortalInviteSection({
             </div>
             <div className="text-start">
               <h4 className="text-lg font-bold">دعوت پورتال مشتری</h4>
-              <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 hidden max-w-xl text-sm leading-relaxed text-muted-foreground sm:block">
                 دسترسی امن مشتری برای ثبت سفارش، پیگیری پروژه و مشاهده وضعیت
                 پرداخت‌ها
               </p>
@@ -246,11 +246,16 @@ export function PortalInviteSection({
               </div>
             ) : null}
 
-            {accountCreated && portalCredentials ? (
+            {accountCreated &&
+            portalCredentials?.canRevealPassword ? (
               <CustomerPortalCredentialsFields
                 customerId={customerId}
                 credentials={portalCredentials}
               />
+            ) : accountCreated ? (
+              <p className="rounded-xl border border-dashed border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                حساب پورتال مشتری ایجاد شده است.
+              </p>
             ) : (
               <p className="rounded-xl border border-dashed border-border/70 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
                 حساب پورتال مشتری هنوز ایجاد نشده است. پس از ثبت‌نام با لینک دعوت،

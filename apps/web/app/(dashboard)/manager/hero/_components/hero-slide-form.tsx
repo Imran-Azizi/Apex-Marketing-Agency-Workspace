@@ -44,6 +44,8 @@ type FormState = {
   isPublished: boolean;
   imageKey: string | null;
   imageUrl: string | null;
+  mobileImageKey: string | null;
+  mobileImageUrl: string | null;
   buttonEnabled: boolean;
   buttonText: string;
   buttonDestination: HeroButtonDestinationId | "";
@@ -59,6 +61,8 @@ function emptyForm(): FormState {
     isPublished: true,
     imageKey: null,
     imageUrl: null,
+    mobileImageKey: null,
+    mobileImageUrl: null,
     buttonEnabled: false,
     buttonText: "",
     buttonDestination: "portfolio",
@@ -79,6 +83,8 @@ function fromSlide(slide: HeroSlide): FormState {
     isPublished: slide.isPublished ?? true,
     imageKey: slide.imageKey || null,
     imageUrl: slide.imageUrl || null,
+    mobileImageKey: slide.mobileImageKey || null,
+    mobileImageUrl: slide.mobileImageUrl || null,
     buttonEnabled: slide.buttonEnabled === true,
     buttonText: slide.buttonText || "",
     buttonDestination: destination || "portfolio",
@@ -110,7 +116,7 @@ export function HeroSlideForm({
       await ensureCsrf();
       const title = form.title.trim();
       if (title.length < 2) throw new Error("عنوان اسلاید الزامی است");
-      if (!form.imageKey) throw new Error("تصویر اسلاید الزامی است");
+      if (!form.imageKey) throw new Error("تصویر دسکتاپ اسلاید الزامی است");
       if (form.buttonEnabled) {
         if (!form.buttonText.trim()) {
           throw new Error("متن دکمه الزامی است");
@@ -129,6 +135,7 @@ export function HeroSlideForm({
         title,
         description: form.description.trim() || null,
         imageKey: form.imageKey,
+        mobileImageKey: form.mobileImageKey,
         durationSeconds: normalizeHeroDurationSeconds(
           Number(form.durationSeconds),
         ),
@@ -170,25 +177,58 @@ export function HeroSlideForm({
             {editing ? "ویرایش اسلاید" : "افزودن اسلاید"}
           </DialogTitle>
           <DialogDescription className="leading-6">
-            تصویر، متن و دکمهٔ اسلاید را تنظیم کنید. فقط اسلایدهای فعال در وب‌سایت
-            عمومی نمایش داده می‌شوند.
+            تیتر قوی، ارزش واضح و دکمه اقدام بنویسید. عنوان باید در یک نگاه
+            بگوید چرا مشتری باید اقدام کند؛ فقط اسلایدهای فعال در وب‌سایت عمومی
+            نمایش داده می‌شوند.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
           <div className="space-y-2">
-            <Label>تصویر اسلاید</Label>
+            <Label>تصویر دسکتاپ / تبلت بزرگ</Label>
             <p className="text-xs leading-5 text-muted-foreground">
-              اندازه پیشنهادی:{" "}
+              اندازه استاندارد:{" "}
               <span className="font-medium text-foreground">۱۹۲۰×۱۰۸۰</span>{" "}
-              پیکسل (نسبت ۱۶:۹) برای بهترین نمایش در همه دستگاه‌ها.
+              پیکسل (۱۶:۹). برای مانیتورهای رتینا{" "}
+              <span className="font-medium text-foreground">۲۵۶۰×۱۴۴۰</span>{" "}
+              توصیه می‌شود. این تصویر روی صفحه‌های بزرگ نمایش داده می‌شود.
             </p>
             <HeroSlideUploader
               imageKey={form.imageKey}
               imageUrl={form.imageUrl}
+              aspectClass="aspect-[16/9]"
+              allowClear={false}
+              emptyHint="JPG، PNG، WEBP — ۱۹۲۰×۱۰۸۰ (۱۶:۹) — حداکثر ۸ مگابایت"
               disabled={saveMut.isPending}
               onChange={({ imageKey, imageUrl }) =>
                 setForm((p) => ({ ...p, imageKey, imageUrl }))
+              }
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>تصویر موبایل (پیشنهادی)</Label>
+            <p className="text-xs leading-5 text-muted-foreground">
+              اندازه پیشنهادی:{" "}
+              <span className="font-medium text-foreground">۱۰۸۰×۱۴۴۰</span>{" "}
+              پیکسل (۳:۴) یا{" "}
+              <span className="font-medium text-foreground">۱۰۸۰×۱۳۵۰</span>{" "}
+              (۴:۵). سوژه و فضای متن را برای گوشی طراحی کنید. اگر خالی بماند،
+              همان تصویر دسکتاپ استفاده می‌شود.
+            </p>
+            <HeroSlideUploader
+              imageKey={form.mobileImageKey}
+              imageUrl={form.mobileImageUrl}
+              aspectClass="aspect-[3/4] max-w-[14rem] mx-auto sm:mx-0"
+              allowClear
+              emptyHint="JPG، PNG، WEBP — ۱۰۸۰×۱۴۴۰ (۳:۴) — اختیاری"
+              disabled={saveMut.isPending}
+              onChange={({ imageKey, imageUrl }) =>
+                setForm((p) => ({
+                  ...p,
+                  mobileImageKey: imageKey,
+                  mobileImageUrl: imageUrl,
+                }))
               }
             />
           </div>
@@ -199,10 +239,14 @@ export function HeroSlideForm({
               id="hero-title"
               value={form.title}
               onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-              placeholder="مثال: تبلیغات ویدیویی حرفه‌ای برای برندهای متمایز"
+              placeholder="مثال: رشد برند شما با راهکارهای دیجیتال حرفه‌ای"
               disabled={saveMut.isPending}
               maxLength={160}
             />
+            <p className="text-xs leading-5 text-muted-foreground">
+              تیتر کوتاه و قدرتمند (ترجیحاً کمتر از ۵۰ نویسه) تا روی موبایل خوانا
+              بماند.
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -214,10 +258,14 @@ export function HeroSlideForm({
               onChange={(e) =>
                 setForm((p) => ({ ...p, description: e.target.value }))
               }
-              placeholder="توضیح کوتاه و حرفه‌ای…"
+              placeholder="مثال: ما برای کسب‌وکار شما طراحی، بازاریابی و راهکارهای دیجیتال مدرن ارائه می‌کنیم."
               disabled={saveMut.isPending}
               maxLength={600}
             />
+            <p className="text-xs leading-5 text-muted-foreground">
+              یک جمله ارزشمند برای مشتری کافی است؛ فایده را بگویید، نه فقط خدمت
+              را.
+            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -291,7 +339,7 @@ export function HeroSlideForm({
                     onChange={(e) =>
                       setForm((p) => ({ ...p, buttonText: e.target.value }))
                     }
-                    placeholder="مثال: مشاهده نمونه‌کارها"
+                    placeholder="مثال: رزرو مشاوره رایگان"
                     disabled={saveMut.isPending}
                     maxLength={80}
                   />

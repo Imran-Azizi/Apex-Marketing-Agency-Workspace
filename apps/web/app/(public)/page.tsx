@@ -10,7 +10,11 @@ import {
   fetchPublicJson,
   PUBLIC_REVALIDATE_SECONDS,
 } from "@/lib/public-api";
-import { HERO_STAGE_CLASSNAME, type HeroSlide } from "@/lib/hero";
+import {
+  HERO_STAGE_CLASSNAME,
+  heroLcpPreload,
+  type HeroSlide,
+} from "@/lib/hero";
 import type { PublicService } from "@/lib/services";
 import type { ShowcaseCustomer } from "@/lib/customers";
 import type { PublicContactInfo } from "@/lib/contact";
@@ -36,11 +40,12 @@ function HeroFallback() {
   return (
     <section
       id="home"
-      className="relative isolate scroll-mt-20 overflow-hidden bg-background"
+      className="relative isolate scroll-mt-[4.25rem] overflow-hidden bg-background"
       aria-labelledby="hero-heading"
     >
       <div className={HERO_STAGE_CLASSNAME}>
-        <div className="absolute inset-0 bg-muted/40" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[hsl(220_18%_12%)] via-[hsl(220_16%_9%)] to-[hsl(220_20%_7%)]" />
+        <div className="hero-slideshow-shimmer absolute inset-0" />
       </div>
       <span id="hero-heading" className="sr-only">
         در حال بارگذاری
@@ -58,13 +63,16 @@ function SectionCardsFallback({
 }) {
   return (
     <section id={id} className="scroll-mt-20 border-t border-border/50">
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
-        <h2 className="mb-10 text-center text-2xl font-bold tracking-tight">
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
+        <h2 className="mb-7 text-center text-xl font-bold tracking-tight sm:mb-10 sm:text-2xl">
           {title}
         </h2>
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="aspect-video rounded-2xl" />
+            <Skeleton
+              key={i}
+              className="aspect-[16/10] rounded-2xl sm:rounded-3xl"
+            />
           ))}
         </div>
       </div>
@@ -78,7 +86,39 @@ async function HeroBlock() {
     PUBLIC_REVALIDATE_SECONDS,
     ["public-hero"],
   );
-  return <PublicHero initialSlides={hero} />;
+  const first = hero?.[0];
+  const mobileHref = first
+    ? heroLcpPreload(first, "mobile")?.href
+    : null;
+  const desktopHref = first
+    ? heroLcpPreload(first, "desktop")?.href
+    : null;
+
+  // Media-matched preloads: browser downloads only the matching viewport URL,
+  // and it must match the client paint URL exactly (HTTP cache hit).
+  return (
+    <>
+      {mobileHref ? (
+        <link
+          rel="preload"
+          as="image"
+          href={mobileHref}
+          media="(max-width: 1023px)"
+          fetchPriority="high"
+        />
+      ) : null}
+      {desktopHref ? (
+        <link
+          rel="preload"
+          as="image"
+          href={desktopHref}
+          media="(min-width: 1024px)"
+          fetchPriority="high"
+        />
+      ) : null}
+      <PublicHero initialSlides={hero} />
+    </>
+  );
 }
 
 async function AboutBlock() {

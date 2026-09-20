@@ -9,7 +9,7 @@ export const STORYBOARD_IMAGE_SIZE = '1920x1080';
 export const STORYBOARD_COLLAGE_SIZE = '1920x1080';
 
 const QUALITY_SUFFIX =
-  'Premium commercial cinematography still, 16:9 widescreen, shot on 35mm cinema camera, ARRI Alexa look, sharp focus, high detail, well-lit and clearly readable, not underexposed, not muddy, rich texture, cinematic color grade, photoreal, professional lighting, unique to this scene, no illustration, no sci-fi, no anime, no fashion portrait, no watermark, no unreadable text.';
+  'Premium commercial advertising cinematography still, 16:9 widescreen, sharp focus, professional three-point lighting, cinematic color grade, photoreal product-or-service storytelling, unique to this exact scene, no illustration, no anime, no fashion portrait, no watermark, no unreadable text, no collage.';
 
 const COLLAGE_QUALITY_SUFFIX =
   'Photoreal commercial frames inside a professional cinematic storyboard sheet, matching color grade, lens language, wardrobe, and lighting across every panel, clean equal gutters, dark slate mount, no messy photo dump, no overlapping panels, no watermark, no unreadable in-world text.';
@@ -53,6 +53,10 @@ const FA_EN_HINTS = [
   [/شهر|خیابان|محله/g, 'city street neighborhood'],
   [/(?:^|[^\u0600-\u06FF])شب(?:[^\u0600-\u06FF]|$)|تاریک|نورپردازی|شبانه/g, 'night lighting atmosphere'],
   [/روز|آفتاب|صبح|نور طبیعی/g, 'daytime sunlight'],
+  [/مبل|مبلمان|کاناپه|sofa|couch|furniture/gi, 'furniture sofa living room'],
+  [/راحتی|لوکس|لوکسی|luxury|comfort/gi, 'luxury comfort'],
+  [/اتاق نشیمن|سالن|پذیرایی|living room/gi, 'living room interior'],
+  [/خانه|منزل|home|house/gi, 'home interior'],
 ];
 
 /** Generic portrait / unrelated traps that must not dominate commercial scenes. */
@@ -106,6 +110,9 @@ function expandConcreteSubject(hints, blob, brand = {}) {
   }
   if (/energy drink|beverage|drink can|product can/.test(h)) {
     return `hero product shot of ${product || 'the branded energy drink'} in a premium advertising setting that matches this scene`;
+  }
+  if (/furniture|sofa|couch|living room/.test(h)) {
+    return `premium furniture / sofa product in a stylish living room for ${product || 'the furniture brand'}, matching THIS scene exactly, photoreal home interior commercial still`;
   }
   if (/factory|industrial plant/.test(h)) {
     return 'a clean industrial factory floor with real equipment and workers, premium corporate film still';
@@ -634,10 +641,27 @@ function resolveSceneSubject(scene, { brand, scenario, narrationContext, beat, l
   const hints = persianHints(blob);
   const domainHint = expandConcreteSubject(hints, blob, brand);
 
-  // Prefer exact scene description (LLM English prompt or localized visual) over templates.
+  // Prefer scene description grounded in brand/product — never let a bare LLM
+  // imagePrompt replace the advertised product with a generic cinematic still.
+  const brandLead = [toAscii(brand.productName), toAscii(brand.service), toAscii(brand.projectTitle)]
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' — ');
+
   if (llmEn && llmEn.length >= 40 && !GENERIC_TRAP_RE.test(llmEn)) {
+    const brandTokens = brandLead
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 3)
+      .slice(0, 3);
+    const llmLower = llmEn.toLowerCase();
+    const missingBrand =
+      brandTokens.length > 0 &&
+      !brandTokens.some((t) => llmLower.includes(t.toLowerCase()));
+    const groundedLlm =
+      brandLead && missingBrand ? `${brandLead}: ${llmEn}` : llmEn;
     return {
-      subject: llmEn,
+      subject: groundedLlm,
       visualEn,
       actionEn,
       environmentEn,
@@ -648,8 +672,9 @@ function resolveSceneSubject(scene, { brand, scenario, narrationContext, beat, l
   }
 
   if (visualEn && visualEn.length >= 12) {
+    const withBrand = brandLead ? `${brandLead}: ${visualEn}` : visualEn;
     return {
-      subject: domainHint ? `${visualEn} (${domainHint})` : visualEn,
+      subject: domainHint ? `${withBrand} (${domainHint})` : withBrand,
       visualEn,
       actionEn,
       environmentEn,
@@ -661,7 +686,7 @@ function resolveSceneSubject(scene, { brand, scenario, narrationContext, beat, l
 
   if (domainHint) {
     return {
-      subject: domainHint,
+      subject: brandLead ? `${brandLead}: ${domainHint}` : domainHint,
       visualEn,
       actionEn,
       environmentEn,
@@ -680,7 +705,7 @@ function resolveSceneSubject(scene, { brand, scenario, narrationContext, beat, l
     'the exact subject of this commercial storyboard scene';
 
   return {
-    subject: fallback,
+    subject: brandLead && fallback !== brandLead ? `${brandLead}: ${fallback}` : fallback,
     visualEn,
     actionEn,
     environmentEn,
@@ -700,13 +725,17 @@ function buildMustShowMustNot({
 }) {
   const mustShow = [
     toAscii(brand.productName),
+    toAscii(brand.productDescription),
     toAscii(brand.service),
+    toAscii(brand.mainMessage),
+    Array.isArray(brand.features) ? toAscii(brand.features.slice(0, 3).join(', ')) : toAscii(brand.features),
+    toAscii(scenario.concept),
     localizeVisualText(scene.visualDescription || scene.visual || scene.description),
     localizeVisualText(scene.characterActions || scene.action),
     localizeVisualText(scene.environment),
   ]
     .filter(Boolean)
-    .slice(0, 4);
+    .slice(0, 6);
 
   const mustNot = [
     'no unrelated story',
@@ -791,6 +820,9 @@ export function buildSceneImagePrompt(
     visualEn ? `Exact scene description (priority): ${clip(visualEn, 140)}.` : null,
     toAscii(brand.projectTitle) ? `Project: ${clip(toAscii(brand.projectTitle), 70)}.` : null,
     toAscii(brand.productName) ? `Brand/product: ${toAscii(brand.productName)}.` : null,
+    toAscii(brand.productDescription)
+      ? `Product details: ${clip(toAscii(brand.productDescription), 100)}.`
+      : null,
     toAscii(brand.service) ? `Service: ${clip(toAscii(brand.service), 60)}.` : null,
     toAscii(brand.audience) ? `Target audience: ${clip(toAscii(brand.audience), 60)}.` : null,
     toAscii(brand.mainMessage)
@@ -806,8 +838,10 @@ export function buildSceneImagePrompt(
     lighting ? `Light: ${lighting}.` : mood ? `Mood: ${mood}.` : null,
     environmentEn ? `Location: ${clip(environmentEn, 80)}.` : null,
     actionEn ? `Action: ${clip(actionEn, 80)}.` : null,
-    narrationEn ? `Narration beat: ${clip(narrationEn, 80)}.` : null,
-    beat ? `Scenario beat: ${clip(beat, 70)}.` : null,
+    narrationEn
+      ? `Voice-over beat for THIS frame: ${clip(narrationEn, 100)}.`
+      : null,
+    beat ? `Scenario beat for THIS frame: ${clip(beat, 80)}.` : null,
     bible,
     `Unique storyboard frame ${sceneNo} of ${totalScenes} — same cast, product, and look as related scenes.`,
     'ONE full-frame 16:9 cinema still of THIS scene only.',

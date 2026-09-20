@@ -135,6 +135,17 @@ export function canSendFinalVideos(permissions, roleCode) {
   return hasAnyPermission(permissions, ["video.send"], roleCode);
 }
 
+/** Portal invite — Sales/Manager/Admin with crm.invite (credentials stay manager-only). */
+export function canManagePortalInvite(permissions, roleCode) {
+  return hasAnyPermission(permissions, ["crm.invite"], roleCode);
+}
+
+/** Portal WhatsApp + password are exclusive to Manager/Admin. */
+export function canViewPortalCredentials(permissions, roleCode) {
+  if (roleCode !== "MANAGER" && roleCode !== "ADMIN") return false;
+  return hasAnyPermission(permissions, ["crm.portal_credentials"], roleCode);
+}
+
 export function loadOverridesFromUser(user) {
   return (user?.userPermissions || []).map((row) => ({
     code: row.permission?.code,

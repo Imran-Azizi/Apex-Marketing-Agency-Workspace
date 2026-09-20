@@ -146,12 +146,19 @@ export default function NarratorDashboardPage() {
       <PageHeader
         title="میز کار نریتور"
         subtitle="نمای کلی تکالیف نریشن، مهلت‌ها و پیشرفت کار — فقط نریشن‌های ارسال‌شده به شما"
+        subtitleClassName="hidden sm:block"
+        inline
         actions={
-          <Button variant="brand" className="gap-2" asChild>
+          <Button
+            variant="brand"
+            size="sm"
+            className="gap-1.5 px-2.5 text-xs sm:h-10 sm:gap-2 sm:px-4 sm:text-sm"
+            asChild
+          >
             <Link href="/narrator/projects">
-              <Mic2 className="h-4 w-4" />
+              <Mic2 className="h-4 w-4 shrink-0" />
               همه نریشن‌ها
-              <ArrowLeft className="h-3.5 w-3.5" />
+              <ArrowLeft className="hidden h-3.5 w-3.5 sm:inline" />
             </Link>
           </Button>
         }

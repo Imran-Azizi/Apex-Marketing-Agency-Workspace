@@ -22,19 +22,21 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md",
+        "min-w-0 rounded-2xl border p-4 shadow-sm transition-shadow hover:shadow-md",
         TONE_CARD[tone],
         className,
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <p className="text-xs font-medium text-muted-foreground">{title}</p>
-          <p className="text-2xl font-bold tabular-nums tracking-tight text-foreground">
+          <p className="break-words text-xl font-bold tabular-nums tracking-tight text-foreground sm:text-2xl">
             {value}
           </p>
           {hint ? (
-            <p className="text-[11px] leading-5 text-muted-foreground">{hint}</p>
+            <p className="break-words text-[11px] leading-5 text-muted-foreground">
+              {hint}
+            </p>
           ) : null}
         </div>
         <span

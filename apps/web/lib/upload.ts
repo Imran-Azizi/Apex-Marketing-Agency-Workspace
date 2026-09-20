@@ -180,6 +180,12 @@ function guessMimeFromStorageKey(storageKey: string): string | null {
   }
   if (name.endsWith(".webp")) return "image/webp";
   if (name.endsWith(".gif")) return "image/gif";
+  if (name.endsWith(".mp3")) return "audio/mpeg";
+  if (name.endsWith(".wav")) return "audio/wav";
+  if (name.endsWith(".m4a") || name.endsWith(".aac")) return "audio/mp4";
+  if (name.endsWith(".ogg") || name.endsWith(".oga")) return "audio/ogg";
+  if (name.endsWith(".flac")) return "audio/flac";
+  if (name.endsWith(".webm")) return "audio/webm";
   return null;
 }
 

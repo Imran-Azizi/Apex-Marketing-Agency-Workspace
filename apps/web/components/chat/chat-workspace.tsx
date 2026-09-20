@@ -15,6 +15,7 @@ import {
   Search,
   Send,
   Settings2,
+  MessageSquarePlus,
   X,
   ArrowRight,
 } from "lucide-react";
@@ -902,52 +903,67 @@ export function ChatWorkspace({
           mobileShowChat && selectedId ? "hidden md:flex" : "flex",
         )}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold tracking-tight">گفتگو</h1>
-            <p className="text-xs text-muted-foreground">پیام‌رسانی امن تیم</p>
+        <div className="shrink-0 border-b border-border">
+          <div className="flex items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-base font-semibold tracking-tight sm:text-lg">
+                گفتگو
+              </h1>
+              <p className="truncate text-[11px] leading-5 text-muted-foreground sm:text-xs">
+                پیام‌رسانی امن تیم
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-0.5">
+              {canManage ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-9 w-9"
+                  onClick={() => setSettingsOpen(true)}
+                  title="تنظیمات دسترسی"
+                  aria-label="تنظیمات دسترسی"
+                >
+                  <Settings2 className="h-4 w-4" />
+                </Button>
+              ) : null}
+              {isDrawer && onRequestClose ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-9 w-9"
+                  onClick={onRequestClose}
+                  title="بستن"
+                  aria-label="بستن گفتگو"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              ) : null}
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {canManage ? (
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={() => setSettingsOpen(true)}
-                title="تنظیمات دسترسی"
-              >
-                <Settings2 className="h-4 w-4" />
-              </Button>
-            ) : null}
-            <Button size="sm" onClick={() => setNewChatOpen(true)}>
+          <div className="px-3 pb-2.5 sm:px-4 sm:pb-3">
+            <Button
+              className="h-10 w-full gap-2 text-sm"
+              onClick={() => setNewChatOpen(true)}
+            >
+              <MessageSquarePlus className="h-4 w-4 shrink-0" />
               گفتگوی جدید
             </Button>
-            {isDrawer && onRequestClose ? (
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={onRequestClose}
-                title="بستن"
-                aria-label="بستن گفتگو"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            ) : null}
           </div>
         </div>
 
-        <div className="px-3 py-2">
+        <div className="px-3 py-2 sm:px-3">
           <div className="relative">
             <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="جستجوی گفتگو..."
-              className="ps-9"
+              className="h-10 ps-9"
             />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {conversationsQ.isLoading ? (
             <div className="space-y-2 p-3">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -970,7 +986,8 @@ export function ChatWorkspace({
                   type="button"
                   onClick={() => selectConversation(c.id)}
                   className={cn(
-                    "flex w-full items-start gap-3 px-3 py-3 text-start transition hover:bg-muted/60",
+                    "flex w-full min-w-0 items-start gap-3 px-3 py-3 text-start transition hover:bg-muted/60",
+                    "active:bg-muted/80",
                     selectedId === c.id && "bg-muted",
                   )}
                 >
@@ -986,19 +1003,21 @@ export function ChatWorkspace({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-1">
-                        {c.pinned ? <Pin className="h-3 w-3 shrink-0 text-amber-500" /> : null}
+                        {c.pinned ? (
+                          <Pin className="h-3 w-3 shrink-0 text-amber-500" />
+                        ) : null}
                         <span className="truncate font-medium">{c.title}</span>
                       </div>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                      <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                         {formatChatTime(c.lastMessageAt)}
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-2">
-                      <p className="truncate text-xs text-muted-foreground">
+                      <p className="min-w-0 truncate text-xs text-muted-foreground">
                         {c.lastMessagePreview || "بدون پیام"}
                       </p>
                       {c.unreadCount > 0 ? (
-                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                        <span className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
                           {c.unreadCount > 99 ? "99+" : c.unreadCount}
                         </span>
                       ) : null}

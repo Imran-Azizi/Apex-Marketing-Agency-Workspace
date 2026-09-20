@@ -41,7 +41,6 @@ type CreateCustomerOption = {
 
 type CreateOptionsResponse = {
   customers: CreateCustomerOption[];
-  services: Array<{ id: string; name: string; revisionCount?: number }>;
   formats: Array<{ id: string; name: string; ratio: string }>;
 };
 
@@ -143,7 +142,6 @@ export default function NewProjectPage() {
   });
 
   const customers = optionsQuery.data?.customers || [];
-  const services = optionsQuery.data?.services || [];
   const formatsFromOptions = optionsQuery.data?.formats;
 
   const { data: formatsPublic } = useQuery({
@@ -179,16 +177,6 @@ export default function NewProjectPage() {
     () => pickAttachableOpportunity(customerDetailQuery.data),
     [customerDetailQuery.data],
   );
-
-  const initialAgreedPrice = useMemo(() => {
-    if (!attachableOpp) return null;
-    const fromOpp = Number(
-      attachableOpp.agreedPrice || attachableOpp.proposedPrice || 0,
-    );
-    if (Number.isFinite(fromOpp) && fromOpp > 0) return fromOpp;
-    const fromFinance = Number(attachableOpp.finance?.projectTotal || 0);
-    return Number.isFinite(fromFinance) && fromFinance > 0 ? fromFinance : null;
-  }, [attachableOpp]);
 
   const profile: ProjectBriefWizardProfile | null = useMemo(() => {
     const detail = customerDetailQuery.data;
@@ -250,6 +238,7 @@ export default function NewProjectPage() {
             inline
             title="ایجاد پروژه جدید"
             subtitle="ابتدا مشتری را انتخاب کنید، سپس فرم اطلاعات پروژه را تکمیل کنید"
+            subtitleClassName="hidden sm:block"
             actions={
               <Button
                 type="button"
@@ -395,14 +384,6 @@ export default function NewProjectPage() {
             mode="internal"
             profile={profile}
             formats={formats}
-            services={services}
-            initialAgreedPrice={initialAgreedPrice}
-            initialServiceId={
-              attachableOpp?.serviceId || attachableOpp?.service?.id || null
-            }
-            contractPriceLocked={Boolean(
-              attachableOpp && initialAgreedPrice && initialAgreedPrice > 0,
-            )}
             assets={assetsQuery.data}
             onRefreshAssets={() => {
               void assetsQuery.refetch();

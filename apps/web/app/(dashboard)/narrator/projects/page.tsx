@@ -12,6 +12,7 @@ import {
   List,
   Mic2,
   Search,
+  SlidersHorizontal,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { cn, formatDate } from "@/lib/utils";
@@ -39,6 +40,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   ALERT_CALLOUT,
   ALERT_CARD_BORDER,
@@ -164,6 +173,7 @@ export default function NarratorProjectsPage() {
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
   const [view, setView] = useState<"grid" | "list">("grid");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const queryKey = useMemo(
     () => ["narrator-projects", search, status, date, from, to, page],
@@ -193,21 +203,237 @@ export default function NarratorProjectsPage() {
     setSearch(q.trim());
   };
 
+  const activeDropdownFilters =
+    Number(status !== "all") +
+    Number(date !== "all") +
+    Number(date === "custom" && Boolean(from || to)) +
+    Number(view !== "grid");
+
+  function clearDropdownFilters() {
+    setStatus("all");
+    setDate("all");
+    setFrom("");
+    setTo("");
+    setView("grid");
+    setPage(1);
+  }
+
   const items = data?.items || [];
 
+  const coreFilterFields = (
+    <>
+      <div className="space-y-1.5">
+        <Label>وضعیت</Label>
+        <Select
+          value={status}
+          onValueChange={(v) => {
+            setStatus(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>تاریخ ارجاع</Label>
+        <Select
+          value={date}
+          onValueChange={(v) => {
+            setDate(v);
+            setPage(1);
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DATE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>نمایش</Label>
+        <div className="flex h-10 items-center gap-1 rounded-md border border-input p-1">
+          <Button
+            type="button"
+            variant={view === "grid" ? "brand" : "ghost"}
+            size="sm"
+            className="flex-1 gap-1.5"
+            onClick={() => setView("grid")}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            کارت
+          </Button>
+          <Button
+            type="button"
+            variant={view === "list" ? "brand" : "ghost"}
+            size="sm"
+            className="flex-1 gap-1.5"
+            onClick={() => setView("list")}
+          >
+            <List className="h-3.5 w-3.5" />
+            فهرست
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+
+  const customDateFields =
+    date === "custom" ? (
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label htmlFor="from-date">از تاریخ</Label>
+          <Input
+            id="from-date"
+            type="date"
+            value={from}
+            onChange={(e) => {
+              setFrom(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="to-date">تا تاریخ</Label>
+          <Input
+            id="to-date"
+            type="date"
+            value={to}
+            onChange={(e) => {
+              setTo(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+      </div>
+    ) : null;
+
   return (
-    <div className="space-y-6 animate-fade-slide" dir="rtl">
+    <div className="space-y-4 animate-fade-slide sm:space-y-6" dir="rtl">
       <PageHeader
         title="پروژه‌های نریشن"
         subtitle="فقط نریشن‌هایی که مدیر برای شما ارسال کرده — بدون اطلاعات محرمانه پروژه"
+        subtitleClassName="hidden sm:block"
+        inline
+        className="mb-0 sm:mb-2"
         actions={
-          <Button variant="outline" className="gap-2" asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 px-2.5 text-xs sm:h-10 sm:px-4 sm:text-sm"
+            asChild
+          >
             <Link href="/narrator/dashboard">بازگشت به داشبورد</Link>
           </Button>
         }
       />
 
-      <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-4 shadow-sm">
+      {/* Mobile: search + filter */}
+      <div className="flex items-stretch gap-0 overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm md:hidden">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="narrator-search-mobile"
+            value={q}
+            onChange={(e) => {
+              const next = e.target.value;
+              setQ(next);
+              setPage(1);
+              setSearch(next.trim());
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySearch();
+            }}
+            placeholder="جستجوی نریشن..."
+            className="h-11 border-0 bg-transparent ps-9 shadow-none focus-visible:ring-0"
+            aria-label="جستجوی نریشن"
+          />
+        </div>
+        <div className="w-px shrink-0 self-stretch bg-border/70" aria-hidden />
+        <Button
+          type="button"
+          variant="ghost"
+          className={cn(
+            "relative h-11 shrink-0 gap-1.5 rounded-none px-3.5 text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+            activeDropdownFilters > 0 && "text-brand",
+          )}
+          onClick={() => setFiltersOpen(true)}
+          aria-label="باز کردن فیلترها"
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          <span className="text-xs font-medium">فیلتر</span>
+          {activeDropdownFilters > 0 ? (
+            <Badge
+              variant="brand"
+              className="h-4 min-w-4 justify-center rounded-full px-1 text-[10px] leading-none"
+            >
+              {activeDropdownFilters.toLocaleString("fa-AF", {
+                numberingSystem: "latn",
+              })}
+            </Badge>
+          ) : null}
+        </Button>
+      </div>
+
+      <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <SheetContent side="bottom" dir="rtl" className="rounded-t-2xl text-start">
+          <SheetHeader className="text-start">
+            <SheetTitle>فیلترها</SheetTitle>
+            <SheetDescription>
+              وضعیت، تاریخ ارجاع و نوع نمایش را انتخاب کنید.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4 grid gap-3">
+            {coreFilterFields}
+            {customDateFields}
+          </div>
+          <SheetFooter className="mt-6 flex-row gap-2 sm:space-x-0">
+            {activeDropdownFilters > 0 ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  clearDropdownFilters();
+                  setFiltersOpen(false);
+                }}
+              >
+                پاک کردن فیلترها
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="brand"
+              className="flex-1"
+              onClick={() => {
+                applySearch();
+                setFiltersOpen(false);
+              }}
+            >
+              اعمال
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      {/* Desktop / tablet filters */}
+      <section className="hidden space-y-3 rounded-2xl border border-border/70 bg-card p-4 shadow-sm md:block">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
           <div className="min-w-0 flex-1 space-y-1.5">
             <Label htmlFor="narrator-search">جستجو</Label>
@@ -231,105 +457,9 @@ export default function NarratorProjectsPage() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="space-y-1.5">
-            <Label>وضعیت</Label>
-            <Select
-              value={status}
-              onValueChange={(v) => {
-                setStatus(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>تاریخ ارجاع</Label>
-            <Select
-              value={date}
-              onValueChange={(v) => {
-                setDate(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DATE_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>نمایش</Label>
-            <div className="flex h-10 items-center gap-1 rounded-md border border-input p-1">
-              <Button
-                type="button"
-                variant={view === "grid" ? "brand" : "ghost"}
-                size="sm"
-                className="flex-1 gap-1.5"
-                onClick={() => setView("grid")}
-              >
-                <LayoutGrid className="h-3.5 w-3.5" />
-                کارت
-              </Button>
-              <Button
-                type="button"
-                variant={view === "list" ? "brand" : "ghost"}
-                size="sm"
-                className="flex-1 gap-1.5"
-                onClick={() => setView("list")}
-              >
-                <List className="h-3.5 w-3.5" />
-                فهرست
-              </Button>
-            </div>
-          </div>
+          {coreFilterFields}
         </div>
-
-        {date === "custom" && (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="from-date">از تاریخ</Label>
-              <Input
-                id="from-date"
-                type="date"
-                value={from}
-                onChange={(e) => {
-                  setFrom(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="to-date">تا تاریخ</Label>
-              <Input
-                id="to-date"
-                type="date"
-                value={to}
-                onChange={(e) => {
-                  setTo(e.target.value);
-                  setPage(1);
-                }}
-              />
-            </div>
-          </div>
-        )}
+        {customDateFields}
       </section>
 
       <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">

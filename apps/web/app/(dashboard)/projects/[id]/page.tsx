@@ -524,51 +524,60 @@ export default function ProjectDetailPage({
       dir="rtl"
       className="min-w-0 max-w-full space-y-5 text-start sm:space-y-6"
     >
-      <section className="relative overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
+      <section className="relative min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
         <div
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-brand/10 via-transparent to-transparent"
           aria-hidden
         />
-        <div className="relative space-y-5 p-4 sm:p-6 lg:p-7">
-          <div className="min-w-0 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5"
-                asChild
-              >
-                <Link href="/projects">
-                  <ArrowRight className="h-3.5 w-3.5" />
-                  پروژه‌ها
-                </Link>
-              </Button>
-              <Badge variant="outline" className="font-mono" dir="ltr">
-                {data.code}
-              </Badge>
+        <div className="relative space-y-3.5 p-3.5 sm:space-y-5 sm:p-6 lg:p-7">
+          <div className="min-w-0 space-y-2.5 sm:space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 gap-1.5"
+                  asChild
+                >
+                  <Link href="/projects">
+                    <ArrowRight className="h-3.5 w-3.5" />
+                    پروژه‌ها
+                  </Link>
+                </Button>
+                <Badge
+                  variant="outline"
+                  className="max-w-full truncate font-mono text-[11px] sm:text-xs"
+                  dir="ltr"
+                >
+                  {data.code}
+                </Badge>
+                {data.status === "COMPLETED" ? (
+                  <Badge variant="success" className="gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    تکمیل‌شده
+                  </Badge>
+                ) : null}
+              </div>
               {canMarkCompleted ? (
                 <Button
                   variant="brand"
                   size="sm"
-                  className="h-8 gap-1.5"
+                  className="h-9 w-full gap-1.5 sm:h-8 sm:w-auto sm:shrink-0"
                   onClick={() => setCompleteConfirmOpen(true)}
                 >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  علامت‌گذاری به‌عنوان تکمیل‌شده
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="sm:hidden">علامت به‌عنوان تکمیل</span>
+                  <span className="hidden sm:inline">
+                    علامت‌گذاری به‌عنوان تکمیل‌شده
+                  </span>
                 </Button>
               ) : null}
-              {data.status === "COMPLETED" ? (
-                <Badge variant="success" className="gap-1">
-                  <CheckCircle2 className="h-3 w-3" />
-                  تکمیل‌شده
-                </Badge>
-              ) : null}
             </div>
-            <div className="space-y-1.5">
-              <h1 className="break-words text-xl font-bold tracking-tight sm:text-2xl lg:text-3xl">
+            <div className="min-w-0 space-y-1 sm:space-y-1.5">
+              <h1 className="break-words text-lg font-bold leading-snug tracking-tight sm:text-2xl lg:text-3xl">
                 {data.title}
               </h1>
-              <p className="break-words text-sm text-muted-foreground">
+              <p className="break-words text-xs leading-6 text-muted-foreground sm:text-sm">
                 {data.crmCustomer.companyName
                   ? `${data.crmCustomer.personName} · ${data.crmCustomer.companyName}`
                   : data.crmCustomer.personName}
@@ -585,15 +594,15 @@ export default function ProjectDetailPage({
                 )}
               </p>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              <Badge variant="brand">
+            <div className="flex min-w-0 flex-wrap gap-1.5">
+              <Badge variant="brand" className="max-w-full truncate">
                 {getProjectStatusLabel(data.status)}
               </Badge>
-              <Badge variant="secondary">
+              <Badge variant="secondary" className="max-w-full truncate">
                 {getCustomerFacingStatusLabel(data.customerFacingStatus)}
               </Badge>
               {data.deadlineAt && (
-                <Badge variant="outline">
+                <Badge variant="outline" className="max-w-full truncate">
                   مهلت: {formatDate(data.deadlineAt)}
                 </Badge>
               )}
@@ -607,6 +616,7 @@ export default function ProjectDetailPage({
             progress={progress}
             status={data.status}
             variant="full"
+            className="pt-0.5"
           />
         </div>
       </section>

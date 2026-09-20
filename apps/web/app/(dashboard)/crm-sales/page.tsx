@@ -449,20 +449,20 @@ export default function CrmPage() {
   return (
     <div className="min-w-0">
       <PageHeader
-        inline
+        className="mb-4 sm:mb-8"
         title={crmSalesText("pageTitle")}
         subtitle={crmSalesText("pageSubtitle")}
         actions={
           canCreate ? (
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
               <Button
                 variant="outline"
                 onClick={() => setTransferOpen(true)}
                 disabled={selectedCount === 0 || transferMutation.isPending}
-                className="h-9 shrink-0 gap-1.5 px-3 text-sm sm:h-10 sm:px-4"
+                className="h-9 min-w-0 flex-1 gap-1.5 px-3 text-sm sm:h-10 sm:flex-none sm:px-4"
               >
-                <Send className="h-4 w-4" />
-                <span className="whitespace-nowrap">
+                <Send className="h-4 w-4 shrink-0" />
+                <span className="truncate whitespace-nowrap">
                   {crmSalesText("transferToCustomers")}
                 </span>
               </Button>
@@ -729,7 +729,7 @@ export default function CrmPage() {
                 isFetching ? "opacity-70 transition-opacity" : undefined
               }
             >
-              <Table className="min-w-[72rem]">
+              <Table scrollContainer={false} className="min-w-[72rem]">
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     <TableHead className="sticky top-0 z-[1] w-10 bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
@@ -742,13 +742,13 @@ export default function CrmPage() {
                         disabled={!canSelect || selectablePageIds.length === 0}
                       />
                     </TableHead>
-                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       {crmSalesText("customerId")}
                     </TableHead>
-                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       {crmSalesText("customer")}
                     </TableHead>
-                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       {crmSalesText("contact")}
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">

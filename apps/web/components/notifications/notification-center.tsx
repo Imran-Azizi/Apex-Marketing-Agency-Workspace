@@ -267,7 +267,7 @@ function NotificationCard({
       onClick={() => onOpen(item)}
       data-unseen={unseen ? "true" : "false"}
       className={cn(
-        "relative w-full rounded-xl border p-3 text-start",
+        "relative w-full rounded-xl border p-2.5 text-start sm:p-3",
         "transition-[background-color,border-color,box-shadow] duration-300",
         "hover:border-brand/40 hover:bg-brand/[0.07] hover:shadow-sm",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2",
@@ -284,10 +284,10 @@ function NotificationCard({
           aria-hidden
         />
       )}
-      <div className={cn("flex gap-3", unseen && "ps-2")}>
+      <div className={cn("flex gap-2.5 sm:gap-3", unseen && "ps-2")}>
         <div
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors duration-300",
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors duration-300 sm:h-10 sm:w-10",
             unseen
               ? "bg-brand/15 text-brand"
               : "bg-muted text-muted-foreground",
@@ -295,11 +295,11 @@ function NotificationCard({
         >
           <NotificationIcon type={item.meta.type} />
         </div>
-        <div className="min-w-0 flex-1 space-y-2">
+        <div className="min-w-0 flex-1 space-y-1.5 sm:space-y-2">
           <div className="flex items-start justify-between gap-2">
             <h3
               className={cn(
-                "text-sm leading-snug transition-colors duration-300",
+                "text-[13px] leading-6 transition-colors duration-300 sm:text-sm sm:leading-snug",
                 unseen
                   ? "font-semibold text-foreground"
                   : "font-medium text-foreground/90",
@@ -309,14 +309,14 @@ function NotificationCard({
             </h3>
             {unseen && (
               <span
-                className="mt-1 h-2 w-2 shrink-0 rounded-full bg-brand"
+                className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand"
                 aria-label="اعلان جدید"
               />
             )}
           </div>
 
           {(customer || project || projectCode) && (
-            <div className="space-y-1 text-xs text-muted-foreground">
+            <div className="space-y-0.5 text-[11px] text-muted-foreground sm:space-y-1 sm:text-xs">
               {customer && (
                 <p className="flex items-center gap-1.5">
                   <Building2 className="h-3.5 w-3.5 shrink-0" />
@@ -342,7 +342,7 @@ function NotificationCard({
           )}
 
           {!customer && !project && item.body && (
-            <p className="whitespace-pre-line text-xs text-muted-foreground">
+            <p className="line-clamp-3 whitespace-pre-line text-[11px] text-muted-foreground sm:line-clamp-none sm:text-xs">
               {item.body}
             </p>
           )}
@@ -547,26 +547,33 @@ export function NotificationCenter({ className }: { className?: string }) {
       <SheetContent
         side="left"
         showCloseButton={false}
-        className="flex w-full max-w-md flex-col gap-0 overflow-hidden border-r p-0 shadow-2xl sm:max-w-md"
+        className="flex w-full max-w-[100vw] flex-col gap-0 overflow-hidden border-r p-0 shadow-2xl sm:max-w-md"
       >
-        <SheetHeader dir="rtl" className="space-y-0 border-b px-4 py-4 text-start">
-          <div className="flex items-center justify-between gap-3">
+        <SheetHeader
+          dir="rtl"
+          className="space-y-0 border-b px-3 py-3 text-start sm:px-4 sm:py-4"
+        >
+          <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1 text-start">
-              <SheetTitle className="text-base sm:text-lg">اعلان‌ها</SheetTitle>
-              <SheetDescription asChild>
-                <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
-                  <span>
-                    کل: <strong className="text-foreground">{total}</strong>
-                  </span>
-                  <span>
-                    جدید:{" "}
-                    <strong className="text-brand">{unseenCount}</strong>
-                  </span>
-                  {markAllRead.isPending && (
-                    <span className="text-muted-foreground">در حال به‌روزرسانی…</span>
-                  )}
-                </div>
-              </SheetDescription>
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <SheetTitle className="text-base leading-none sm:text-lg">
+                  اعلان‌ها
+                </SheetTitle>
+                <SheetDescription asChild>
+                  <p className="text-[11px] leading-none text-muted-foreground sm:text-xs">
+                    کل{" "}
+                    <strong className="tabular-nums text-foreground">{total}</strong>
+                    <span className="mx-1.5 text-border">·</span>
+                    جدید{" "}
+                    <strong className="tabular-nums text-brand">{unseenCount}</strong>
+                    {markAllRead.isPending ? (
+                      <span className="ms-2 text-muted-foreground">
+                        در حال به‌روزرسانی…
+                      </span>
+                    ) : null}
+                  </p>
+                </SheetDescription>
+              </div>
             </div>
 
             <SheetClose asChild>
@@ -574,7 +581,7 @@ export function NotificationCenter({ className }: { className?: string }) {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 shrink-0 rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="h-8 w-8 shrink-0 rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-9 sm:w-9"
                 aria-label="بستن اعلان‌ها"
               >
                 <X className="h-4 w-4" />
@@ -582,14 +589,14 @@ export function NotificationCenter({ className }: { className?: string }) {
             </SheetClose>
           </div>
 
-          <div className="flex flex-wrap gap-2 pt-3">
+          <div className="mt-2.5 grid grid-cols-2 gap-2 sm:mt-3 sm:flex sm:flex-wrap">
             <Button
               size="sm"
               variant="outline"
-              className="h-8"
+              className="h-9 gap-1.5 px-2 text-xs sm:h-8 sm:flex-none sm:px-3 sm:text-sm"
               disabled={unseenCount === 0 || markAllRead.isPending}
               isLoading={markAllRead.isPending}
-              loadingText="در حال به‌روزرسانی..."
+              loadingText="…"
               onClick={() => {
                 if (unseenCount === 0 || markAllRead.isPending) return;
                 markAllRead.mutate(undefined, {
@@ -597,25 +604,27 @@ export function NotificationCenter({ className }: { className?: string }) {
                 });
               }}
             >
-              <CheckCheck className="h-3.5 w-3.5" />
-              همه را خوانده‌شده کن
+              <CheckCheck className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate sm:hidden">همه خوانده</span>
+              <span className="hidden sm:inline">همه را خوانده‌شده کن</span>
             </Button>
             <Button
               size="sm"
               variant="ghost"
-              className="h-8 text-muted-foreground"
+              className="h-9 gap-1.5 px-2 text-xs text-muted-foreground sm:h-8 sm:flex-none sm:px-3 sm:text-sm"
               disabled={total === 0}
               isLoading={clearRead.isPending}
-              loadingText="در حال پاک‌سازی..."
+              loadingText="…"
               onClick={() => clearRead.mutate()}
             >
-              <Trash2 className="h-3.5 w-3.5" />
-              پاک‌سازی خوانده‌شده‌ها
+              <Trash2 className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate sm:hidden">پاک‌سازی</span>
+              <span className="hidden sm:inline">پاک‌سازی خوانده‌شده‌ها</span>
             </Button>
           </div>
         </SheetHeader>
 
-        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <div className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3 sm:space-y-3 sm:px-4 sm:py-4">
           {query.isLoading && <NotificationListSkeleton count={6} />}
 
           {query.isError && (

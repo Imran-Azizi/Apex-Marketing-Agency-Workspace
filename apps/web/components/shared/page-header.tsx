@@ -5,6 +5,8 @@ interface PageHeaderProps {
   subtitle?: string;
   actions?: React.ReactNode;
   className?: string;
+  /** Extra classes for the subtitle (e.g. hide on mobile: `hidden sm:block`). */
+  subtitleClassName?: string;
   /**
    * Keep title/subtitle and actions on one horizontal row on small screens
    * (space-between, vertically centered) instead of stacking.
@@ -17,14 +19,16 @@ export function PageHeader({
   subtitle,
   actions,
   className,
+  subtitleClassName,
   inline = false,
 }: PageHeaderProps) {
   return (
     <div
       className={cn(
-        "mb-6 flex flex-col gap-3 sm:mb-8 sm:flex-row sm:items-start sm:justify-between",
-        inline &&
-          "flex-row items-center justify-between gap-2 sm:items-start sm:gap-3",
+        "mb-6 flex min-w-0 max-w-full gap-3 sm:mb-8",
+        inline
+          ? "flex-row items-center justify-between"
+          : "flex-col sm:flex-row sm:items-start sm:justify-between",
         className,
       )}
     >
@@ -32,7 +36,8 @@ export function PageHeader({
         <h1
           className={cn(
             "break-words text-lg font-bold tracking-tight text-foreground sm:text-2xl",
-            inline && "text-base leading-snug sm:text-2xl",
+            inline &&
+              "truncate text-base leading-snug sm:whitespace-normal sm:break-words sm:text-2xl",
           )}
         >
           {title}
@@ -41,7 +46,9 @@ export function PageHeader({
           <p
             className={cn(
               "mt-0.5 break-words text-sm text-muted-foreground",
-              inline && "truncate text-xs sm:mt-0.5 sm:text-sm sm:whitespace-normal",
+              inline &&
+                "truncate text-xs sm:mt-0.5 sm:text-sm sm:whitespace-normal",
+              subtitleClassName,
             )}
           >
             {subtitle}
@@ -51,8 +58,10 @@ export function PageHeader({
       {actions && (
         <div
           className={cn(
-            "flex w-full shrink-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end",
-            inline && "w-auto",
+            "flex shrink-0 items-center gap-2",
+            inline
+              ? "w-auto max-w-[58%] justify-end sm:max-w-none"
+              : "w-full flex-wrap sm:w-auto sm:justify-end",
           )}
         >
           {actions}

@@ -156,13 +156,16 @@ export default function CatalogServicesPage() {
   return (
     <div className="space-y-6" dir="rtl">
       <PageHeader
+        inline
         title="مدیریت خدمات"
         subtitle="کارت‌های خدمات وب‌سایت عمومی را ایجاد، ویرایش، مرتب و منتشر کنید."
+        subtitleClassName="hidden sm:block"
         actions={
           canCreate ? (
             <Button
               variant="brand"
-              className="gap-2"
+              size="sm"
+              className="h-9 shrink-0 gap-1.5 px-3 sm:h-10 sm:gap-2 sm:px-4"
               onClick={() => {
                 setEditing(null);
                 setFormOpen(true);

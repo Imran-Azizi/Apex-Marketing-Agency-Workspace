@@ -3,7 +3,7 @@ import { env } from "../../config/env.js";
 import { AppError } from "../../utils/response.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { decryptCredential } from "../../utils/credentialVault.js";
-import { hasAnyPermission } from "../../services/permissions/effective.js";
+import { canViewPortalCredentials } from "../../services/permissions/effective.js";
 
 export const INVITE_STATUSES = ["PENDING", "REGISTERED", "EXPIRED", "REVOKED"];
 
@@ -15,11 +15,7 @@ export function inviteStatus(invite, now = new Date()) {
 }
 
 export function canRevealPortalPassword(auth) {
-  return hasAnyPermission(
-    auth?.permissions,
-    ["crm.portal_credentials"],
-    auth?.roleCode,
-  );
+  return canViewPortalCredentials(auth?.permissions, auth?.roleCode);
 }
 
 const PORTAL_STATUS_LABELS = {
@@ -61,10 +57,10 @@ export function serializePortalCredentials(customer, auth) {
     status,
     statusLabel: PORTAL_STATUS_LABELS[status] || PORTAL_STATUS_LABELS.NONE,
     whatsappNumber:
-      isRegistered
+      reveal && isRegistered
         ? portal.normalizedWhatsapp || customer?.normalizedWhatsapp || ""
         : null,
-    hasPassword: Boolean(cipher),
+    hasPassword: reveal && Boolean(cipher),
     canRevealPassword: reveal && Boolean(cipher),
     registeredAt: portal?.registeredAt || null,
     createdAt: portal?.createdAt || null,
@@ -100,9 +96,9 @@ export function serializePortalInvite(invite, auth, { now = new Date() } = {}) {
     customerCode: customer?.customerCode || null,
     personName: customer?.personName || null,
     companyName: customer?.companyName || null,
-    whatsappNumber: registeredWhatsapp(invite) || "",
+    whatsappNumber: reveal ? registeredWhatsapp(invite) || "" : "",
     status,
-    hasPassword: Boolean(cipher),
+    hasPassword: reveal && Boolean(cipher),
     canRevealPassword: reveal && Boolean(cipher),
     registerUrl,
     createdAt: invite.createdAt,

@@ -160,6 +160,7 @@ export function PaymentHistoryPanel({
         icon={History}
         title="سوابق پرداخت"
         description="پرداخت‌ها پس از تأیید مدیر در محاسبات مالی پروژه لحاظ می‌شوند"
+        descriptionClassName="hidden sm:block"
         className="mb-5"
         action={
           <div className="flex flex-wrap justify-start gap-2">
@@ -198,226 +199,138 @@ export function PaymentHistoryPanel({
             </p>
           </div>
         ) : (
-          <>
-            <HorizontalScroll bordered={false} className="hidden lg:block">
-              <Table className="min-w-[54rem]">
-                <TableHeader>
-                  <TableRow className="bg-muted/20 hover:bg-muted/20">
-                    <TableHead className="text-start">شماره پرداخت</TableHead>
-                    <TableHead className="text-start">مبلغ پرداختی</TableHead>
-                    <TableHead className="text-start">تاریخ پرداخت</TableHead>
-                    <TableHead className="text-start">زمان پرداخت</TableHead>
-                    <TableHead className="text-start">روش پرداخت</TableHead>
-                    <TableHead className="text-start">ثبت‌کننده</TableHead>
-                    <TableHead className="text-start">وضعیت</TableHead>
-                    <TableHead className="min-w-[220px] text-start">
-                      عملیات
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {sortedPayments.map((p) => {
-                    const paidAt = p.paidAt || p.createdAt;
-                    const paymentNumber =
-                      p.reference ||
-                      p.invoice?.invoiceNumber ||
-                      (p.invoiceId
-                        ? invoiceById.get(p.invoiceId)?.invoiceNumber
-                        : null) ||
-                      `PAY-${p.id.slice(-8).toUpperCase()}`;
+          <HorizontalScroll bordered={false}>
+            <Table scrollContainer={false} className="min-w-[54rem]">
+              <TableHeader>
+                <TableRow className="bg-muted/20 hover:bg-muted/20">
+                  <TableHead className="whitespace-nowrap text-start">
+                    شماره پرداخت
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap text-start">
+                    مبلغ پرداختی
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap text-start">
+                    تاریخ پرداخت
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap text-start">
+                    زمان پرداخت
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap text-start">
+                    روش پرداخت
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap text-start">
+                    ثبت‌کننده
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap text-start">
+                    وضعیت
+                  </TableHead>
+                  <TableHead className="min-w-[220px] whitespace-nowrap text-start">
+                    عملیات
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedPayments.map((p) => {
+                  const paidAt = p.paidAt || p.createdAt;
+                  const paymentNumber =
+                    p.reference ||
+                    p.invoice?.invoiceNumber ||
+                    (p.invoiceId
+                      ? invoiceById.get(p.invoiceId)?.invoiceNumber
+                      : null) ||
+                    `PAY-${p.id.slice(-8).toUpperCase()}`;
 
-                    return (
-                      <TableRow
-                        key={p.id}
-                        className="transition-colors hover:bg-muted/15"
-                      >
-                        <TableCell className="text-start">
-                          <span
-                            className="font-medium tabular-nums [unicode-bidi:isolate]"
-                            dir="ltr"
-                          >
-                            {paymentNumber}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-start font-semibold tabular-nums">
-                          {formatCurrency(Number(p.amount))}
-                        </TableCell>
-                        <TableCell className="text-start text-sm text-muted-foreground">
-                          {formatDate(paidAt)}
-                        </TableCell>
-                        <TableCell className="text-start text-sm text-muted-foreground tabular-nums">
-                          {formatTime(paidAt)}
-                        </TableCell>
-                        <TableCell className="text-start">
-                          <Badge
-                            variant="outline"
-                            className="rounded-full font-normal"
-                          >
-                            {p.methodLabel || paymentMethodLabel(p.method)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-start text-sm">
-                          {p.recordedBy?.fullName || "—"}
-                        </TableCell>
-                        <TableCell className="text-start">
-                          <Badge
-                            variant={
-                              PAYMENT_STATUS_VARIANTS[p.verification] ||
-                              "secondary"
-                            }
-                            className="rounded-full"
-                          >
-                            {PAYMENT_STATUS_LABELS[p.verification] ||
-                              p.verification}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-start">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <PaymentReceiptActions
-                              paymentId={p.id}
-                              onView={() => openReceipt(p.id)}
-                            />
-                            {canApprove && p.verification === "PENDING" && (
-                              <>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => verifyMut.mutate(p.id)}
-                                  disabled={busy}
-                                  className="rounded-lg hover:border-brand/40 hover:bg-brand/5"
-                                >
-                                  <Check className="h-3.5 w-3.5" />
-                                  تأیید
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setRejectReason("");
-                                    setRejectTarget(p);
-                                  }}
-                                  disabled={busy}
-                                  className="rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                  رد
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </HorizontalScroll>
-
-            <div className="space-y-3 p-3 lg:hidden">
-              {sortedPayments.map((p) => {
-                const paidAt = p.paidAt || p.createdAt;
-                const paymentNumber =
-                  p.reference ||
-                  `PAY-${p.id.slice(-8).toUpperCase()}`;
-                return (
-                  <div
-                    key={p.id}
-                    className="rounded-2xl border border-border/50 bg-muted/10 p-4 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="text-start">
-                        <p className="font-bold tabular-nums">
-                          {formatCurrency(Number(p.amount))}
-                        </p>
-                        <p
-                          className="mt-0.5 text-xs text-muted-foreground [unicode-bidi:isolate]"
+                  return (
+                    <TableRow
+                      key={p.id}
+                      className="transition-colors hover:bg-muted/15"
+                    >
+                      <TableCell className="whitespace-nowrap text-start">
+                        <span
+                          className="font-medium tabular-nums [unicode-bidi:isolate]"
                           dir="ltr"
                         >
                           {paymentNumber}
-                        </p>
-                      </div>
-                      <Badge
-                        variant={
-                          PAYMENT_STATUS_VARIANTS[p.verification] || "secondary"
-                        }
-                        className="rounded-full"
-                      >
-                        {PAYMENT_STATUS_LABELS[p.verification] ||
-                          p.verification}
-                      </Badge>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/40 pt-3 text-xs text-muted-foreground">
-                      <p>
-                        تاریخ:{" "}
-                        <span className="text-foreground">
-                          {formatDate(paidAt)}
                         </span>
-                      </p>
-                      <p>
-                        زمان:{" "}
-                        <span className="text-foreground tabular-nums">
-                          {formatTime(paidAt)}
-                        </span>
-                      </p>
-                      <p className="col-span-2">
-                        روش پرداخت:{" "}
-                        <span className="font-medium text-foreground">
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-start font-semibold tabular-nums">
+                        {formatCurrency(Number(p.amount))}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-start text-sm text-muted-foreground">
+                        {formatDate(paidAt)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-start text-sm text-muted-foreground tabular-nums">
+                        {formatTime(paidAt)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-start">
+                        <Badge
+                          variant="outline"
+                          className="rounded-full font-normal"
+                        >
                           {p.methodLabel || paymentMethodLabel(p.method)}
-                        </span>
-                      </p>
-                      <p className="col-span-2">
-                        ثبت‌کننده:{" "}
-                        <span className="text-foreground">
-                          {p.recordedBy?.fullName || "—"}
-                        </span>
-                      </p>
-                      {p.rejectionReason ? (
-                        <p className="col-span-2">
-                          دلیل رد:{" "}
-                          <span className="text-destructive">
-                            {p.rejectionReason}
-                          </span>
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/40 pt-3">
-                      <PaymentReceiptActions
-                        paymentId={p.id}
-                        onView={() => openReceipt(p.id)}
-                      />
-                      {canApprove && p.verification === "PENDING" && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => verifyMut.mutate(p.id)}
-                            disabled={busy}
-                            className="rounded-lg"
-                          >
-                            <Check className="h-3.5 w-3.5" />
-                            تأیید
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setRejectReason("");
-                              setRejectTarget(p);
-                            }}
-                            disabled={busy}
-                            className="rounded-lg text-destructive"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                            رد
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-start text-sm">
+                        {p.recordedBy?.fullName || "—"}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-start">
+                        <Badge
+                          variant={
+                            PAYMENT_STATUS_VARIANTS[p.verification] ||
+                            "secondary"
+                          }
+                          className="rounded-full"
+                        >
+                          {PAYMENT_STATUS_LABELS[p.verification] ||
+                            p.verification}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-start">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <PaymentReceiptActions
+                            paymentId={p.id}
+                            onView={() => openReceipt(p.id)}
+                          />
+                          {canApprove && p.verification === "PENDING" && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => verifyMut.mutate(p.id)}
+                                disabled={busy}
+                                className="rounded-lg hover:border-brand/40 hover:bg-brand/5"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                تأیید
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  setRejectReason("");
+                                  setRejectTarget(p);
+                                }}
+                                disabled={busy}
+                                className="rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                                رد
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                        {p.rejectionReason ? (
+                          <p className="mt-1.5 max-w-[16rem] text-xs text-destructive">
+                            دلیل رد: {p.rejectionReason}
+                          </p>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </HorizontalScroll>
         )}
       </div>
 

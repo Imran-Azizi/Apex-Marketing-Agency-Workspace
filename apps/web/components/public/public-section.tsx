@@ -27,18 +27,18 @@ export function PublicSection({
         className,
       )}
     >
-      <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
-        <header className="mx-auto mb-10 max-w-2xl text-center sm:mb-14">
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
+        <header className="mx-auto mb-7 max-w-2xl text-center sm:mb-14">
           {eyebrow ? (
-            <p className="mb-3 text-xs font-semibold tracking-wide text-brand">
+            <p className="mb-2 text-xs font-semibold tracking-wide text-brand sm:mb-3">
               {eyebrow}
             </p>
           ) : null}
-          <h2 className="text-balance text-2xl font-bold tracking-tight text-foreground sm:text-3xl lg:text-4xl">
+          <h2 className="text-balance text-xl font-bold tracking-tight text-foreground sm:text-3xl lg:text-4xl">
             {title}
           </h2>
           {description ? (
-            <p className="mt-3 whitespace-pre-wrap text-pretty text-sm leading-7 text-muted-foreground sm:text-base sm:leading-8">
+            <p className="mt-2.5 whitespace-pre-wrap text-pretty text-sm leading-6 text-muted-foreground sm:mt-3 sm:text-base sm:leading-8 line-clamp-4 sm:line-clamp-none">
               {description}
             </p>
           ) : null}

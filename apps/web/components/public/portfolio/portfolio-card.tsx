@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Play } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
 import {
@@ -17,15 +18,35 @@ export function PortfolioCard({
   item: PublicPortfolioItem;
   className?: string;
 }) {
+  const router = useRouter();
   const categoryName = item.category?.name;
   const excerpt = portfolioCardExcerpt(item);
+  const href = portfolioWorkPath(item.slug);
 
   return (
-    <article className={cn("h-full", className)}>
+    <article
+      className={cn(
+        "h-full [content-visibility:auto] [contain-intrinsic-size:auto_320px]",
+        className,
+      )}
+    >
       <Link
-        href={portfolioWorkPath(item.slug)}
+        href={href}
+        prefetch={false}
         aria-label={`مشاهده ${item.title}`}
-        className="group flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm outline-none transition-all duration-300 hover:border-brand/30 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-safe:hover:-translate-y-1"
+        onPointerEnter={() => {
+          router.prefetch(href);
+        }}
+        onFocus={() => {
+          router.prefetch(href);
+        }}
+        className={cn(
+          "group flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm outline-none",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+          "[@media(hover:hover)]:transition-[transform,box-shadow,border-color] [@media(hover:hover)]:duration-300",
+          "[@media(hover:hover)]:hover:-translate-y-1 [@media(hover:hover)]:hover:border-brand/30",
+          "[@media(hover:hover)]:hover:shadow-md",
+        )}
       >
         <span className="relative block aspect-video w-full overflow-hidden bg-muted">
           {item.thumbnailUrl ? (
@@ -33,7 +54,8 @@ export function PortfolioCard({
               src={item.thumbnailUrl}
               alt={item.title}
               sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
-              className="transition-transform duration-500 motion-safe:group-hover:scale-[1.04]"
+              quality={72}
+              className="[@media(hover:hover)]:transition-transform [@media(hover:hover)]:duration-500 [@media(hover:hover)]:motion-safe:group-hover:scale-[1.03]"
             />
           ) : (
             <span
@@ -46,18 +68,21 @@ export function PortfolioCard({
             aria-hidden
           />
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg shadow-black/35 ring-4 ring-white/10 transition-transform duration-300 motion-safe:group-hover:scale-110">
-              <Play className="h-6 w-6 fill-current ps-0.5" aria-hidden />
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-brand-foreground shadow-lg shadow-black/35 ring-4 ring-white/10 sm:h-14 sm:w-14 [@media(hover:hover)]:transition-transform [@media(hover:hover)]:duration-300 [@media(hover:hover)]:motion-safe:group-hover:scale-110">
+              <Play
+                className="h-5 w-5 fill-current ps-0.5 sm:h-6 sm:w-6"
+                aria-hidden
+              />
             </span>
           </span>
         </span>
-        <span className="flex flex-1 flex-col gap-1.5 p-4">
+        <span className="flex flex-1 flex-col gap-1 p-3.5 sm:gap-1.5 sm:p-4">
           {categoryName ? (
             <span className="text-[11px] font-medium tracking-wide text-brand">
               {categoryName}
             </span>
           ) : null}
-          <span className="line-clamp-1 text-base font-semibold tracking-tight text-foreground">
+          <span className="line-clamp-1 text-[0.95rem] font-semibold tracking-tight text-foreground sm:text-base">
             {item.title}
           </span>
           {excerpt ? (

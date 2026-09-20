@@ -21,6 +21,15 @@ const PROVIDERS = {
   mock: mockService,
 };
 
+function demoteLightweight(models) {
+  const list = [...new Set((models || []).filter(Boolean))];
+  const light = (id) =>
+    /mini|lite|nano|haiku|flash-lite|:free$/i.test(String(id || ''));
+  const strong = list.filter((id) => !light(id));
+  const weak = list.filter((id) => light(id));
+  return strong.length ? [...strong, ...weak] : list;
+}
+
 export function listProviders() {
   return Object.keys(PROVIDERS);
 }
@@ -49,22 +58,23 @@ export function listConfiguredLlmProviders(override) {
 
 /**
  * Native models for a provider — never send OpenRouter slugs to Gemini/OpenAI.
+ * Quality content agents lead with reasoning models, not flash-lite / mini.
  */
 export function modelsForProvider(providerId, agentType, modelOverride) {
   if (providerId === 'openrouter') {
     return resolveModelsForAgent(agentType, modelOverride);
   }
   if (providerId === 'gemini') {
-    return [...new Set([
+    return demoteLightweight([
       env.geminiModelReasoning || env.geminiModel,
       env.geminiModelLight,
-    ].filter(Boolean))];
+    ]);
   }
   if (providerId === 'openai') {
-    return [...new Set([
+    return demoteLightweight([
       env.openaiModelReasoning || env.openaiModel,
       env.openaiModelLight,
-    ].filter(Boolean))];
+    ]);
   }
   if (providerId === 'anthropic') {
     return [env.anthropicModel].filter(Boolean);

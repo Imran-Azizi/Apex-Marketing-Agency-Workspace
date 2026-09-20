@@ -106,7 +106,7 @@ export function MixedPortfolioManager({
     <div className="space-y-4 text-start" dir="rtl">
       <div>
         <h2 className="text-lg font-semibold">مدیریت مختلط</h2>
-        <p className="mt-1 text-sm leading-7 text-muted-foreground">
+        <p className="mt-1 hidden text-sm leading-7 text-muted-foreground sm:block">
           ویدیوهایی که در تب «کتگوری مختلط» وب‌سایت عمومی نمایش داده می‌شوند را
           انتخاب و مرتب کنید. همه ویدیوها به‌صورت خودکار اضافه نمی‌شوند.
         </p>
@@ -250,10 +250,10 @@ export function MixedPortfolioManager({
       </div>
 
       {canEdit ? (
-        <div className="flex justify-start">
+        <div className="flex justify-center sm:justify-start">
           <Button
             variant="brand"
-            className="gap-2"
+            className="w-full max-w-xs gap-2 sm:w-auto sm:max-w-none"
             disabled={saveMut.isPending}
             onClick={() => saveMut.mutate(selected.map((item) => item.id))}
           >

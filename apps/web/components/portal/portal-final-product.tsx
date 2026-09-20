@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { apiPost } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -20,11 +20,14 @@ import { VIDEO_TYPE_LABELS, type FinalVideoType } from "@/lib/final-product";
 import { downloadMediaFile, formatFileSize } from "@/lib/upload";
 import { cn, formatDate } from "@/lib/utils";
 import {
+  CalendarDays,
   Check,
   CheckCircle2,
+  Clock3,
   Download,
   Eye,
   Film,
+  HardDrive,
   Loader2,
   Lock,
   MessageSquare,
@@ -179,6 +182,23 @@ function formatDuration(totalSec: number | null | undefined): string {
     minimumIntegerDigits: 2,
   });
   return `${mm}:${ss}`;
+}
+
+/** Readable title for long download filenames (keeps full name in tooltip). */
+function displayVideoTitle(name: string): string {
+  const raw = String(name || "").trim();
+  if (!raw) return "ویدیو";
+  const base = raw.replace(/\.[^.]+$/, "");
+  let cleaned = base
+    .replace(/^From\s+/i, "")
+    .replace(/^[^-]+\.com-\s*/i, "")
+    .replace(/[-_]*pin-id[-_]?\d+/gi, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) cleaned = base;
+  if (cleaned.length <= 56) return cleaned;
+  return `${cleaned.slice(0, 48).trim()}…`;
 }
 
 function portalStatusBadge(
@@ -618,14 +638,23 @@ function LatestDeliveryRow({
         <div
           className={cn(
             "grid grid-cols-1 gap-4",
-            cards.length > 1 && "md:grid-cols-2",
+            cards.length > 1 && "lg:grid-cols-2 lg:gap-5",
           )}
         >
           {cards.map(({ video, variant }) => (
-            <div key={video.id} className="space-y-2">
-              <p className="text-[11px] font-medium text-muted-foreground">
-                {VIDEO_TYPE_LABELS[variant]}
-              </p>
+            <div key={video.id} className="flex h-full flex-col gap-2.5">
+              <div className="flex items-center gap-2 px-0.5">
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 shrink-0 rounded-full",
+                    variant === "CLEAN" ? "bg-amber-500" : "bg-brand",
+                  )}
+                  aria-hidden
+                />
+                <p className="text-xs font-semibold text-foreground">
+                  {VIDEO_TYPE_LABELS[variant]}
+                </p>
+              </div>
               <VideoCard
                 variant={variant}
                 video={video}
@@ -783,21 +812,26 @@ function VideoCard({
   const thumbSrc = stream ? `${stream}#t=0.5` : "";
   const statusBadge = portalStatusBadge(video, variant, isNew, locked);
   const showDecisionActions = canApprove || canRequestRevision;
+  // Never show "approved" on a payment-locked clean card — confirmation
+  // applies to the watermarked preview the customer could actually review.
+  const approved =
+    !locked && video.status === "APPROVED_BY_CUSTOMER";
+  const title = displayVideoTitle(video.name);
 
   return (
     <article
       className={cn(
         "flex h-full flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-shadow hover:shadow-md",
         locked
-          ? "border-amber-500/30"
+          ? "border-amber-500/35"
           : isNew
             ? "border-brand/45 ring-1 ring-brand/15"
-            : video.status === "APPROVED_BY_CUSTOMER"
-              ? "border-emerald-500/25"
+            : approved
+              ? "border-emerald-500/30"
               : "border-border/70",
       )}
     >
-      <div className="relative bg-neutral-950">
+      <div className="relative isolate bg-neutral-950">
         {canPlay ? (
           <button
             type="button"
@@ -810,96 +844,132 @@ function VideoCard({
               preload="metadata"
               muted
               playsInline
-              className="aspect-video w-full object-cover"
+              className="aspect-video w-full bg-neutral-950 object-cover"
               onLoadedMetadata={(e) => {
                 const d = e.currentTarget.duration;
                 if (Number.isFinite(d) && d > 0) setDurationSec(d);
               }}
             />
-            <span className="absolute inset-0 flex items-center justify-center bg-black/10 transition-colors group-hover:bg-black/35">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/95 text-foreground shadow-lg ring-1 ring-black/10 transition-transform group-hover:scale-105">
+            <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-black/20" />
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-foreground shadow-lg ring-1 ring-black/10 transition-transform duration-200 group-hover:scale-105">
                 <Play className="h-5 w-5 fill-current ps-0.5" />
               </span>
             </span>
           </button>
         ) : (
-          <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-gradient-to-br from-neutral-300 via-neutral-200 to-neutral-300 dark:from-neutral-800 dark:via-neutral-900 dark:to-neutral-800">
-            <div className="absolute inset-0 bg-background/40 backdrop-blur-[2px]" />
-            <div className="relative z-10 flex flex-col items-center gap-2 px-4 text-center">
-              <span className="flex h-11 w-11 items-center justify-center rounded-full border border-amber-500/30 bg-background/95 text-amber-700 shadow-sm dark:text-amber-300">
+          <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-neutral-900">
+            <div
+              className="absolute inset-0 opacity-[0.35]"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 30% 20%, hsl(var(--brand) / 0.22), transparent 55%), linear-gradient(160deg, #1c2430 0%, #0f141b 55%, #1a1510 100%)",
+              }}
+            />
+            <div className="relative z-10 flex flex-col items-center gap-2.5 px-5 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full border border-amber-400/35 bg-amber-500/10 text-amber-200 shadow-sm backdrop-blur-sm">
                 <Lock className="h-5 w-5" />
               </span>
-              <span className="text-xs font-medium text-muted-foreground">
-                دسترسی قفل است
-              </span>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-white">دسترسی قفل است</p>
+                <p className="max-w-[16rem] text-[11px] leading-5 text-white/65">
+                  پس از تسویه کامل پرداخت فعال می‌شود
+                </p>
+              </div>
             </div>
           </div>
         )}
 
-        <div className="absolute start-3 top-3 flex flex-wrap gap-1.5">
-          <Badge variant={statusBadge.tone} className="h-5 px-2 text-[10px] shadow-sm">
-            {statusBadge.label}
-          </Badge>
-          {video.version != null ? (
-            <Badge variant="secondary" className="h-5 px-2 text-[10px] shadow-sm">
-              نسخه {video.version}
+        <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-2 p-3">
+          <div className="flex flex-wrap gap-1.5">
+            <Badge
+              variant={statusBadge.tone}
+              className="h-6 border-0 px-2.5 text-[10px] font-medium shadow-sm backdrop-blur-sm"
+            >
+              {statusBadge.label}
             </Badge>
-          ) : null}
+            {video.version != null ? (
+              <Badge
+                variant="secondary"
+                className="h-6 border-0 bg-black/55 px-2.5 text-[10px] font-medium text-white shadow-sm backdrop-blur-sm"
+              >
+                نسخه {video.version}
+              </Badge>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 p-4 text-start">
-        <div className="space-y-2">
-          <p
-            className="line-clamp-2 text-sm font-semibold leading-snug"
+      <div className="flex flex-1 flex-col gap-3.5 p-4 text-start sm:p-5">
+        <div className="space-y-1">
+          <h4
+            className="line-clamp-2 text-[15px] font-semibold leading-6 tracking-tight text-foreground"
             title={video.name}
           >
-            {video.name}
-          </p>
-
-          <dl className="grid grid-cols-3 gap-2 text-[11px]">
-            <MetaTile label="مدت" value={formatDuration(durationSec)} />
-            <MetaTile
-              label="حجم"
-              value={
-                video.sizeBytes != null ? formatFileSize(video.sizeBytes) : "—"
-              }
-            />
-            <MetaTile
-              label="تاریخ"
-              value={dateValue ? formatDate(dateValue) : "—"}
-            />
-          </dl>
-
-          {locked ? (
-            <p className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
-              {video.accessMessage ||
-                "پس از تسویه پرداخت، پخش و دانلود فعال می‌شود."}
-            </p>
-          ) : null}
-
-          {video.status === "REVISION_REQUESTED" && video.revisionNotes ? (
-            <p className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] leading-5 text-muted-foreground">
-              <span className="font-medium text-foreground">درخواست اصلاح: </span>
-              {video.revisionNotes}
-            </p>
-          ) : null}
-
-          {video.status === "APPROVED_BY_CUSTOMER" ? (
-            <p className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-              این ویدیو تأیید شده است.
+            {title}
+          </h4>
+          {title !== video.name ? (
+            <p
+              className="truncate text-[11px] text-muted-foreground"
+              dir="ltr"
+              title={video.name}
+            >
+              {video.name}
             </p>
           ) : null}
         </div>
 
-        <div className="mt-auto space-y-2">
-          <div className="flex flex-col gap-2 sm:flex-row">
+        <dl className="grid grid-cols-3 divide-x divide-border/70 overflow-hidden rounded-xl border border-border/70 bg-muted/25 text-[11px] divide-x-reverse">
+          <MetaTile
+            icon={<Clock3 className="h-3.5 w-3.5" />}
+            label="مدت"
+            value={formatDuration(durationSec)}
+          />
+          <MetaTile
+            icon={<HardDrive className="h-3.5 w-3.5" />}
+            label="حجم"
+            value={
+              video.sizeBytes != null ? formatFileSize(video.sizeBytes) : "—"
+            }
+          />
+          <MetaTile
+            icon={<CalendarDays className="h-3.5 w-3.5" />}
+            label="تاریخ"
+            value={dateValue ? formatDate(dateValue) : "—"}
+          />
+        </dl>
+
+        {locked ? (
+          <div className="flex gap-2.5 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2.5">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300" />
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              {video.accessMessage ||
+                "نسخه بدون واترمارک پس از تسویه کامل پرداخت فعال می‌شود. فعلاً می‌توانید نسخه پیش‌نمایش را ببینید."}
+            </p>
+          </div>
+        ) : null}
+
+        {video.status === "REVISION_REQUESTED" && video.revisionNotes ? (
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-[11px] leading-5 text-muted-foreground">
+            <span className="font-medium text-foreground">درخواست اصلاح: </span>
+            {video.revisionNotes}
+          </div>
+        ) : null}
+
+        {approved ? (
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-[11px] font-medium text-emerald-800 dark:text-emerald-300">
+            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+            این ویدیو تأیید شده است
+          </div>
+        ) : null}
+
+        <div className="mt-auto space-y-2.5 pt-0.5">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {canPlay ? (
               <Button
                 size="sm"
                 variant="brand"
-                className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
+                className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
                 onClick={() => onView(video)}
               >
                 <Eye className="h-3.5 w-3.5" />
@@ -909,7 +979,7 @@ function VideoCard({
               <Button
                 size="sm"
                 variant="outline"
-                className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
+                className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
                 asChild
               >
                 <Link href={paymentDetailsHref}>
@@ -922,7 +992,7 @@ function VideoCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-9 flex-1 gap-1.5 rounded-lg text-xs"
+              className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
               disabled={!canDownload || downloading}
               onClick={async () => {
                 if (!canDownload) return;
@@ -950,22 +1020,22 @@ function VideoCard({
           </div>
 
           {showDecisionActions ? (
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-2.5">
-              <p className="mb-2 text-[10px] font-medium text-muted-foreground">
+            <div className="rounded-xl border border-border/70 bg-muted/25 p-3">
+              <p className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground">
                 تأیید یا رد این ویدیو
               </p>
               {canApprove && variant === "CLEAN" ? (
-                <p className="mb-2 text-[11px] leading-5 text-muted-foreground">
+                <p className="mb-2.5 text-[11px] leading-5 text-muted-foreground">
                   با تأیید نسخه بدون واترمارک، در صورت تسویه کامل پرداخت، پروژه
                   تکمیل می‌شود.
                 </p>
               ) : null}
-              <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {canApprove ? (
                   <Button
                     variant="brand"
                     size="sm"
-                    className="h-9 flex-1 gap-1.5 text-xs"
+                    className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
                     disabled={isApproving || isRequesting}
                     onClick={() =>
                       onApprove?.({
@@ -986,7 +1056,10 @@ function VideoCard({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-9 flex-1 gap-1.5 text-xs"
+                    className={cn(
+                      "h-10 w-full gap-1.5 rounded-xl text-xs font-medium",
+                      !canApprove && "sm:col-span-2",
+                    )}
                     disabled={isApproving || isRequesting}
                     onClick={() => onRequestRevision(video)}
                   >
@@ -1003,11 +1076,22 @@ function VideoCard({
   );
 }
 
-function MetaTile({ label, value }: { label: string; value: string }) {
+function MetaTile({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon?: ReactNode;
+}) {
   return (
-    <div className="rounded-lg bg-muted/45 px-2.5 py-2">
-      <dt className="text-[10px] text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 truncate text-xs font-medium text-foreground">
+    <div className="flex min-w-0 flex-col items-center gap-1 px-2 py-2.5 text-center sm:px-3">
+      <dt className="flex items-center gap-1 text-[10px] text-muted-foreground">
+        {icon ? <span className="opacity-70">{icon}</span> : null}
+        {label}
+      </dt>
+      <dd className="w-full truncate text-xs font-semibold tabular-nums text-foreground">
         {value}
       </dd>
     </div>

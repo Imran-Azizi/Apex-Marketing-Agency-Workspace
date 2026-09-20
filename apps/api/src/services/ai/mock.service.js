@@ -13,38 +13,68 @@ export function mockOutput(agentType, input) {
   switch (agentType) {
     case 'SCENARIO': {
       const duration = input?.durationSec || 30;
-      const single = {
-        id: 1,
-        title: 'سناریوی مشکل-راه‌حل',
-        concept:
-          'نمایش درد مشتری در ثانیه‌های اول و معرفی برند به‌عنوان راه‌حل سریع و قابل اعتماد',
-        problem: 'برند در شلوغی بازار دیده نمی‌شود و فرصت تبدیل از دست می‌رود',
-        solution: 'ویدیوی کوتاه با هوک قوی، پیام شفاف مزیت، و CTA مستقیم',
-        hook: 'آیا هنوز برای دیده شدن برندتان مشکل دارید؟',
-        storyFlow: 'شروع با مشکل → معرفی راه‌حل → نمایش مزیت → CTA',
-        content: 'شروع با مشکل → معرفی راه‌حل → نمایش مزیت → CTA',
-        sceneBreakdown: [
-          { scene: 1, description: 'هوک بصری و طرح مشکل', durationSec: 5 },
-          {
-            scene: 2,
-            description: 'نمایش راه‌حل و مزایا',
-            durationSec: Math.max(10, duration - 15),
-          },
-          { scene: 3, description: 'CTA و بستن پیام', durationSec: 10 },
-        ],
-        emotionalDirection: 'انگیزش و اعتماد',
-        marketingAngle: 'تمایز برند در ثانیه‌های اول',
-        cta: 'همین امروز تماس بگیرید',
-        totalDurationSec: duration,
-      };
+      const lang = String(input?.language || 'fa').toLowerCase();
+      const isEn = lang === 'en' || lang.startsWith('en');
+      const single = isEn
+        ? {
+            id: 1,
+            title: 'Problem–Solution Scenario',
+            concept:
+              'Open with the customer pain in the first seconds, then present the brand as a fast, trustworthy solution',
+            problem: 'The brand gets lost in a crowded market and conversion opportunities are missed',
+            solution: 'A short video with a strong hook, clear benefit message, and direct CTA',
+            hook: 'Still struggling to make your brand stand out?',
+            storyFlow: 'Open with the problem → introduce the solution → show the benefit → CTA',
+            content: 'Open with the problem → introduce the solution → show the benefit → CTA',
+            sceneBreakdown: [
+              { scene: 1, description: 'Visual hook and problem setup', durationSec: 5 },
+              {
+                scene: 2,
+                description: 'Solution and benefits',
+                durationSec: Math.max(10, duration - 15),
+              },
+              { scene: 3, description: 'CTA and closing message', durationSec: 10 },
+            ],
+            emotionalDirection: 'Motivation and trust',
+            marketingAngle: 'Brand differentiation in the first seconds',
+            cta: 'Contact us today',
+            totalDurationSec: duration,
+          }
+        : {
+            id: 1,
+            title: 'سناریوی مشکل-راه‌حل',
+            concept:
+              'نمایش درد مشتری در ثانیه‌های اول و معرفی برند به‌عنوان راه‌حل سریع و قابل اعتماد',
+            problem: 'برند در شلوغی بازار دیده نمی‌شود و فرصت تبدیل از دست می‌رود',
+            solution: 'ویدیوی کوتاه با هوک قوی، پیام شفاف مزیت، و CTA مستقیم',
+            hook: 'آیا هنوز برای دیده شدن برندتان مشکل دارید؟',
+            storyFlow: 'شروع با مشکل → معرفی راه‌حل → نمایش مزیت → CTA',
+            content: 'شروع با مشکل → معرفی راه‌حل → نمایش مزیت → CTA',
+            sceneBreakdown: [
+              { scene: 1, description: 'هوک بصری و طرح مشکل', durationSec: 5 },
+              {
+                scene: 2,
+                description: 'نمایش راه‌حل و مزایا',
+                durationSec: Math.max(10, duration - 15),
+              },
+              { scene: 3, description: 'CTA و بستن پیام', durationSec: 10 },
+            ],
+            emotionalDirection: 'انگیزش و اعتماد',
+            marketingAngle: 'تمایز برند در ثانیه‌های اول',
+            cta: 'همین امروز تماس بگیرید',
+            totalDurationSec: duration,
+          };
       return normalizeScenarioOutput(
         {
           projectId,
+          language: input?.language || 'fa',
+          tone: input?.tone || '',
           ...single,
           scenarios: [single],
           recommendedScenarioId: 1,
         },
         projectId,
+        { language: input?.language || 'fa', tone: input?.tone || '' },
       );
     }
     case 'NARRATION': {
@@ -60,13 +90,11 @@ export function mockOutput(agentType, input) {
           script: primary,
           language: lang,
           tone,
-          toneExplanation:
-            lang === 'en'
-              ? `Selected ${tone} tone to match brand voice, audience, and campaign goal.`
-              : `لحن «${tone}» بر اساس هویت برند، مخاطب و هدف کمپین انتخاب شد.`,
+          toneExplanation: '',
           estimatedSeconds: input?.durationSec || 30,
         },
         projectId,
+        { language: lang, tone },
       );
     }
     case 'STORYBOARD':

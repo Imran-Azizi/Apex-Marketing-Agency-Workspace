@@ -269,6 +269,11 @@ export const env = {
   ),
   /** When true, failed live providers may return mock content (dev only). */
   aiAllowMockFallback: bool("AI_ALLOW_MOCK_FALLBACK", false),
+  /**
+   * When true, Scenario / Narration / Storyboard use paid models instead of
+   * the free OpenRouter catalog. Default false — content stays on free models.
+   */
+  aiContentPreferQuality: bool("AI_CONTENT_PREFER_QUALITY", false),
   aiAsyncPipeline: process.env.AI_ASYNC_PIPELINE !== "false",
 
   // OpenRouter (primary)
@@ -331,6 +336,9 @@ export const env = {
     process.env.GEMINI_MODEL ||
     "gemini-2.0-flash",
   geminiModelLight: process.env.GEMINI_MODEL_LIGHT || "gemini-2.0-flash-lite",
+  /** Gemini native image model (generateContent with IMAGE modality). */
+  geminiImageModel:
+    process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image",
 
   defaultManagerEmail: process.env.DEFAULT_MANAGER_EMAIL || "manager@apex.af",
   defaultManagerPassword:

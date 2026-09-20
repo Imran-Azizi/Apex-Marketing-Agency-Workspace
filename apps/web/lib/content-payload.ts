@@ -39,6 +39,15 @@ export type StoryboardSceneFormState = {
   imagePrompt: string;
 };
 
+export type StoryboardUploadedImage = {
+  url: string;
+  storageKey: string;
+  name?: string;
+  originalName?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -91,6 +100,21 @@ export function emptyStoryboardScenes(): StoryboardSceneFormState[] {
 }
 
 export function loadScenarioForm(value: unknown): ScenarioFormState {
+  const obj = asRecord(value);
+  if (obj?.preserveExact === true && typeof obj.manualRaw === "string") {
+    return {
+      ...emptyScenarioForm(),
+      title: str(obj.title) || "سناریوی دستی",
+      storyFlow: obj.manualRaw,
+      concept: str(obj.concept),
+      problem: str(obj.problem),
+      solution: str(obj.solution),
+      hook: str(obj.hook),
+      cta: str(obj.cta),
+      emotionalDirection: str(obj.emotionalDirection),
+      marketingAngle: str(obj.marketingAngle),
+    };
+  }
   const scenario = resolveSingleScenario(value);
   if (!scenario) return emptyScenarioForm();
   return {
@@ -116,12 +140,197 @@ export function loadNarrationForm(value: unknown): NarrationFormState {
     }
     return emptyNarrationForm();
   }
+  if (obj.preserveExact === true && typeof obj.manualRaw === "string") {
+    return {
+      ...emptyNarrationForm(),
+      script: obj.manualRaw || str(obj.script),
+      tone: str(obj.tone),
+      language: str(obj.language) || "fa",
+      toneExplanation: str(obj.toneExplanation),
+    };
+  }
   return {
     script: str(obj.script),
     tone: str(obj.tone),
     language: str(obj.language) || "fa",
     toneExplanation: str(obj.toneExplanation),
   };
+}
+
+function pushLabeledBlock(
+  lines: string[],
+  label: string,
+  value: unknown,
+) {
+  const text = str(value).trim();
+  if (!text) return;
+  lines.push(`${label}:`);
+  lines.push(text);
+  lines.push("");
+}
+
+/** Flatten scenario JSON into one editable plain-text document. */
+export function scenarioToEditableText(value: unknown): string {
+  const obj = asRecord(value);
+  if (obj?.preserveExact === true && typeof obj.manualRaw === "string") {
+    return obj.manualRaw;
+  }
+  if (typeof value === "string") return value;
+
+  const scenario = resolveSingleScenario(value);
+  if (!scenario) return "";
+
+  const lines: string[] = [];
+  if (str(scenario.title).trim()) {
+    lines.push(str(scenario.title).trim());
+    lines.push("");
+  }
+  if (scenario.totalDurationSec) {
+    lines.push(`مدت: ${scenario.totalDurationSec} ثانیه`);
+    lines.push("");
+  }
+  pushLabeledBlock(lines, "مفهوم اصلی", scenario.concept);
+  pushLabeledBlock(lines, "مشکل", scenario.problem);
+  pushLabeledBlock(lines, "راه‌حل", scenario.solution);
+  pushLabeledBlock(lines, "هوک", scenario.hook);
+  pushLabeledBlock(lines, "جریان ویدیو", scenario.storyFlow || (scenario as { content?: string }).content);
+  pushLabeledBlock(lines, "زاویه بازاریابی", scenario.marketingAngle);
+  pushLabeledBlock(lines, "جهت احساسی", scenario.emotionalDirection);
+  pushLabeledBlock(lines, "CTA", scenario.cta);
+
+  if (Array.isArray(scenario.sceneBreakdown) && scenario.sceneBreakdown.length) {
+    lines.push("ساختار صحنه:");
+    scenario.sceneBreakdown.forEach((scene, i) => {
+      const n = Number(scene?.scene ?? i + 1) || i + 1;
+      const desc = str(scene?.description).trim() || "—";
+      const dur = scene?.durationSec ? ` (${scene.durationSec}s)` : "";
+      lines.push(`${n}. ${desc}${dur}`);
+    });
+    lines.push("");
+  }
+
+  return lines.join("\n").trim();
+}
+
+/** Flatten narration JSON into one editable plain-text document. */
+export function narrationToEditableText(value: unknown): string {
+  const obj = asRecord(value);
+  if (obj?.preserveExact === true && typeof obj.manualRaw === "string") {
+    return obj.manualRaw;
+  }
+  if (typeof value === "string") return value;
+  return str(obj?.script).trim();
+}
+
+/** Flatten storyboard JSON into one editable plain-text document. */
+export function storyboardToEditableText(value: unknown): string {
+  const obj = asRecord(value);
+  if (obj?.preserveExact === true && typeof obj.manualRaw === "string") {
+    return obj.manualRaw;
+  }
+  if (typeof value === "string") return value;
+
+  const scenes = loadStoryboardScenes(value).filter(
+    (s) =>
+      s.title.trim() ||
+      s.visualDescription.trim() ||
+      s.characterActions.trim() ||
+      s.camera.trim() ||
+      s.duration.trim(),
+  );
+  if (!scenes.length) return "";
+
+  const lines: string[] = [];
+  scenes.forEach((scene, i) => {
+    const n = scene.sceneNumber || i + 1;
+    lines.push(`صحنه ${n}${scene.title.trim() ? ` — ${scene.title.trim()}` : ""}`);
+    if (scene.camera.trim()) lines.push(`دوربین: ${scene.camera.trim()}`);
+    if (scene.duration.trim()) lines.push(`مدت: ${scene.duration.trim()}`);
+    if (scene.visualDescription.trim()) {
+      lines.push("توضیح تصویری:");
+      lines.push(scene.visualDescription.trim());
+    }
+    if (scene.characterActions.trim()) {
+      lines.push("اقدام شخصیت:");
+      lines.push(scene.characterActions.trim());
+    }
+    if (scene.transition.trim()) lines.push(`انتقال: ${scene.transition.trim()}`);
+    if (scene.notes.trim()) lines.push(`یادداشت: ${scene.notes.trim()}`);
+    lines.push("");
+  });
+  return lines.join("\n").trim();
+}
+
+/** Keep previously uploaded / generated storyboard images when editing. */
+export function extractStoryboardUploadedImages(
+  value: unknown,
+): StoryboardUploadedImage[] {
+  const obj = asRecord(value);
+  if (!obj) return [];
+
+  if (Array.isArray(obj.uploadedImages) && obj.uploadedImages.length) {
+    return obj.uploadedImages
+      .map((item) => {
+        const img = asRecord(item);
+        if (!img) return null;
+        const url = str(img.url).trim();
+        const storageKey = str(img.storageKey).trim();
+        if (!url && !storageKey) return null;
+        const next: StoryboardUploadedImage = {
+          url: url || (storageKey ? storageKey : ""),
+          storageKey: storageKey || url,
+          name: str(img.name) || undefined,
+          originalName: str(img.originalName) || undefined,
+          mimeType: str(img.mimeType) || undefined,
+          sizeBytes:
+            typeof img.sizeBytes === "number" ? img.sizeBytes : undefined,
+        };
+        return next;
+      })
+      .filter((item): item is StoryboardUploadedImage => item != null);
+  }
+
+  const collected: StoryboardUploadedImage[] = [];
+  const collageKey = str(
+    obj.collageImageStorageKey || obj.collage_image_storage_key,
+  ).trim();
+  const collageUrlRaw = str(
+    obj.collageImageUrl || obj.collage_image_url,
+  ).trim();
+  if (collageKey || collageUrlRaw) {
+    collected.push({
+      url: collageUrlRaw || collageKey,
+      storageKey: collageKey || collageUrlRaw,
+      name: "شیت استوری‌بورد",
+      originalName: "شیت استوری‌بورد",
+    });
+  }
+
+  const scenes = (
+    Array.isArray(obj.storyboard)
+      ? obj.storyboard
+      : Array.isArray(obj.scenes)
+        ? obj.scenes
+        : []
+  ) as Array<Record<string, unknown>>;
+
+  scenes.forEach((scene, i) => {
+    const key = str(scene.imageStorageKey || scene.image_storage_key).trim();
+    const url = str(scene.imageUrl || scene.image_url).trim();
+    if (!key && !url) return;
+    const storageKey = key || url;
+    if (collected.some((img) => img.storageKey === storageKey || img.url === url)) {
+      return;
+    }
+    collected.push({
+      url: url || key,
+      storageKey,
+      name: str(scene.title) || `صحنه ${i + 1}`,
+      originalName: str(scene.title) || `صحنه ${i + 1}`,
+    });
+  });
+
+  return collected;
 }
 
 export function loadStoryboardScenes(
@@ -188,7 +397,7 @@ export function buildScenarioPayload(
     totalDurationSec: Number(base.totalDurationSec) || 30,
   };
 
-  return {
+  const next: Record<string, unknown> = {
     ...base,
     ...fields,
     projectId: base.projectId,
@@ -196,6 +405,9 @@ export function buildScenarioPayload(
     scenarios: [fields],
     hooks: fields.hook ? [fields.hook] : [],
   };
+  delete next.preserveExact;
+  delete next.manualRaw;
+  return next;
 }
 
 export function buildNarrationPayload(
@@ -203,16 +415,19 @@ export function buildNarrationPayload(
   original: unknown,
 ): Record<string, unknown> {
   const base = asRecord(original) || {};
-  return {
+  const next: Record<string, unknown> = {
     ...base,
     projectId: base.projectId,
     script: form.script.trim(),
-    tone: form.tone.trim() || "Professional",
+    tone: form.tone.trim(),
     language: form.language.trim() || "fa",
-    toneExplanation: form.toneExplanation.trim(),
+    toneExplanation: "",
     estimatedSeconds: Number(base.estimatedSeconds) || 30,
     estimated_duration: String(Number(base.estimatedSeconds) || 30),
   };
+  delete next.preserveExact;
+  delete next.manualRaw;
+  return next;
 }
 
 export function buildStoryboardPayload(
@@ -249,6 +464,8 @@ export function buildStoryboardPayload(
     storyboard: normalized,
     scenes: normalized,
   };
+  delete next.preserveExact;
+  delete next.manualRaw;
 
   if (collage !== undefined) {
     if (collage) {
@@ -320,15 +537,6 @@ export function buildExactNarrationPayload(rawText: string): Record<string, unkn
     estimated_duration: "30",
   };
 }
-
-export type StoryboardUploadedImage = {
-  url: string;
-  storageKey: string;
-  name?: string;
-  originalName?: string;
-  mimeType?: string;
-  sizeBytes?: number;
-};
 
 function mapUploadedImages(images: StoryboardUploadedImage[]) {
   return images.map((img) => ({

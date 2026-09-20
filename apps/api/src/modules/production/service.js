@@ -1615,11 +1615,11 @@ export const productionService = {
     const customerApproved =
       !!clientFinalApproval || project.status === "WAITING_PAYMENT";
 
-    // Self-heal: persist APPROVED_BY_CUSTOMER on watermarked cards if approval exists.
+    // Self-heal: persist APPROVED_BY_CUSTOMER on watermarked cards only.
+    // Never backfill locked clean files — that falsely shows "تأیید شده".
     if (customerApproved) {
       const needsBackfill = files.some((f) => {
-        if (f.kind !== "WATERMARKED_FINAL" && f.kind !== "CLEAN_FINAL")
-          return false;
+        if (f.kind !== "WATERMARKED_FINAL") return false;
         const meta =
           f.meta && typeof f.meta === "object" && !Array.isArray(f.meta)
             ? f.meta
@@ -1635,6 +1635,7 @@ export const productionService = {
           await import("./finalProduct.js");
         await markSentFinalsApprovedByCustomer(prisma, projectId, {
           approvedAt: clientFinalApproval?.createdAt || new Date(),
+          includeClean: false,
         });
         const refreshed = await prisma.projectFile.findMany({
           where: {

@@ -29,6 +29,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -43,7 +51,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, PlusCircle, Search, Trash2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  PlusCircle,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   DELIVERY_STATUS_FILTER_OPTIONS,
@@ -150,6 +165,7 @@ export default function ProjectsPage() {
   const [createdFrom, setCreatedFrom] = useState("");
   const [createdTo, setCreatedTo] = useState("");
   const [page, setPage] = useState(1);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -433,6 +449,119 @@ export default function ProjectsPage() {
   const showEmptyCatalog = Boolean(data && total === 0 && !hasActiveFilters);
   const showEmptyFiltered = Boolean(data && total === 0 && hasActiveFilters);
 
+  function renderSearchField(
+    className = "w-[min(20rem,55vw)] shrink-0 sm:w-[18rem] lg:w-[20rem]",
+  ) {
+    return (
+      <div className={`relative ${className}`}>
+        <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="جستجو: پروژه، مشتری، شرکت یا شناسه…"
+          className="h-10 ps-9 pe-9"
+          aria-label="جستجوی پروژه‌ها"
+        />
+        {searchInput ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchInput("");
+              setSearch("");
+              setPage(1);
+            }}
+            className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            title="پاک کردن جستجو"
+            aria-label="پاک کردن جستجو"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderCustomerSelect(
+    triggerClassName = "h-10 w-[10.5rem] shrink-0",
+  ) {
+    return (
+      <Select value={customerId} onValueChange={setCustomerFilter}>
+        <SelectTrigger className={triggerClassName} aria-label="فیلتر مشتری">
+          <SelectValue placeholder="مشتری" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>همه مشتریان</SelectItem>
+          {(filterOptions?.customers ?? []).map((customer) => (
+            <SelectItem key={customer.id} value={customer.id}>
+              {customerLabel(customer)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  function renderEditorSelect(triggerClassName = "h-10 w-[10rem] shrink-0") {
+    return (
+      <Select value={editorId} onValueChange={setEditorFilter}>
+        <SelectTrigger className={triggerClassName} aria-label="فیلتر ویرایشگر">
+          <SelectValue placeholder="ویرایشگر" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>همه ویرایشگرها</SelectItem>
+          {(filterOptions?.editors ?? []).map((editor) => (
+            <SelectItem key={editor.id} value={editor.id}>
+              {editor.fullName}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  function renderDeliverySelect(triggerClassName = "h-10 w-[10rem] shrink-0") {
+    return (
+      <Select value={deliveryStatus} onValueChange={setDeliveryFilter}>
+        <SelectTrigger
+          className={triggerClassName}
+          aria-label="فیلتر وضعیت تحویل"
+        >
+          <SelectValue placeholder="تحویل" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={ALL}>همه وضعیت‌های تحویل</SelectItem>
+          {DELIVERY_STATUS_FILTER_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
+  function renderCreatedPresetSelect(
+    triggerClassName = "h-10 w-[9.5rem] shrink-0",
+  ) {
+    return (
+      <Select value={createdPreset} onValueChange={setCreatedPresetFilter}>
+        <SelectTrigger
+          className={triggerClassName}
+          aria-label="فیلتر تاریخ ایجاد"
+        >
+          <SelectValue placeholder="تاریخ ایجاد" />
+        </SelectTrigger>
+        <SelectContent>
+          {DATE_PRESET_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
   return (
     <div className="min-w-0">
       <PageHeader
@@ -454,6 +583,93 @@ export default function ProjectsPage() {
           ) : null
         }
       />
+
+      <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <SheetContent
+          side="bottom"
+          className="max-h-[85vh] rounded-t-2xl px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2"
+        >
+          <SheetHeader className="text-start">
+            <SheetTitle>فیلترها</SheetTitle>
+            <SheetDescription>
+              مشتری، ویرایشگر، وضعیت تحویل و تاریخ ایجاد را انتخاب کنید. فیلترها
+              بلافاصله اعمال می‌شوند.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="mt-5 space-y-4">
+            <div className="space-y-2">
+              <p className="text-sm font-medium">مشتری</p>
+              {renderCustomerSelect("h-10 w-full")}
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">ویرایشگر</p>
+              {renderEditorSelect("h-10 w-full")}
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">وضعیت تحویل</p>
+              {renderDeliverySelect("h-10 w-full")}
+            </div>
+            <div className="space-y-2">
+              <p className="text-sm font-medium">تاریخ ایجاد</p>
+              {renderCreatedPresetSelect("h-10 w-full")}
+            </div>
+            {createdPreset === "custom" ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">از</p>
+                  <Input
+                    type="date"
+                    value={createdFrom}
+                    onChange={(e) => {
+                      setCreatedFrom(e.target.value);
+                      setPage(1);
+                    }}
+                    className="h-10 w-full"
+                    dir="ltr"
+                    aria-label="از تاریخ"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">تا</p>
+                  <Input
+                    type="date"
+                    value={createdTo}
+                    onChange={(e) => {
+                      setCreatedTo(e.target.value);
+                      setPage(1);
+                    }}
+                    className="h-10 w-full"
+                    dir="ltr"
+                    aria-label="تا تاریخ"
+                  />
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <SheetFooter className="mt-6 flex-row gap-2 sm:space-x-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={clearDropdownFilters}
+              disabled={activeDropdownFilters === 0}
+            >
+              <X className="h-4 w-4" />
+              حذف فیلترها
+            </Button>
+            <Button
+              type="button"
+              variant="brand"
+              className="flex-1"
+              onClick={() => setFiltersOpen(false)}
+            >
+              مشاهده نتایج
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">
@@ -492,102 +708,40 @@ export default function ProjectsPage() {
       </Dialog>
 
       <div className="space-y-4">
-        <div className="-mx-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:thin]">
+        {/* Mobile: search + filters button */}
+        <div className="flex items-center gap-2 md:hidden">
+          {renderSearchField("min-w-0 flex-1")}
+          <Button
+            type="button"
+            variant={activeDropdownFilters > 0 ? "secondary" : "outline"}
+            className="relative h-10 shrink-0 gap-1.5 px-3"
+            onClick={() => setFiltersOpen(true)}
+            aria-label="باز کردن فیلترها"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            <span>فیلترها</span>
+            {activeDropdownFilters > 0 ? (
+              <Badge
+                variant="brand"
+                className="h-5 min-w-5 justify-center rounded-full px-1.5 text-[10px] leading-none"
+              >
+                {activeDropdownFilters.toLocaleString("fa-AF", {
+                  numberingSystem: "latn",
+                })}
+              </Badge>
+            ) : null}
+          </Button>
+        </div>
+
+        {/* Desktop / tablet: inline filters */}
+        <div className="-mx-1 hidden overflow-x-auto px-1 pb-0.5 [scrollbar-width:thin] md:block">
           <div className="flex min-w-max items-center gap-2">
-            <div className="relative w-[min(20rem,55vw)] shrink-0 sm:w-[18rem] lg:w-[20rem]">
-              <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="جستجو: پروژه، مشتری، شرکت یا شناسه…"
-                className="h-10 ps-9 pe-9"
-                aria-label="جستجوی پروژه‌ها"
-              />
-              {searchInput && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchInput("");
-                    setSearch("");
-                    setPage(1);
-                  }}
-                  className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  title="پاک کردن جستجو"
-                  aria-label="پاک کردن جستجو"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-
-            <Select value={customerId} onValueChange={setCustomerFilter}>
-              <SelectTrigger
-                className="h-10 w-[10.5rem] shrink-0"
-                aria-label="فیلتر مشتری"
-              >
-                <SelectValue placeholder="مشتری" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>همه مشتریان</SelectItem>
-                {(filterOptions?.customers ?? []).map((customer) => (
-                  <SelectItem key={customer.id} value={customer.id}>
-                    {customerLabel(customer)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={editorId} onValueChange={setEditorFilter}>
-              <SelectTrigger
-                className="h-10 w-[10rem] shrink-0"
-                aria-label="فیلتر ویرایشگر"
-              >
-                <SelectValue placeholder="ویرایشگر" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>همه ویرایشگرها</SelectItem>
-                {(filterOptions?.editors ?? []).map((editor) => (
-                  <SelectItem key={editor.id} value={editor.id}>
-                    {editor.fullName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={deliveryStatus} onValueChange={setDeliveryFilter}>
-              <SelectTrigger
-                className="h-10 w-[10rem] shrink-0"
-                aria-label="فیلتر وضعیت تحویل"
-              >
-                <SelectValue placeholder="تحویل" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>همه وضعیت‌های تحویل</SelectItem>
-                {DELIVERY_STATUS_FILTER_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={createdPreset} onValueChange={setCreatedPresetFilter}>
-              <SelectTrigger
-                className="h-10 w-[9.5rem] shrink-0"
-                aria-label="فیلتر تاریخ ایجاد"
-              >
-                <SelectValue placeholder="تاریخ ایجاد" />
-              </SelectTrigger>
-              <SelectContent>
-                {DATE_PRESET_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {createdPreset === "custom" && (
+            {renderSearchField()}
+            {renderCustomerSelect()}
+            {renderEditorSelect()}
+            {renderDeliverySelect()}
+            {renderCreatedPresetSelect()}
+            {createdPreset === "custom" ? (
               <>
                 <Input
                   type="date"
@@ -612,9 +766,8 @@ export default function ProjectsPage() {
                   aria-label="تا تاریخ"
                 />
               </>
-            )}
-
-            {activeDropdownFilters > 0 && (
+            ) : null}
+            {activeDropdownFilters > 0 ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -624,7 +777,7 @@ export default function ProjectsPage() {
                 <X className="h-4 w-4" />
                 پاک کردن فیلترها
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -717,16 +870,16 @@ export default function ProjectsPage() {
                 isFetching ? "opacity-70 transition-opacity" : undefined
               }
             >
-              <Table className="min-w-[48rem]">
+              <Table scrollContainer={false} className="min-w-[56rem]">
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       کد
                     </TableHead>
-                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    <TableHead className="sticky top-0 z-[1] min-w-[12rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       عنوان
                     </TableHead>
-                    <TableHead className="sticky top-0 z-[1] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       مشتری
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">

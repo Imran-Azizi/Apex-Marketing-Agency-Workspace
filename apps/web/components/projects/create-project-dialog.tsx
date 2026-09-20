@@ -67,7 +67,6 @@ type CreateCustomerOption = {
 
 type CreateOptionsResponse = {
   customers: CreateCustomerOption[];
-  services: Array<{ id: string; name: string; revisionCount?: number }>;
   formats: Array<{ id: string; name: string; ratio: string }>;
 };
 
@@ -90,8 +89,6 @@ const PLATFORMS: { id: string; label: string }[] = [
   { id: "YouTube", label: "یوتیوب" },
   { id: "Other", label: "سایر" },
 ];
-
-const NONE = "__none__";
 
 type WizardStepId = "customer" | "content" | "video";
 
@@ -168,7 +165,6 @@ export function CreateProjectDialog({
     useState<CreateCustomerOption | null>(null);
 
   const [title, setTitle] = useState("");
-  const [serviceId, setServiceId] = useState(NONE);
   const [agreedPrice, setAgreedPrice] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -203,7 +199,6 @@ export function CreateProjectDialog({
     setPickerOpen(false);
     setSelectedCustomer(null);
     setTitle("");
-    setServiceId(NONE);
     setAgreedPrice("");
     setNotes("");
     setProductName("");
@@ -239,7 +234,6 @@ export function CreateProjectDialog({
   });
 
   const customers = optionsQuery.data?.customers || [];
-  const services = optionsQuery.data?.services || [];
   const formats = optionsQuery.data?.formats || [];
 
   useEffect(() => {
@@ -366,7 +360,6 @@ export function CreateProjectDialog({
     createMutation.mutate({
       crmCustomerId: selectedCustomer.id,
       title: autoTitle,
-      serviceId: serviceId === NONE ? null : serviceId,
       formatId: aspect.formatId || null,
       customAspectRatio: aspect.customRatio?.trim() || null,
       durationSec: durationSec || null,
@@ -416,49 +409,52 @@ export function CreateProjectDialog({
 
           <nav
             aria-label="مراحل ایجاد پروژه"
-            className="mt-4 flex items-center gap-1 overflow-x-auto pb-0.5"
+            className="apex-h-scroll mt-4 -mx-1 overflow-x-auto overscroll-x-contain px-1 pb-1 [scrollbar-width:thin]"
           >
-            {WIZARD_STEPS.map((step, index) => {
-              const Icon = step.icon;
-              const active = index === stepIndex;
-              const done = index < stepIndex;
-              return (
-                <button
-                  key={step.id}
-                  type="button"
-                  disabled={pending}
-                  onClick={() => {
-                    if (index < stepIndex) {
-                      setStepError(null);
-                      setStepIndex(index);
-                    }
-                  }}
-                  className={cn(
-                    "flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-2.5 py-2 text-start transition-colors",
-                    active && "border-brand/45 bg-brand/[0.07]",
-                    done && !active && "border-border/50 bg-muted/30",
-                    !active && !done && "border-transparent bg-muted/15",
-                  )}
-                >
-                  <span
+            <div className="flex w-max min-w-full gap-2">
+              {WIZARD_STEPS.map((step, index) => {
+                const Icon = step.icon;
+                const active = index === stepIndex;
+                const done = index < stepIndex;
+                return (
+                  <button
+                    key={step.id}
+                    type="button"
+                    disabled={pending}
+                    onClick={() => {
+                      if (index < stepIndex) {
+                        setStepError(null);
+                        setStepIndex(index);
+                      }
+                    }}
                     className={cn(
-                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold",
-                      active && "bg-brand text-brand-foreground",
-                      done && !active && "bg-brand/15 text-brand",
-                      !active && !done && "bg-muted text-muted-foreground",
+                      "inline-flex h-11 shrink-0 items-center gap-2 rounded-xl border px-3 text-start transition-colors",
+                      active && "border-brand/45 bg-brand/[0.07]",
+                      done && !active && "border-border/50 bg-muted/30",
+                      !active && !done && "border-border/60 bg-muted/15",
                     )}
                   >
-                    {done ? <Check className="h-3.5 w-3.5" /> : <Icon className="h-3.5 w-3.5" />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[11px] font-semibold sm:text-xs">
-                      <span className="sm:hidden">{step.shortLabel}</span>
-                      <span className="hidden sm:inline">{step.label}</span>
+                    <span
+                      className={cn(
+                        "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold",
+                        active && "bg-brand text-brand-foreground",
+                        done && !active && "bg-brand/15 text-brand",
+                        !active && !done && "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {done ? (
+                        <Check className="h-3.5 w-3.5" />
+                      ) : (
+                        <Icon className="h-3.5 w-3.5" />
+                      )}
                     </span>
-                  </span>
-                </button>
-              );
-            })}
+                    <span className="whitespace-nowrap text-xs font-semibold">
+                      {step.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </nav>
         </DialogHeader>
 
@@ -603,41 +599,19 @@ export function CreateProjectDialog({
                 />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <FieldLabel>سرویس</FieldLabel>
-                  <Select
-                    value={serviceId}
-                    onValueChange={setServiceId}
-                    disabled={pending}
-                  >
-                    <SelectTrigger className="h-11 rounded-xl">
-                      <SelectValue placeholder="انتخاب سرویس" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>بدون سرویس</SelectItem>
-                      {services.map((service) => (
-                        <SelectItem key={service.id} value={service.id}>
-                          {service.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <FieldLabel htmlFor="create-project-price" required>
-                    مبلغ توافق‌شده (افغانی)
-                  </FieldLabel>
-                  <Input
-                    id="create-project-price"
-                    disabled={pending}
-                    inputMode="decimal"
-                    value={agreedPrice}
-                    onChange={(e) => setAgreedPrice(e.target.value)}
-                    className="h-11 rounded-xl"
-                    placeholder="الزامی"
-                  />
-                </div>
+              <div className="space-y-1.5">
+                <FieldLabel htmlFor="create-project-price" required>
+                  مبلغ توافق‌شده (افغانی)
+                </FieldLabel>
+                <Input
+                  id="create-project-price"
+                  disabled={pending}
+                  inputMode="decimal"
+                  value={agreedPrice}
+                  onChange={(e) => setAgreedPrice(e.target.value)}
+                  className="h-11 rounded-xl"
+                  placeholder="الزامی"
+                />
               </div>
 
               <div className="space-y-1.5">

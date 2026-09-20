@@ -11,15 +11,33 @@ interface VideoPlayerProps {
   className?: string;
   title?: string;
   autoPlay?: boolean;
+  /**
+   * Attach media immediately (skip viewport arming) and preload metadata.
+   * Use on dedicated watch pages where the video is the primary content.
+   */
+  eager?: boolean;
   /** MIME type hint for the browser (defaults to video/mp4). */
   type?: string;
+  /** Loading overlay label. */
+  loadingLabel?: string;
+}
+
+function resolveSourceType(type?: string): string | undefined {
+  const mime = String(type || "")
+    .trim()
+    .toLowerCase();
+  if (!mime || mime === "application/octet-stream") return undefined;
+  if (!mime.startsWith("video/")) return undefined;
+  // Prefer standard MP4 MIME — some uploads store non-standard aliases.
+  if (mime === "video/x-m4v" || mime === "video/mpeg") return "video/mp4";
+  return mime;
 }
 
 /**
  * Professional HTML5 video player with loading / error states.
  * `src` is attached only when the player is near the viewport so large
  * files do not download on first paint. preload=metadata keeps bandwidth
- * low until the user presses play.
+ * low until the user presses play (or eager/autoPlay requests more).
  */
 export function VideoPlayer({
   src,
@@ -27,25 +45,28 @@ export function VideoPlayer({
   className,
   title,
   autoPlay = false,
+  eager = false,
   type = "video/mp4",
+  loadingLabel = "در حال بارگذاری",
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [armed, setArmed] = useState(autoPlay);
+  const [armed, setArmed] = useState(autoPlay || eager);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const waitingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sourceType = resolveSourceType(type);
 
   useEffect(() => {
     setError(null);
-    if (autoPlay) setArmed(true);
+    if (autoPlay || eager) setArmed(true);
     return () => {
       if (waitingTimer.current) clearTimeout(waitingTimer.current);
     };
-  }, [src, autoPlay]);
+  }, [src, autoPlay, eager]);
 
   useEffect(() => {
-    if (armed || autoPlay) return;
+    if (armed || autoPlay || eager) return;
     const el = containerRef.current;
     if (!el) return;
     if (typeof IntersectionObserver === "undefined") {
@@ -59,11 +80,11 @@ export function VideoPlayer({
           observer.disconnect();
         }
       },
-      { rootMargin: "200px 0px", threshold: 0.01 },
+      { rootMargin: "120px 0px", threshold: 0.01 },
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [armed, autoPlay]);
+  }, [armed, autoPlay, eager]);
 
   if (!src) {
     return (
@@ -82,6 +103,7 @@ export function VideoPlayer({
   }
 
   const mediaSrc = armed ? src : undefined;
+  const preload = autoPlay ? "auto" : eager ? "metadata" : "none";
 
   return (
     <div
@@ -89,10 +111,12 @@ export function VideoPlayer({
       className={cn("relative overflow-hidden rounded-xl bg-black", className)}
     >
       {loading && !error && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/50">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black/45">
           <div className="flex flex-col items-center gap-2 text-white">
-            <Loader2 className="h-8 w-8 animate-spin" />
-            <span className="text-xs">در حال آماده‌سازی ویدیو…</span>
+            <Loader2 className="h-7 w-7 animate-spin" />
+            <span className="text-xs font-medium tracking-wide">
+              {loadingLabel}
+            </span>
           </div>
         </div>
       )}
@@ -110,12 +134,11 @@ export function VideoPlayer({
       <video
         ref={videoRef}
         key={armed ? src : "poster"}
-        src={mediaSrc}
         poster={poster}
         title={title}
         controls
         playsInline
-        preload={autoPlay ? "auto" : "none"}
+        preload={preload}
         autoPlay={autoPlay}
         className="aspect-video w-full max-w-full bg-black object-contain"
         onLoadStart={() => {
@@ -128,7 +151,7 @@ export function VideoPlayer({
         onCanPlay={() => setLoading(false)}
         onWaiting={() => {
           if (waitingTimer.current) clearTimeout(waitingTimer.current);
-          waitingTimer.current = setTimeout(() => setLoading(true), 400);
+          waitingTimer.current = setTimeout(() => setLoading(true), 280);
         }}
         onPlaying={() => {
           if (waitingTimer.current) clearTimeout(waitingTimer.current);
@@ -140,7 +163,12 @@ export function VideoPlayer({
           setError("فایل ویدیو در دسترس نیست یا فرمت آن پشتیبانی نمی‌شود.");
         }}
       >
-        {mediaSrc ? <source src={mediaSrc} type={type} /> : null}
+        {mediaSrc ? (
+          <source
+            src={mediaSrc}
+            {...(sourceType ? { type: sourceType } : {})}
+          />
+        ) : null}
         مرورگر شما از پخش ویدیو پشتیبانی نمی‌کند.
       </video>
     </div>

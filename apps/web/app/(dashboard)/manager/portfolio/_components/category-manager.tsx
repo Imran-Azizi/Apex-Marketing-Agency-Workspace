@@ -108,10 +108,10 @@ export function CategoryManager({
 
   return (
     <div className="space-y-4 text-start" dir="rtl">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">مدیریت کتگوری ها</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 sm:gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold sm:text-lg">مدیریت کتگوری ها</h2>
+          <p className="mt-1 hidden text-sm text-muted-foreground sm:block">
             کتگوری‌های ازپیش‌تعریف‌شده را فعال کنید و ترتیب ویدیوهای هر دسته را
             تنظیم کنید.
           </p>
@@ -119,7 +119,8 @@ export function CategoryManager({
         {canEdit ? (
           <Button
             variant="outline"
-            className="gap-2"
+            size="sm"
+            className="h-9 shrink-0 gap-1.5 px-3 sm:h-10 sm:gap-2 sm:px-4"
             onClick={() => setCreateOpen(true)}
           >
             <Plus className="h-4 w-4" />

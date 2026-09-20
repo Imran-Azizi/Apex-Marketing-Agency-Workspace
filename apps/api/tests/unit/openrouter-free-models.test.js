@@ -129,6 +129,12 @@ test('mergeAdminConfig can disable free-only mode', () => {
   assert.equal(cfg.allowPaidFallback, true);
 });
 
+test('mergeAdminConfig can enable free-only mode explicitly', () => {
+  const cfg = mergeAdminConfig({ freeModelsOnly: true, allowPaidFallback: false });
+  assert.equal(cfg.freeModelsOnly, true);
+  assert.equal(cfg.allowPaidFallback, false);
+});
+
 test('caps free-model max tokens to the provider limit', () => {
   assert.equal(capFreeMaxTokens(4096, { maxCompletionTokens: 1024 }), 1024);
   assert.equal(capFreeMaxTokens(256, { maxCompletionTokens: 8192 }), 256);

@@ -77,7 +77,26 @@ export function createApp() {
         : false,
     }),
   );
-  app.use(compression());
+  // Skip compression for ranged / AV streams — gzip breaks HTML5 seeking
+  // (Content-Length / Content-Range) and can buffer entire videos in memory.
+  app.use(
+    compression({
+      filter(req, res) {
+        if (req.headers.range) return false;
+        const path = String(req.originalUrl || req.url || "");
+        if (
+          /\/files\/(media|raw)\//.test(path) ||
+          /\/portfolio\/[^/]+\/stream/.test(path) ||
+          /\/chat\/.*\/(?:attachment|stream)/.test(path)
+        ) {
+          return false;
+        }
+        const type = String(res.getHeader("Content-Type") || "");
+        if (type.startsWith("video/") || type.startsWith("audio/")) return false;
+        return compression.filter(req, res);
+      },
+    }),
+  );
   app.use(
     cors({
       origin(origin, callback) {

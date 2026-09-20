@@ -95,107 +95,6 @@ function asStringList(value: unknown): string[] {
   return value.map((item) => asString(item)).filter(Boolean);
 }
 
-const KNOWN_BRIEF_KEYS = new Set([
-  "personName",
-  "jobTitle",
-  "companyName",
-  "phone",
-  "email",
-  "website",
-  "address",
-  "city",
-  "productName",
-  "productDescription",
-  "features",
-  "audience",
-  "goal",
-  "mainMessage",
-  "cta",
-  "tone",
-  "language",
-  "durationSec",
-  "aspectRatio",
-  "customAspectRatio",
-  "platforms",
-  "allowedClaims",
-  "mandatoryTexts",
-  "brandLimits",
-  "notes",
-  "narratorProfileId",
-  "formatId",
-  "serviceId",
-]);
-
-const BRIEF_KEY_LABELS: Record<string, string> = {
-  personName: "نام",
-  jobTitle: "سمت",
-  companyName: "شرکت / سازمان",
-  phone: "تلفن",
-  email: "ایمیل",
-  website: "وب‌سایت",
-  address: "آدرس",
-  city: "شهر",
-  productName: "نام محصول / خدمت",
-  productDescription: "توضیح کوتاه",
-  features: "ویژگی‌ها و مزایا",
-  audience: "مخاطب هدف",
-  goal: "هدف تبلیغ",
-  mainMessage: "پیام اصلی",
-  cta: "CTA",
-  tone: "لحن برند",
-  language: "زبان",
-  durationSec: "مدت ویدیو",
-  aspectRatio: "نسبت تصویر",
-  customAspectRatio: "نسبت تصویر سفارشی",
-  platforms: "پلتفرم‌ها",
-  allowedClaims: "ادعاهای مجاز",
-  mandatoryTexts: "متون اجباری",
-  brandLimits: "محدودیت‌های برند",
-  notes: "یادداشت‌ها",
-};
-
-function humanizeBriefKey(key: string): string {
-  return BRIEF_KEY_LABELS[key] || key;
-}
-
-function formatBriefExtraValue(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return asString(value);
-  }
-  if (Array.isArray(value)) {
-    return asStringList(value).join("، ");
-  }
-  if (typeof value === "object") {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return "";
-    }
-  }
-  return "";
-}
-
-function collectExtraBriefFields(brief: Record<string, unknown>) {
-  return Object.entries(brief)
-    .filter(([key, value]) => {
-      if (KNOWN_BRIEF_KEYS.has(key)) return false;
-      if (key.endsWith("Id") || key.endsWith("Ids")) return false;
-      if (value == null) return false;
-      if (typeof value === "string" && !value.trim()) return false;
-      if (Array.isArray(value) && value.length === 0) return false;
-      return true;
-    })
-    .map(([key, value]) => ({
-      key,
-      label: humanizeBriefKey(key),
-      value: formatBriefExtraValue(value),
-      ltr: key.toLowerCase().includes("url") || key.toLowerCase().includes("email") || key.toLowerCase().includes("phone") || key.toLowerCase().includes("website"),
-      wide: true,
-    }))
-    .filter((item) => item.value);
-}
-
 function MixedValue({
   value,
   ltr,
@@ -229,12 +128,14 @@ function FieldTile({
   return (
     <div
       className={cn(
-        "rounded-xl border border-border/60 bg-background/80 px-3.5 py-3 text-start shadow-sm",
-        wide && "sm:col-span-2",
+        "rounded-xl border border-border/60 bg-background/80 px-2.5 py-2 text-start shadow-sm sm:px-3.5 sm:py-3",
+        wide && "col-span-2",
       )}
     >
-      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1.5 text-sm font-medium leading-relaxed">
+      <p className="text-[10px] font-medium text-muted-foreground sm:text-[11px]">
+        {label}
+      </p>
+      <p className="mt-1 text-xs font-medium leading-6 sm:mt-1.5 sm:text-sm sm:leading-relaxed">
         <MixedValue value={trimmed} ltr={ltr} empty={!trimmed} />
       </p>
     </div>
@@ -243,16 +144,20 @@ function FieldTile({
 
 function TagList({ label, items }: { label: string; items: string[] }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-background/80 px-3.5 py-3 text-start shadow-sm sm:col-span-2">
-      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+    <div className="col-span-2 rounded-xl border border-border/60 bg-background/80 px-2.5 py-2 text-start shadow-sm sm:px-3.5 sm:py-3">
+      <p className="text-[10px] font-medium text-muted-foreground sm:text-[11px]">
+        {label}
+      </p>
       {items.length === 0 ? (
-        <p className="mt-1.5 text-sm text-muted-foreground">{EMPTY}</p>
+        <p className="mt-1 text-xs text-muted-foreground sm:mt-1.5 sm:text-sm">
+          {EMPTY}
+        </p>
       ) : (
-        <div className="mt-2.5 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-1.5 sm:mt-2.5 sm:gap-2">
           {items.map((item) => (
             <span
               key={item}
-              className="rounded-lg border bg-muted/40 px-2.5 py-1 text-xs font-medium"
+              className="rounded-lg border bg-muted/40 px-2 py-0.5 text-[11px] font-medium sm:px-2.5 sm:py-1 sm:text-xs"
             >
               {item}
             </span>
@@ -265,16 +170,20 @@ function TagList({ label, items }: { label: string; items: string[] }) {
 
 function BulletList({ label, items }: { label: string; items: string[] }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-background/80 px-3.5 py-3 text-start shadow-sm sm:col-span-2">
-      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+    <div className="col-span-2 rounded-xl border border-border/60 bg-background/80 px-2.5 py-2 text-start shadow-sm sm:px-3.5 sm:py-3">
+      <p className="text-[10px] font-medium text-muted-foreground sm:text-[11px]">
+        {label}
+      </p>
       {items.length === 0 ? (
-        <p className="mt-1.5 text-sm text-muted-foreground">{EMPTY}</p>
+        <p className="mt-1 text-xs text-muted-foreground sm:mt-1.5 sm:text-sm">
+          {EMPTY}
+        </p>
       ) : (
-        <ul className="mt-2.5 space-y-2">
+        <ul className="mt-2 space-y-1.5 sm:mt-2.5 sm:space-y-2">
           {items.map((item, index) => (
             <li key={`${index}-${item.slice(0, 24)}`} className="flex gap-2.5">
               <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
-              <span className="min-w-0 flex-1 break-words text-sm font-medium">
+              <span className="min-w-0 flex-1 break-words text-xs font-medium sm:text-sm">
                 {item}
               </span>
             </li>
@@ -300,15 +209,15 @@ function SectionCard({
 }) {
   return (
     <Card className="overflow-hidden border-border/70 shadow-sm">
-      <CardHeader className="border-b border-border/60 bg-gradient-to-l from-muted/40 to-transparent pb-3">
-        <div className="flex items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
-            <Icon className="h-4 w-4" />
+      <CardHeader className="border-b border-border/60 bg-gradient-to-l from-muted/40 to-transparent px-3 py-2.5 sm:px-6 sm:pb-3 sm:pt-6">
+        <div className="flex items-start gap-2.5 sm:gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand sm:h-9 sm:w-9">
+            <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
           </div>
           <div className="min-w-0 space-y-0.5">
-            <CardTitle className="text-base">{title}</CardTitle>
+            <CardTitle className="text-sm sm:text-base">{title}</CardTitle>
             {description && (
-              <CardDescription className="text-xs sm:text-sm">
+              <CardDescription className="hidden text-xs sm:block sm:text-sm">
                 {description}
               </CardDescription>
             )}
@@ -316,7 +225,10 @@ function SectionCard({
         </div>
       </CardHeader>
       <CardContent
-        className={cn("grid gap-3 p-3 sm:grid-cols-2 sm:p-5", contentClassName)}
+        className={cn(
+          "grid grid-cols-2 gap-2 p-2.5 sm:gap-3 sm:p-5",
+          contentClassName,
+        )}
       >
         {children}
       </CardContent>
@@ -414,7 +326,6 @@ export function ProjectInfoTabContent({
     const hasBrandSection = Boolean(
       brandClaims || mandatoryTexts || brandLimits,
     );
-    const extraFields = collectExtraBriefFields(brief);
 
     return (
       <div className="space-y-4">
@@ -499,24 +410,6 @@ export function ProjectInfoTabContent({
             description="توضیحات تکمیلی ثبت‌شده هنگام ایجاد پروژه"
           >
             <FieldTile label="یادداشت" value={briefNotes} wide />
-          </SectionCard>
-        ) : null}
-
-        {extraFields.length > 0 ? (
-          <SectionCard
-            icon={Building2}
-            title="سایر اطلاعات ثبت‌شده"
-            description="فیلدهای تکمیلی ارسال‌شده توسط مشتری"
-          >
-            {extraFields.map((field) => (
-              <FieldTile
-                key={field.key}
-                label={field.label}
-                value={field.value}
-                ltr={field.ltr}
-                wide={field.wide}
-              />
-            ))}
           </SectionCard>
         ) : null}
       </div>

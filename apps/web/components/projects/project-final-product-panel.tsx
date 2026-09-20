@@ -25,6 +25,7 @@ import { hasPermission, canReviewFinalVideos, canSendFinalVideos } from "@/lib/r
 import { useMeQuery } from "@/lib/permissions";
 import { FinalVideoUploader } from "@/components/projects/final-video-uploader";
 import { VideoPlayer } from "@/components/media/video-player";
+import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -74,20 +75,54 @@ function statusVariant(
 function deliveryBadge(state: FinalVideoDeliveryState): {
   variant: "brand" | "secondary" | "outline" | "success" | "warning";
   label: string;
+  shortLabel: string;
 } {
   if (state === "SENT") {
-    return { variant: "brand", label: DELIVERY_STATE_LABELS.SENT };
+    return {
+      variant: "brand",
+      label: DELIVERY_STATE_LABELS.SENT,
+      shortLabel: "ارسال‌شده",
+    };
   }
   if (state === "AWAITING_DELIVERY") {
     return {
       variant: "secondary",
       label: DELIVERY_STATE_LABELS.AWAITING_DELIVERY,
+      shortLabel: "آماده ارسال",
     };
   }
   if (state === "REVISION") {
-    return { variant: "warning", label: DELIVERY_STATE_LABELS.REVISION };
+    return {
+      variant: "warning",
+      label: DELIVERY_STATE_LABELS.REVISION,
+      shortLabel: "اصلاح",
+    };
   }
-  return { variant: "warning", label: DELIVERY_STATE_LABELS.PENDING_REVIEW };
+  return {
+    variant: "warning",
+    label: DELIVERY_STATE_LABELS.PENDING_REVIEW,
+    shortLabel: "جدید",
+  };
+}
+
+const VIDEO_TYPE_SHORT: Record<FinalVideoType, string> = {
+  WATERMARKED: "واترمارک",
+  CLEAN: "بدون واترمارک",
+};
+
+function DualLabel({
+  shortLabel,
+  label,
+}: {
+  shortLabel: string;
+  label: string;
+}) {
+  return (
+    <>
+      <span className="sm:hidden">{shortLabel}</span>
+      <span className="hidden sm:inline">{label}</span>
+    </>
+  );
 }
 
 function ManagerVideoCard({
@@ -148,6 +183,10 @@ function ManagerVideoCard({
     }
   };
 
+  const showCustomerStatus =
+    item.status === "APPROVED_BY_CUSTOMER" ||
+    item.status === "VIEWED_BY_CUSTOMER";
+
   return (
     <article
       className={cn(
@@ -162,14 +201,15 @@ function ManagerVideoCard({
           : null,
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <div className="min-w-0 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-start justify-between gap-2 border-b border-border/60 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {selectable ? (
               <Checkbox
                 checked={selected}
                 onCheckedChange={() => onToggle?.(item.id)}
                 aria-label={`انتخاب برای ارسال به مشتری — ${typeLabel}`}
+                className="shrink-0"
               />
             ) : null}
             {portfolioSelectable ? (
@@ -191,23 +231,48 @@ function ManagerVideoCard({
                 ) : null}
               </button>
             ) : null}
-            <Badge variant={type === "WATERMARKED" ? "brand" : "secondary"}>
-              {typeLabel}
+            <Badge
+              variant={type === "WATERMARKED" ? "brand" : "secondary"}
+              className="max-w-full text-[10px] sm:text-xs"
+            >
+              <DualLabel
+                shortLabel={VIDEO_TYPE_SHORT[type]}
+                label={typeLabel}
+              />
             </Badge>
-            <Badge variant={deliveryMeta.variant}>{deliveryMeta.label}</Badge>
-            {delivery === "PENDING_REVIEW" ? (
-              <Badge variant="warning">جدید</Badge>
+            <Badge
+              variant={deliveryMeta.variant}
+              className="max-w-full text-[10px] sm:text-xs"
+            >
+              <DualLabel
+                shortLabel={deliveryMeta.shortLabel}
+                label={deliveryMeta.label}
+              />
+            </Badge>
+            {showCustomerStatus ? (
+              <Badge
+                variant={statusVariant(item.status)}
+                className="text-[10px] sm:text-xs"
+              >
+                {statusLabel}
+              </Badge>
             ) : null}
-            {delivery === "SENT" ? (
-              <Badge variant="brand">ارسال‌شده</Badge>
-            ) : null}
-            <Badge variant={statusVariant(item.status)}>{statusLabel}</Badge>
-            <Badge variant="outline">نسخه {item.version}</Badge>
+            <Badge variant="outline" className="text-[10px] sm:text-xs">
+              نسخه {item.version}
+            </Badge>
             {portfolioSelected ? (
-              <Badge variant="brand">انتخاب‌شده برای نمونه‌کارها</Badge>
+              <Badge variant="brand" className="text-[10px] sm:text-xs">
+                <DualLabel
+                  shortLabel="نمونه‌کار"
+                  label="انتخاب‌شده برای نمونه‌کارها"
+                />
+              </Badge>
             ) : null}
           </div>
-          <p className="truncate text-sm font-medium" title={item.name}>
+          <p
+            className="break-all text-xs font-medium leading-5 sm:truncate sm:break-normal sm:text-sm sm:leading-normal"
+            title={item.name}
+          >
             {item.name}
           </p>
           {portfolioSelectable ? (
@@ -227,34 +292,34 @@ function ManagerVideoCard({
             </button>
           ) : null}
         </div>
-        <Film className="h-5 w-5 shrink-0 text-muted-foreground" />
+        <Film className="mt-0.5 hidden h-5 w-5 shrink-0 text-muted-foreground sm:block" />
       </div>
-      <div className="p-3 sm:p-4">
+      <div className="p-2.5 sm:p-4">
         <VideoPlayer src={mediaStreamUrl(item.id)} title={item.name} />
       </div>
-      <dl className="grid gap-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:grid-cols-3">
-        <div className="flex items-center gap-1.5">
+      <dl className="grid grid-cols-2 gap-2 border-t border-border/60 px-3 py-2.5 text-[11px] text-muted-foreground sm:grid-cols-3 sm:px-4 sm:py-3 sm:text-xs">
+        <div className="flex min-w-0 items-center gap-1.5">
           <UserRound className="h-3.5 w-3.5 shrink-0" />
-          <span>{item.uploadedByName || "ادیتور"}</span>
+          <span className="truncate">{item.uploadedByName || "ادیتور"}</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           <Calendar className="h-3.5 w-3.5 shrink-0" />
-          <span>{item.createdAt ? formatDate(item.createdAt) : "—"}</span>
+          <span className="truncate">
+            {item.createdAt ? formatDate(item.createdAt) : "—"}
+          </span>
         </div>
-        <div className="tabular-nums">
+        <div className="col-span-2 tabular-nums sm:col-span-1">
           {item.sizeBytes != null ? formatFileSize(item.sizeBytes) : "—"}
         </div>
         {delivery === "SENT" ? (
-          <div className="sm:col-span-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>
-              ارسال: {item.sentAt ? formatDate(item.sentAt) : "—"}
-            </span>
+          <div className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-1 sm:col-span-3">
+            <span>ارسال: {item.sentAt ? formatDate(item.sentAt) : "—"}</span>
             {item.sentByName ? <span>توسط {item.sentByName}</span> : null}
           </div>
         ) : null}
       </dl>
       {item.status === "REVISION_REQUESTED" && item.revisionNotes ? (
-        <div className="border-t border-warning/30 bg-warning/5 px-4 py-3">
+        <div className="border-t border-warning/30 bg-warning/5 px-3 py-2.5 sm:px-4 sm:py-3">
           <p className="text-xs font-medium text-foreground">
             توضیحات اصلاح مدیر
           </p>
@@ -263,14 +328,14 @@ function ManagerVideoCard({
           </p>
         </div>
       ) : null}
-      <div className="flex flex-wrap gap-2 border-t border-border/60 px-4 py-3">
+      <div className="grid grid-cols-2 gap-2 border-t border-border/60 px-3 py-2.5 sm:flex sm:flex-wrap sm:px-4 sm:py-3">
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="h-9 gap-1.5 sm:h-8"
           onClick={() => onPreview(item)}
         >
-          <Eye className="h-3.5 w-3.5" />
+          <Eye className="h-3.5 w-3.5 shrink-0" />
           پیش‌نمایش
         </Button>
         {pendingReview && onApprove ? (
@@ -278,25 +343,25 @@ function ManagerVideoCard({
             <Button
               size="sm"
               variant="brand"
-              className="gap-1.5"
+              className="h-9 gap-1.5 sm:h-8"
               disabled={reviewing}
               onClick={() => onApprove(item)}
             >
               {reviewing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
               ) : (
-                <CheckCircle2 className="h-3.5 w-3.5" />
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
               )}
               تأیید
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="gap-1.5"
+              className="col-span-2 h-9 gap-1.5 sm:col-span-1 sm:h-8"
               disabled={reviewing}
               onClick={() => onRequestRevision?.(item)}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="h-3.5 w-3.5 shrink-0" />
               درخواست اصلاح
             </Button>
           </>
@@ -305,34 +370,33 @@ function ManagerVideoCard({
           <Button
             size="sm"
             variant="brand"
-            className="gap-1.5"
+            className="h-9 gap-1.5 sm:h-8"
             onClick={() => onSend?.(item)}
           >
-            <Send className="h-3.5 w-3.5" />
+            <Send className="h-3.5 w-3.5 shrink-0" />
             ارسال به مشتری
           </Button>
         ) : null}
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="h-9 gap-1.5 sm:h-8"
           disabled={downloading}
           onClick={handleDownload}
         >
           {downloading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
           ) : (
-            <Download className="h-3.5 w-3.5" />
+            <Download className="h-3.5 w-3.5 shrink-0" />
           )}
           دانلود
         </Button>
         {item.status === "APPROVED_BY_CUSTOMER" ? (
-          <Badge variant="success" className="ms-auto self-center">
+          <Badge
+            variant="success"
+            className="col-span-2 justify-center self-center sm:ms-auto sm:col-span-1"
+          >
             {item.statusLabel || "ویدیو تایید شد"}
-          </Badge>
-        ) : delivery === "SENT" ? (
-          <Badge variant="brand" className="ms-auto self-center">
-            ارسال‌شده
           </Badge>
         ) : null}
       </div>
@@ -373,45 +437,67 @@ function EditorVideoCard({
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <div className="min-w-0 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={type === "WATERMARKED" ? "brand" : "secondary"}>
-              {typeLabel}
+      <div className="flex items-start justify-between gap-2 border-b border-border/60 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <Badge
+              variant={type === "WATERMARKED" ? "brand" : "secondary"}
+              className="text-[10px] sm:text-xs"
+            >
+              <DualLabel
+                shortLabel={VIDEO_TYPE_SHORT[type]}
+                label={typeLabel}
+              />
             </Badge>
             {resolveItemDeliveryState(item) === "PENDING_REVIEW" ? (
-              <Badge variant="warning">جدید</Badge>
+              <Badge variant="warning" className="text-[10px] sm:text-xs">
+                جدید
+              </Badge>
             ) : null}
             {resolveItemDeliveryState(item) === "SENT" ? (
-              <Badge variant="brand">ارسال‌شده</Badge>
+              <Badge variant="brand" className="text-[10px] sm:text-xs">
+                ارسال‌شده
+              </Badge>
             ) : null}
-            <Badge variant={statusVariant(item.status)}>{statusLabel}</Badge>
-            <Badge variant="outline">نسخه {item.version}</Badge>
+            <Badge
+              variant={statusVariant(item.status)}
+              className="hidden text-[10px] sm:inline-flex sm:text-xs"
+            >
+              {statusLabel}
+            </Badge>
+            <Badge variant="outline" className="text-[10px] sm:text-xs">
+              نسخه {item.version}
+            </Badge>
           </div>
-          <p className="truncate text-sm font-medium" title={item.name}>
+          <p
+            className="break-all text-xs font-medium leading-5 sm:truncate sm:break-normal sm:text-sm sm:leading-normal"
+            title={item.name}
+          >
             {item.name}
           </p>
         </div>
-        <Film className="h-5 w-5 shrink-0 text-muted-foreground" />
+        <Film className="mt-0.5 hidden h-5 w-5 shrink-0 text-muted-foreground sm:block" />
       </div>
-      <div className="p-3 sm:p-4">
+      <div className="p-2.5 sm:p-4">
         <VideoPlayer src={mediaStreamUrl(item.id)} title={item.name} />
       </div>
-      <dl className="grid gap-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:grid-cols-3">
-        <div className="flex items-center gap-1.5">
+      <dl className="grid grid-cols-2 gap-2 border-t border-border/60 px-3 py-2.5 text-[11px] text-muted-foreground sm:grid-cols-3 sm:px-4 sm:py-3 sm:text-xs">
+        <div className="flex min-w-0 items-center gap-1.5">
           <UserRound className="h-3.5 w-3.5 shrink-0" />
-          <span>{item.uploadedByName || "ادیتور"}</span>
+          <span className="truncate">{item.uploadedByName || "ادیتور"}</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           <Calendar className="h-3.5 w-3.5 shrink-0" />
-          <span>{item.createdAt ? formatDate(item.createdAt) : "—"}</span>
+          <span className="truncate">
+            {item.createdAt ? formatDate(item.createdAt) : "—"}
+          </span>
         </div>
-        <div className="tabular-nums">
+        <div className="col-span-2 tabular-nums sm:col-span-1">
           {item.sizeBytes != null ? formatFileSize(item.sizeBytes) : "—"}
         </div>
       </dl>
       {item.status === "REVISION_REQUESTED" && item.revisionNotes ? (
-        <div className="border-t border-warning/30 bg-warning/5 px-4 py-3">
+        <div className="border-t border-warning/30 bg-warning/5 px-3 py-2.5 sm:px-4 sm:py-3">
           <p className="text-xs font-medium text-foreground">
             توضیحات اصلاح مدیر
           </p>
@@ -420,27 +506,27 @@ function EditorVideoCard({
           </p>
         </div>
       ) : null}
-      <div className="flex flex-wrap gap-2 border-t border-border/60 px-4 py-3">
+      <div className="grid grid-cols-2 gap-2 border-t border-border/60 px-3 py-2.5 sm:flex sm:flex-wrap sm:px-4 sm:py-3">
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="h-9 gap-1.5 sm:h-8"
           onClick={() => onPreview(item)}
         >
-          <Eye className="h-3.5 w-3.5" />
+          <Eye className="h-3.5 w-3.5 shrink-0" />
           پیش‌نمایش
         </Button>
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="h-9 gap-1.5 sm:h-8"
           disabled={downloading}
           onClick={handleDownload}
         >
           {downloading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
           ) : (
-            <Download className="h-3.5 w-3.5" />
+            <Download className="h-3.5 w-3.5 shrink-0" />
           )}
           دانلود
         </Button>
@@ -655,21 +741,23 @@ export function ProjectFinalProductPanel({
   // Editor: gallery of existing videos + modal to add watermarked/clean versions
   if (isEditor) {
     return (
-      <div className="space-y-5 text-start" dir="rtl">
-        <header className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          <div className="space-y-1.5">
+      <div className="space-y-3 text-start sm:space-y-5" dir="rtl">
+        <header className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-3.5 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="min-w-0 space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
-              <PackageCheck className="h-5 w-5 text-brand" />
-              <h3 className="text-lg font-semibold tracking-tight">
+              <PackageCheck className="h-4 w-4 shrink-0 text-brand sm:h-5 sm:w-5" />
+              <h3 className="text-base font-semibold tracking-tight sm:text-lg">
                 محصول نهایی
               </h3>
-              <Badge variant="outline">{dataQ.data.project.code}</Badge>
+              <Badge variant="outline" className="text-[10px] sm:text-xs">
+                {dataQ.data.project.code}
+              </Badge>
             </div>
-            <p className="text-xs leading-6 text-muted-foreground sm:text-sm">
+            <p className="hidden text-sm leading-6 text-muted-foreground sm:block">
               نسخه‌های دارای واترمارک و بدون واترمارک را اضافه کنید. نسخه‌های
               قبلی در تاریخچه باقی می‌مانند.
             </p>
-            <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-muted-foreground">
+            <div className="flex flex-wrap gap-x-2 gap-y-1 pt-0.5 text-[11px] text-muted-foreground">
               <span>کل: {counts.total}</span>
               <span>· واترمارک: {counts.watermarked}</span>
               <span>· بدون واترمارک: {counts.clean}</span>
@@ -679,10 +767,10 @@ export function ProjectFinalProductPanel({
           </div>
           <Button
             variant="brand"
-            className="gap-2"
+            className="h-10 w-full gap-2 sm:h-9 sm:w-auto"
             onClick={() => setUploadOpen(true)}
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-4 w-4 shrink-0" />
             افزودن ویدیو ها
           </Button>
         </header>
@@ -771,42 +859,44 @@ export function ProjectFinalProductPanel({
 
   // Manager (and other roles): review + send workflow
   return (
-    <div className="space-y-5 text-start" dir="rtl">
-      <header className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-        <div className="space-y-1.5">
+    <div className="space-y-3 text-start sm:space-y-5" dir="rtl">
+      <header className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-3.5 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="min-w-0 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <PackageCheck className="h-5 w-5 text-brand" />
-            <h3 className="text-lg font-semibold tracking-tight">
+            <PackageCheck className="h-4 w-4 shrink-0 text-brand sm:h-5 sm:w-5" />
+            <h3 className="text-base font-semibold tracking-tight sm:text-lg">
               محصول نهایی
             </h3>
-            <Badge variant="outline">{dataQ.data.project.code}</Badge>
+            <Badge variant="outline" className="text-[10px] sm:text-xs">
+              {dataQ.data.project.code}
+            </Badge>
           </div>
-          <p className="text-xs leading-6 text-muted-foreground sm:text-sm">
+          <p className="hidden text-sm leading-6 text-muted-foreground sm:block">
             ویدیوهای جدید را بررسی کنید و فقط پس از تأیید، آن‌ها را برای مشتری
             ارسال کنید.
           </p>
-          <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap gap-x-2 gap-y-1 pt-0.5 text-[11px] text-muted-foreground">
             <span>کل: {counts.total}</span>
             <span>· جدید: {counts.pendingReview ?? 0}</span>
             <span>· آماده ارسال: {counts.awaitingDelivery ?? 0}</span>
             <span>· ارسال‌شده: {counts.sent}</span>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
           {canPublishPortfolio ? (
             portfolioQ.data?.portfolio?.status === "PUBLISHED" ? (
               <Button
                 variant="outline"
-                className="gap-2"
+                className="h-10 w-full gap-2 sm:h-9 sm:w-auto"
                 onClick={openPortfolioPublish}
               >
-                <CheckCircle2 className="h-4 w-4 text-success" />
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                 در نمونه‌کارها
               </Button>
             ) : (
               <Button
                 variant="outline"
-                className="gap-2"
+                className="h-10 w-full gap-2 sm:h-9 sm:w-auto"
                 disabled={!portfolioQ.data?.canPublish}
                 title={
                   portfolioQ.data?.canPublish
@@ -817,7 +907,7 @@ export function ProjectFinalProductPanel({
                 }
                 onClick={openPortfolioPublish}
               >
-                <Sparkles className="h-4 w-4 text-brand" />
+                <Sparkles className="h-4 w-4 shrink-0 text-brand" />
                 ارسال به نمونه‌کارها
               </Button>
             )
@@ -825,11 +915,11 @@ export function ProjectFinalProductPanel({
           {canSend ? (
             <Button
               variant="brand"
-              className="gap-2"
+              className="h-10 w-full gap-2 sm:h-9 sm:w-auto"
               disabled={selected.length === 0}
               onClick={() => setSendOpen(true)}
             >
-              <Send className="h-4 w-4" />
+              <Send className="h-4 w-4 shrink-0" />
               ارسال به مشتری
               {selected.length > 0 ? ` (${selected.length})` : ""}
             </Button>
@@ -840,7 +930,7 @@ export function ProjectFinalProductPanel({
       {canPublishPortfolio && portfolioQ.data?.canPublish ? (
         <div className="rounded-xl border border-brand/20 bg-brand/5 px-3 py-2.5 text-xs leading-6 text-muted-foreground">
           {portfolioSelectedVideo ? (
-            <p>
+            <p className="break-words">
               ویدیوی انتخاب‌شده برای نمونه‌کارها:{" "}
               <span className="font-medium text-foreground">
                 {portfolioSelectedVideo.videoTypeLabel ||
@@ -865,10 +955,11 @@ export function ProjectFinalProductPanel({
       ) : null}
 
       {canSend && pendingSelectable.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5 text-xs">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-muted/20 px-2.5 py-2 text-xs sm:gap-3 sm:px-3 sm:py-2.5">
           <Button
             size="sm"
             variant="ghost"
+            className="h-8 px-2.5"
             onClick={() => setSelected(pendingSelectable.map((i) => i.id))}
           >
             انتخاب همهٔ آماده ارسال
@@ -876,6 +967,7 @@ export function ProjectFinalProductPanel({
           <Button
             size="sm"
             variant="ghost"
+            className="h-8 px-2.5"
             onClick={() => setSelected([])}
             disabled={selected.length === 0}
           >
@@ -884,44 +976,62 @@ export function ProjectFinalProductPanel({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["all", "همه"],
-            ["WATERMARKED", VIDEO_TYPE_LABELS.WATERMARKED],
-            ["CLEAN", VIDEO_TYPE_LABELS.CLEAN],
-          ] as const
-        ).map(([id, label]) => (
-          <Button
-            key={id}
-            size="sm"
-            variant={filter === id ? "brand" : "outline"}
-            onClick={() => setFilter(id)}
+      <HorizontalScroll
+        bordered={false}
+        className="rounded-xl"
+        viewportClassName="pb-0"
+      >
+        <div className="flex w-max min-w-full flex-col gap-2 pb-0.5">
+          <div className="flex gap-2" role="group" aria-label="فیلتر نوع ویدیو">
+            {(
+              [
+                ["all", "همه", "همه"],
+                [
+                  "WATERMARKED",
+                  VIDEO_TYPE_LABELS.WATERMARKED,
+                  VIDEO_TYPE_SHORT.WATERMARKED,
+                ],
+                ["CLEAN", VIDEO_TYPE_LABELS.CLEAN, VIDEO_TYPE_SHORT.CLEAN],
+              ] as const
+            ).map(([id, label, shortLabel]) => (
+              <Button
+                key={id}
+                size="sm"
+                variant={filter === id ? "brand" : "outline"}
+                className="h-9 shrink-0 rounded-xl px-3 text-xs sm:h-8 sm:rounded-md"
+                onClick={() => setFilter(id)}
+              >
+                <DualLabel shortLabel={shortLabel} label={label} />
+              </Button>
+            ))}
+          </div>
+          <div
+            className="flex gap-2"
+            role="group"
+            aria-label="فیلتر وضعیت ارسال"
           >
-            {label}
-          </Button>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["all", "همه وضعیت‌ها"],
-            ["PENDING_REVIEW", "ویدیوهای جدید"],
-            ["AWAITING_DELIVERY", "آماده ارسال"],
-            ["SENT", "ارسال‌شده"],
-            ["REVISION", "نیازمند اصلاح"],
-          ] as const
-        ).map(([id, label]) => (
-          <Button
-            key={id}
-            size="sm"
-            variant={deliveryFilter === id ? "brand" : "outline"}
-            onClick={() => setDeliveryFilter(id)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
+            {(
+              [
+                ["all", "همه وضعیت‌ها", "همه وضعیت‌ها"],
+                ["PENDING_REVIEW", "ویدیوهای جدید", "جدید"],
+                ["AWAITING_DELIVERY", "آماده ارسال", "آماده ارسال"],
+                ["SENT", "ارسال‌شده", "ارسال‌شده"],
+                ["REVISION", "نیازمند اصلاح", "اصلاح"],
+              ] as const
+            ).map(([id, label, shortLabel]) => (
+              <Button
+                key={id}
+                size="sm"
+                variant={deliveryFilter === id ? "brand" : "outline"}
+                className="h-9 shrink-0 rounded-xl px-3 text-xs sm:h-8 sm:rounded-md"
+                onClick={() => setDeliveryFilter(id)}
+              >
+                <DualLabel shortLabel={shortLabel} label={label} />
+              </Button>
+            ))}
+          </div>
+        </div>
+      </HorizontalScroll>
 
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border/70 px-6 py-16 text-center">
@@ -945,12 +1055,14 @@ export function ProjectFinalProductPanel({
           )
             .filter(([state]) => grouped[state].length > 0)
             .map(([state, title]) => (
-              <section key={state} className="space-y-3">
+              <section key={state} className="space-y-2.5 sm:space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="text-sm font-semibold">{title}</h4>
-                  <Badge variant="outline">{grouped[state].length}</Badge>
+                  <h4 className="text-sm font-semibold leading-6">{title}</h4>
+                  <Badge variant="outline" className="text-[10px] sm:text-xs">
+                    {grouped[state].length}
+                  </Badge>
                 </div>
-                <div className="grid gap-4 xl:grid-cols-2">
+                <div className="grid gap-3 sm:gap-4 xl:grid-cols-2">
                   {grouped[state].map((item) => (
                     <ManagerVideoCard
                       key={item.id}

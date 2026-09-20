@@ -131,46 +131,62 @@ function PosterCard({
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
-        <div className="min-w-0 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={statusVariant(item.status)}>
+      <div className="flex items-start justify-between gap-2 border-b border-border/60 px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <Badge
+              variant={statusVariant(item.status)}
+              className="max-w-full text-[10px] sm:text-xs"
+            >
               {posterStatusLabel(item)}
             </Badge>
-            <Badge variant="outline">نسخه {item.version}</Badge>
-            {item.isLatest ? <Badge variant="brand">جدیدترین</Badge> : null}
+            <Badge variant="outline" className="text-[10px] sm:text-xs">
+              نسخه {item.version}
+            </Badge>
+            {item.isLatest ? (
+              <Badge variant="brand" className="text-[10px] sm:text-xs">
+                جدیدترین
+              </Badge>
+            ) : null}
             {item.isLatestDelivered ? (
-              <Badge variant="secondary">نسخه ارسال‌شده</Badge>
+              <Badge variant="secondary" className="text-[10px] sm:text-xs">
+                نسخه ارسال‌شده
+              </Badge>
             ) : null}
           </div>
-          <p className="truncate text-sm font-medium" title={item.name}>
+          <p
+            className="break-all text-xs font-medium leading-5 sm:truncate sm:break-normal sm:text-sm sm:leading-normal"
+            title={item.name}
+          >
             {item.name}
           </p>
         </div>
-        <ImageIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
+        <ImageIcon className="mt-0.5 hidden h-5 w-5 shrink-0 text-muted-foreground sm:block" />
       </div>
-      <div className="bg-muted/20 p-3 sm:p-4">
+      <div className="bg-muted/20 p-2.5 sm:p-4">
         <div className="overflow-hidden rounded-xl border border-border/60 bg-neutral-950">
-          <div className="flex aspect-video items-center justify-center">
+          <div className="flex aspect-[4/3] items-center justify-center sm:aspect-video">
             <PosterPreview fileId={item.fileId} name={item.name} />
           </div>
         </div>
       </div>
-      <dl className="grid gap-2 border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:grid-cols-3">
-        <div className="flex items-center gap-1.5">
+      <dl className="grid grid-cols-2 gap-2 border-t border-border/60 px-3 py-2.5 text-[11px] text-muted-foreground sm:grid-cols-3 sm:px-4 sm:py-3 sm:text-xs">
+        <div className="flex min-w-0 items-center gap-1.5">
           <UserRound className="h-3.5 w-3.5 shrink-0" />
-          <span>{item.uploadedByName || "ادیتور"}</span>
+          <span className="truncate">{item.uploadedByName || "ادیتور"}</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           <Calendar className="h-3.5 w-3.5 shrink-0" />
-          <span>{item.createdAt ? formatDate(item.createdAt) : "—"}</span>
+          <span className="truncate">
+            {item.createdAt ? formatDate(item.createdAt) : "—"}
+          </span>
         </div>
-        <div className="tabular-nums">
+        <div className="col-span-2 tabular-nums sm:col-span-1">
           {item.sizeBytes != null ? formatFileSize(item.sizeBytes) : "—"}
         </div>
       </dl>
       {item.status === "REJECTED" && item.rejectionReason ? (
-        <div className="border-t border-destructive/30 bg-destructive/5 px-4 py-3">
+        <div className="border-t border-destructive/30 bg-destructive/5 px-3 py-2.5 sm:px-4 sm:py-3">
           <p className="text-xs font-medium text-foreground">دلیل رد مدیریت</p>
           <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
             {item.rejectionReason}
@@ -178,7 +194,7 @@ function PosterCard({
         </div>
       ) : null}
       {item.notes ? (
-        <div className="border-t border-border/50 px-4 py-3">
+        <div className="border-t border-border/50 px-3 py-2.5 sm:px-4 sm:py-3">
           <p className="text-xs font-medium">یادداشت ادیتور</p>
           <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">
             {item.notes}
@@ -186,19 +202,19 @@ function PosterCard({
         </div>
       ) : null}
       {sent && item.deliveredAt ? (
-        <div className="border-t border-border/50 px-4 py-2.5 text-[11px] text-muted-foreground">
+        <div className="border-t border-border/50 px-3 py-2 text-[11px] text-muted-foreground sm:px-4 sm:py-2.5">
           ارسال به مشتری: {formatDate(item.deliveredAt)}
           {item.deliveredByName ? ` · ${item.deliveredByName}` : ""}
         </div>
       ) : null}
-      <div className="flex flex-wrap gap-2 border-t border-border/60 px-4 py-3">
+      <div className="grid grid-cols-2 gap-2 border-t border-border/60 px-3 py-2.5 sm:flex sm:flex-wrap sm:px-4 sm:py-3">
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="h-9 gap-1.5 sm:h-8"
           onClick={() => onPreview(item)}
         >
-          <Eye className="h-3.5 w-3.5" />
+          <Eye className="h-3.5 w-3.5 shrink-0" />
           پیش‌نمایش
         </Button>
         {canReview && pending ? (
@@ -206,25 +222,25 @@ function PosterCard({
             <Button
               size="sm"
               variant="brand"
-              className="gap-1.5"
+              className="h-9 gap-1.5 sm:h-8"
               disabled={reviewing}
               onClick={() => onApprove?.(item)}
             >
               {reviewing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
               ) : (
-                <CheckCircle2 className="h-3.5 w-3.5" />
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
               )}
               تایید پوستر
             </Button>
             <Button
               size="sm"
               variant="outline"
-              className="gap-1.5"
+              className="h-9 gap-1.5 sm:h-8"
               disabled={reviewing}
               onClick={() => onReject?.(item)}
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5 shrink-0" />
               رد پوستر
             </Button>
           </>
@@ -233,14 +249,14 @@ function PosterCard({
           <Button
             size="sm"
             variant="brand"
-            className="gap-1.5"
+            className="col-span-2 h-9 gap-1.5 sm:col-span-1 sm:h-8"
             disabled={sending}
             onClick={() => onSend?.(item)}
           >
             {sending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
             ) : (
-              <Send className="h-3.5 w-3.5" />
+              <Send className="h-3.5 w-3.5 shrink-0" />
             )}
             {sent ? "ارسال مجدد به مشتری" : "ارسال به مشتری"}
           </Button>
@@ -248,14 +264,14 @@ function PosterCard({
         <Button
           size="sm"
           variant="outline"
-          className="gap-1.5"
+          className="h-9 gap-1.5 sm:h-8"
           disabled={downloading}
           onClick={handleDownload}
         >
           {downloading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
           ) : (
-            <Download className="h-3.5 w-3.5" />
+            <Download className="h-3.5 w-3.5 shrink-0" />
           )}
           دانلود
         </Button>
@@ -359,10 +375,10 @@ function EditorPosterUploader({
   const locked = disabled || uploadMut.isPending;
 
   return (
-    <section className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
+    <section className="space-y-3 rounded-2xl border border-border/70 bg-card p-3.5 shadow-sm sm:space-y-4 sm:p-5">
       <div>
         <h4 className="text-sm font-semibold">ارسال پوستر جدید</h4>
-        <p className="mt-1 text-xs leading-6 text-muted-foreground">
+        <p className="mt-1 hidden text-xs leading-6 text-muted-foreground sm:block">
           پوستر پس از ارسال به‌صورت خودکار برای مشتری نمایش داده نمی‌شود و باید
           ابتدا توسط مدیریت تأیید شود.
         </p>
@@ -402,15 +418,15 @@ function EditorPosterUploader({
             if (next && !locked) pick(next);
           }}
           className={cn(
-            "flex min-h-[180px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed px-4 py-8 text-center transition-all",
+            "flex min-h-[140px] cursor-pointer flex-col items-center justify-center gap-2.5 rounded-2xl border border-dashed px-4 py-6 text-center transition-all sm:min-h-[180px] sm:gap-3 sm:py-8",
             dragOver
               ? "border-brand bg-brand/5"
               : "border-border/70 bg-muted/15 hover:border-brand/50",
             locked && "pointer-events-none opacity-60",
           )}
         >
-          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-background shadow-sm ring-1 ring-border/60">
-            <Upload className="h-6 w-6 text-brand" />
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-background shadow-sm ring-1 ring-border/60 sm:h-14 sm:w-14">
+            <Upload className="h-5 w-5 text-brand sm:h-6 sm:w-6" />
           </span>
           <div className="space-y-1">
             <p className="text-sm font-medium">تصویر پوستر را انتخاب کنید</p>
@@ -503,10 +519,10 @@ function EditorPosterUploader({
         />
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex justify-stretch sm:justify-end">
         <Button
           variant="brand"
-          className="gap-2"
+          className="h-10 w-full gap-2 sm:h-9 sm:w-auto"
           disabled={locked || !file}
           onClick={() => uploadMut.mutate()}
         >
@@ -652,20 +668,24 @@ export function ProjectPosterPanel({
   );
 
   return (
-    <div className="space-y-5 text-start" dir="rtl">
-      <header className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-        <div className="space-y-1.5">
+    <div className="space-y-3 text-start sm:space-y-5" dir="rtl">
+      <header className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-3.5 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="min-w-0 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <ImageIcon className="h-5 w-5 text-brand" />
-            <h3 className="text-lg font-semibold tracking-tight">اپلود پوستر</h3>
-            <Badge variant="outline">{dataQ.data.project.code}</Badge>
+            <ImageIcon className="h-4 w-4 shrink-0 text-brand sm:h-5 sm:w-5" />
+            <h3 className="text-base font-semibold tracking-tight sm:text-lg">
+              اپلود پوستر
+            </h3>
+            <Badge variant="outline" className="text-[10px] sm:text-xs">
+              {dataQ.data.project.code}
+            </Badge>
           </div>
-          <p className="text-xs leading-6 text-muted-foreground sm:text-sm">
+          <p className="hidden text-sm leading-6 text-muted-foreground sm:block">
             {isEditor
               ? "پوستر را بارگذاری کنید تا مدیریت آن را بررسی کند. پس از تأیید، مدیر می‌تواند آن را برای مشتری ارسال کند."
               : "پوسترهای ارسال‌شده توسط ادیتور را بررسی، تأیید یا رد کنید و نسخه تأییدشده را برای مشتری بفرستید."}
           </p>
-          <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap gap-x-2 gap-y-1 pt-0.5 text-[11px] text-muted-foreground">
             <span>کل: {dataQ.data.counts.total}</span>
             <span>· در انتظار: {dataQ.data.counts.pending}</span>
             <span>· تأییدشده: {dataQ.data.counts.approved}</span>
@@ -704,7 +724,7 @@ export function ProjectPosterPanel({
       ) : null}
 
       {items.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border/70 px-6 py-16 text-center">
+        <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border/70 px-4 py-12 text-center sm:px-6 sm:py-16">
           <ImageIcon className="h-8 w-8 text-muted-foreground/40" />
           <p className="text-sm font-medium">هنوز پوستری آپلود نشده است</p>
           <p className="max-w-md text-xs leading-6 text-muted-foreground">
@@ -714,7 +734,7 @@ export function ProjectPosterPanel({
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className="grid gap-3 sm:gap-4 xl:grid-cols-2">
           {items.map((item) => (
             <PosterCard
               key={item.id}

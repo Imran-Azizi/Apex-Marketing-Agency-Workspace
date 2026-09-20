@@ -52,8 +52,8 @@ const nextConfig: NextConfig = {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1600, 1920],
     imageSizes: [64, 96, 128, 256, 384],
-    // CoverImage / hero use 82–85; required allow-list for Next 15.5+ / 16.
-    qualities: [75, 82, 85, 90, 100],
+    // CoverImage / hero use 80–85; required allow-list for Next 15.5+ / 16.
+    qualities: [75, 80, 82, 85, 90, 100],
     minimumCacheTTL: 60 * 60 * 24 * 31,
     remotePatterns: [
       { protocol: "https", hostname: "**" },
@@ -71,6 +71,26 @@ const nextConfig: NextConfig = {
     }
     const wsOrigin = apiOrigin.replace(/^http/, "ws");
     const isDev = process.env.NODE_ENV !== "production";
+    const mediaOrigins = new Set<string>([apiOrigin]);
+    try {
+      const parsed = new URL(apiOrigin);
+      const altHost =
+        parsed.hostname === "localhost"
+          ? "127.0.0.1"
+          : parsed.hostname === "127.0.0.1"
+            ? "localhost"
+            : null;
+      if (altHost) {
+        mediaOrigins.add(
+          `${parsed.protocol}//${altHost}${parsed.port ? `:${parsed.port}` : ""}`,
+        );
+      }
+    } catch {
+      /* keep apiOrigin only */
+    }
+    // media-src must include the API origin: authenticated <video>/<audio>
+    // streams use http(s)://api/... — 'self' is the Next app only, and
+    // `https:` does not cover local http://localhost:4000 development.
     const csp = [
       "default-src 'self'",
       "base-uri 'self'",
@@ -81,8 +101,8 @@ const nextConfig: NextConfig = {
       // also needs 'unsafe-eval'. Production builds do not.
       `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob: https:",
-      "media-src 'self' blob: https:",
+      "img-src 'self' data: blob: https: http://localhost:* http://127.0.0.1:*",
+      `media-src 'self' blob: data: https: ${[...mediaOrigins].join(" ")}`,
       "font-src 'self' data:",
       `connect-src 'self' ${apiOrigin} ${wsOrigin} https: wss:`,
     ].join("; ");

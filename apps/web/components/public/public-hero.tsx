@@ -3,48 +3,60 @@
 import { HeroSlideshow } from "@/components/public/hero-slideshow";
 import { Button } from "@/components/ui/button";
 import { scrollToSection } from "@/components/public/use-active-section";
-import { type HeroSlide } from "@/lib/hero";
+import { HERO_STAGE_CLASSNAME, type HeroSlide } from "@/lib/hero";
+import { cn } from "@/lib/utils";
 
 function EmptyHero() {
   return (
     <section
       id="home"
-      className="relative isolate scroll-mt-20 overflow-hidden bg-background text-foreground"
+      className="relative isolate scroll-mt-[4.25rem] overflow-hidden bg-background text-foreground"
       aria-labelledby="hero-heading"
     >
       <div className="pointer-events-none absolute inset-0" aria-hidden>
         <div className="hero-orb absolute -top-28 end-[-12%] h-[26rem] w-[26rem] rounded-full bg-brand/[0.14] blur-3xl dark:bg-brand/[0.12]" />
         <div className="absolute inset-0 bg-gradient-to-b from-brand/[0.06] via-transparent to-transparent" />
       </div>
-      <div className="relative mx-auto flex min-h-[28rem] max-w-7xl items-center px-4 py-20 sm:px-6 lg:min-h-[32rem] lg:px-8">
-        <div className="max-w-2xl">
-          <h1
-            id="hero-heading"
-            className="text-balance text-3xl font-bold leading-[1.25] tracking-tight sm:text-4xl lg:text-[2.75rem]"
-          >
-            آژانس هوشمند بازاریابی{" "}
-            <span className="text-brand">اپیکس</span>
-          </h1>
-          <p className="mt-5 max-w-lg text-sm leading-8 text-muted-foreground sm:text-base">
-            محتوای هیرو به‌زودی از پنل مدیریت منتشر می‌شود.
-          </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Button
-              variant="brand"
-              size="lg"
-              className="h-12 rounded-xl"
-              onClick={() => scrollToSection("contact")}
+      <div
+        className={cn(
+          HERO_STAGE_CLASSNAME,
+          "relative mx-auto flex max-w-none items-center border-0 bg-transparent",
+        )}
+      >
+        <div className="relative mx-auto flex h-full w-full max-w-7xl items-center px-4 pt-[var(--public-header-height,4.25rem)] sm:px-6 lg:px-8">
+          <div className="max-w-2xl py-10 sm:py-14">
+            <p className="mb-3 text-sm font-medium tracking-wide text-brand">
+              آژانس هوشمند بازاریابی اپیکس
+            </p>
+            <h1
+              id="hero-heading"
+              className="text-balance text-[1.75rem] font-extrabold leading-[1.25] tracking-tight sm:text-4xl lg:text-[3.25rem] lg:leading-[1.12]"
             >
-              تماس با ما
-            </Button>
-            <Button
-              variant="outline"
-              size="lg"
-              className="h-12 rounded-xl"
-              onClick={() => scrollToSection("portfolio")}
-            >
-              مشاهده آثار
-            </Button>
+              برند شما شایسته{" "}
+              <span className="text-brand">محتوایی اثرگذار</span> است
+            </h1>
+            <p className="mt-4 max-w-lg text-pretty text-sm leading-7 text-muted-foreground sm:mt-5 sm:text-base sm:leading-8">
+              از استراتژی تا تولید و انتشار؛ اپیکس پیام برندتان را واضح، جذاب و
+              ماندگار به مخاطب می‌رساند — با تیمی که نتیجه را اولویت می‌دهد.
+            </p>
+            <div className="mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row">
+              <Button
+                variant="brand"
+                size="lg"
+                className="h-11 rounded-xl sm:h-12"
+                onClick={() => scrollToSection("contact")}
+              >
+                شروع همکاری
+              </Button>
+              <Button
+                variant="outline"
+                size="lg"
+                className="h-11 rounded-xl sm:h-12"
+                onClick={() => scrollToSection("portfolio")}
+              >
+                مشاهده نمونه‌کارها
+              </Button>
+            </div>
           </div>
         </div>
       </div>
