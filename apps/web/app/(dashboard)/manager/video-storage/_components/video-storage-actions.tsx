@@ -82,7 +82,7 @@ export function VideoStorageActions({
               <span className="sr-only">عملیات بیشتر</span>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-44" dir="rtl">
+          <DropdownMenuContent align="start" className="min-w-44 text-start">
             {canEdit ? (
               <DropdownMenuItem onClick={onEdit}>
                 <Pencil className="ms-2 h-4 w-4" />
