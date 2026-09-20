@@ -421,6 +421,40 @@ export const PERMISSION_CATALOG = [
     ],
   },
   {
+    id: "video_storage",
+    label: "مدیریت ویدیوها",
+    description: "ذخیره‌سازی، مدیریت و گردش‌کار ویدیوهای شرکت",
+    actions: [
+      {
+        code: "video_storage.view",
+        label: "دسترسی به مدیریت ویدیوها",
+        description:
+          "مشاهده صفحه مدیریت ویدیوها — کارمند فقط ویدیوهای خود را می‌بیند",
+      },
+      {
+        code: "video_storage.upload",
+        label: "بارگذاری",
+        description: "آپلود ویدیوهای جدید در فضای ذخیره‌سازی شرکت",
+      },
+      {
+        code: "video_storage.edit",
+        label: "ویرایش",
+        description: "ویرایش عنوان، توضیحات و وضعیت ویدیوهای مجاز",
+      },
+      {
+        code: "video_storage.delete",
+        label: "حذف",
+        description: "حذف ویدیوهای مجاز از فضای ذخیره‌سازی",
+      },
+      {
+        code: "video_storage.send_portfolio",
+        label: "ارسال به نمونه‌کارها",
+        description:
+          "ارسال ویدیو به نمونه‌کارها — معمولاً فقط مدیر؛ برای کارمند باید صریحاً اعطا شود",
+      },
+    ],
+  },
+  {
     id: "services",
     label: "خدمات",
     description: "مدیریت کارت‌های خدمات وب‌سایت عمومی",

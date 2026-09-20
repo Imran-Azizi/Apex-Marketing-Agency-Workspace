@@ -768,6 +768,13 @@ export const portfolioService = {
       data,
     });
 
+    if (body.status) {
+      const { syncCompanyVideoFromPortfolio } = await import(
+        "../video-storage/service.js"
+      );
+      await syncCompanyVideoFromPortfolio(id, body.status);
+    }
+
     if (body.categoryIds) {
       const { syncCategoriesForItem } = await import('./showcase.js');
       await syncCategoriesForItem(id, body.categoryIds);
@@ -820,6 +827,11 @@ export const portfolioService = {
         status: 'UNPUBLISHED',
       },
     });
+
+    const { unlinkCompanyVideoFromPortfolio } = await import(
+      '../video-storage/service.js'
+    );
+    await unlinkCompanyVideoFromPortfolio(id);
 
     await writeAudit({
       userId: actor.userId,

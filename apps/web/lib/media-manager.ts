@@ -16,6 +16,8 @@ export const UPLOAD_PURPOSE = {
   CUSTOMER_IMAGE: "customer-image",
   PORTFOLIO_VIDEO: "portfolio-video",
   PORTFOLIO_THUMBNAIL: "portfolio-thumbnail",
+  VIDEO_STORAGE: "video-storage",
+  VIDEO_STORAGE_THUMBNAIL: "video-storage-thumbnail",
   CHAT_ATTACHMENT: "chat-attachment",
   GENERIC: "generic",
 } as const;

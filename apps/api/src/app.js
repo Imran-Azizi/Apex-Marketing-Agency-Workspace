@@ -29,6 +29,7 @@ import employeeRoutes from "./modules/employees/index.js";
 import productionRoutes from "./modules/production/index.js";
 import backupRoutes from "./modules/backup/index.js";
 import portfolioRoutes from "./modules/portfolio/index.js";
+import videoStorageRoutes from "./modules/video-storage/index.js";
 import servicesRoutes from "./modules/services/index.js";
 import contactRoutes from "./modules/contact/index.js";
 import heroRoutes from "./modules/hero/index.js";
@@ -289,6 +290,7 @@ export function createApp() {
   app.use("/api/v1/narration", narrationRoutes);
   app.use("/api/v1/production", productionRoutes);
   app.use("/api/v1/portfolio", portfolioRoutes);
+  app.use("/api/v1/video-storage", videoStorageRoutes);
   app.use("/api/v1/backup", backupRoutes);
   app.use("/api/v1/services", servicesRoutes);
   app.use("/api/v1/contact", contactRoutes);

@@ -6,6 +6,9 @@ import {
   isPublicStorageKey,
   stripStoragePrefix,
 } from "../../services/storage/media-manager.js";
+import { prisma } from "../../db/prisma.js";
+import { isFullAccessRole } from "../../services/permissions/catalog.js";
+import { hasAnyPermission } from "../../services/permissions/effective.js";
 
 export function normalizeStorageKey(input) {
   const key = String(input || "")
@@ -47,6 +50,35 @@ export async function assertRawStorageAccess(storageKey, auth) {
 
   const unprefixed = stripStoragePrefix(key);
   const parts = unprefixed.split("/").filter(Boolean);
+
+  if (
+    (parts[0] === "videos" && parts[1] === "storage") ||
+    (parts[0] === "images" && parts[1] === "video-storage")
+  ) {
+    if (
+      !hasAnyPermission(
+        auth.permissions,
+        ["video_storage.view"],
+        auth.roleCode,
+      )
+    ) {
+      throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+    }
+    if (isFullAccessRole(auth.roleCode)) return key;
+
+    const owned = await prisma.companyVideo.findFirst({
+      where: {
+        deletedAt: null,
+        uploadedByUserId: auth.userId,
+        OR: [{ storageKey: key }, { thumbnailKey: key }],
+      },
+      select: { id: true },
+    });
+    if (!owned) {
+      throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+    }
+    return key;
+  }
 
   if (parts[0] === "projects" && parts[1]) {
     await assertProjectAccess(parts[1], auth);

@@ -14,6 +14,7 @@ import {
   UPLOAD_PURPOSE,
   validateContentImportFile,
 } from "../../services/storage/media-manager.js";
+import { assertUploadPurposeAllowed } from "../video-storage/service.js";
 import { prisma } from "../../db/prisma.js";
 import { normalizeDigitsDeep } from "../../utils/toEnglishDigits.js";
 import { SECURITY, BLOCKED_UPLOAD_EXTENSIONS } from "../../config/security.js";
@@ -456,6 +457,7 @@ router.post(
       if (!req.file)
         throw new AppError("فایل الزامی است", 400, "FILE_REQUIRED");
       const uploadContext = parseUploadContext(req.body || {}, req.auth || {});
+      assertUploadPurposeAllowed(uploadContext.purpose, req.auth);
       if (uploadContext.purpose === UPLOAD_PURPOSE.CONTENT_IMPORT) {
         const check = validateContentImportFile(req.file);
         if (!check.ok) {

@@ -32,6 +32,21 @@ export function portfolioAdminStreamUrl(portfolioId: string): string {
   const base = `${API_BASE}/portfolio/${encodeURIComponent(portfolioId)}/stream`;
   return panel ? `${base}?panel=${encodeURIComponent(panel)}` : base;
 }
+
+/** Authenticated stream URL for company video library playback. */
+export function videoStorageStreamUrl(videoId: string): string {
+  const panel = resolveClientAuthPanel();
+  const base = `${API_BASE}/video-storage/${encodeURIComponent(videoId)}/stream`;
+  return panel ? `${base}?panel=${encodeURIComponent(panel)}` : base;
+}
+
+/** Authenticated thumbnail URL for company video library cards. */
+export function videoStorageThumbnailUrl(videoId: string): string {
+  const panel = resolveClientAuthPanel();
+  const base = `${API_BASE}/video-storage/${encodeURIComponent(videoId)}/thumbnail`;
+  return panel ? `${base}?panel=${encodeURIComponent(panel)}` : base;
+}
+
 export type VideoKindLabel = "WATERMARKED" | "CLEAN";
 
 export const VIDEO_KIND_LABELS: Record<VideoKindLabel, string> = {

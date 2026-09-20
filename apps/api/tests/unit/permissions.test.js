@@ -36,6 +36,8 @@ test('manager and admin are equivalent full-access grantors', () => {
   assert.equal(ALL_PERMISSION_CODES.includes('settings.permissions'), true);
   assert.equal(ALL_PERMISSION_CODES.includes('crm.portal_credentials'), true);
   assert.equal(ALL_PERMISSION_CODES.includes('employees.credentials'), true);
+  assert.equal(ALL_PERMISSION_CODES.includes('video_storage.view'), true);
+  assert.equal(ALL_PERMISSION_CODES.includes('video_storage.send_portfolio'), true);
 
   const managerGrantable = getGrantableCodes({ roleCode: 'MANAGER', permissions: [] });
   const adminGrantable = getGrantableCodes({ roleCode: 'ADMIN', permissions: [] });

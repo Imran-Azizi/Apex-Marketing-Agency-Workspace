@@ -17,6 +17,8 @@ export const UPLOAD_PURPOSE = Object.freeze({
   CUSTOMER_IMAGE: "customer-image",
   PORTFOLIO_VIDEO: "portfolio-video",
   PORTFOLIO_THUMBNAIL: "portfolio-thumbnail",
+  VIDEO_STORAGE: "video-storage",
+  VIDEO_STORAGE_THUMBNAIL: "video-storage-thumbnail",
   CHAT_ATTACHMENT: "chat-attachment",
   GENERIC: "generic",
 });
@@ -277,6 +279,22 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
   if (purpose === UPLOAD_PURPOSE.PORTFOLIO_THUMBNAIL) {
     return {
       folderPath: `${MEDIA_ROOTS.IMAGES}/portfolio`,
+      category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.VIDEO_STORAGE) {
+    return {
+      folderPath: `${MEDIA_ROOTS.VIDEOS}/storage`,
+      category: MEDIA_ROOTS.VIDEOS,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.VIDEO_STORAGE_THUMBNAIL) {
+    return {
+      folderPath: `${MEDIA_ROOTS.IMAGES}/video-storage`,
       category: MEDIA_ROOTS.IMAGES,
       purpose,
     };

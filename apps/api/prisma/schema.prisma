@@ -348,6 +348,7 @@ model User {
   postersUploaded         ProjectPoster[]     @relation("PosterUploader")
   postersReviewed         ProjectPoster[]     @relation("PosterReviewer")
   postersDelivered        ProjectPoster[]     @relation("PosterDeliverer")
+  companyVideosUploaded   CompanyVideo[]      @relation("CompanyVideoUploader")
 
   @@index([deletedAt])
   @@index([roleId])
@@ -993,8 +994,9 @@ model PortfolioItem {
   updatedAt     DateTime        @updatedAt
   deletedAt     DateTime?
 
-  categories  PortfolioItemCategory[]
-  mixedEntry  MixedPortfolioItem?
+  categories   PortfolioItemCategory[]
+  mixedEntry   MixedPortfolioItem?
+  companyVideo CompanyVideo?
 
   @@index([status, publishedAt])
   @@index([projectId])
@@ -1732,6 +1734,20 @@ enum PortfolioStatus {
   UNPUBLISHED
 }
 
+/// Company video library workflow (Video Storage → Portfolio → Public Website)
+enum VideoStorageStatus {
+  UPLOADED
+  UNDER_REVIEW
+  IN_PORTFOLIO
+  PUBLISHED
+}
+
+enum VideoProcessingStatus {
+  PENDING
+  READY
+  FAILED
+}
+
 enum BackupType {
   MANUAL
   AUTOMATIC
@@ -2177,4 +2193,35 @@ model BusinessAssistantRun {
   @@index([startedAt])
   @@index([trigger, startedAt])
   @@map("business_assistant_runs")
+}
+
+/// Company-wide video library — ownership-scoped storage before Portfolio / public publish
+model CompanyVideo {
+  id               String                @id @default(cuid())
+  title            String
+  description      String?
+  originalFilename String
+  storageKey       String
+  thumbnailKey     String?
+  mimeType         String?
+  sizeBytes        Int?
+  durationSeconds  Float?
+  status           VideoStorageStatus    @default(UPLOADED)
+  processingStatus VideoProcessingStatus @default(READY)
+  uploadedByUserId String
+  uploadedBy       User                  @relation("CompanyVideoUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  /// One video may enter Portfolio only once (DB uniqueness)
+  portfolioItemId  String?               @unique
+  portfolioItem    PortfolioItem?        @relation(fields: [portfolioItemId], references: [id], onDelete: SetNull)
+  meta             Json?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  deletedAt        DateTime?
+
+  @@index([uploadedByUserId, createdAt])
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([deletedAt])
+  @@index([processingStatus])
+  @@map("company_videos")
 }

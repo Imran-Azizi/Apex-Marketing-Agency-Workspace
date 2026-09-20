@@ -20,6 +20,7 @@ import {
   Banknote,
   TrendingUp,
   Bot,
+  Film,
 } from "lucide-react";
 
 export type InternalRole =
@@ -89,6 +90,7 @@ const MANAGER_NAV: NavItem[] = [
   { href: "/crm-sales", label: "CRM و فروش", icon: Kanban },
   { href: "/crm", label: "مدیریت مشتریان", icon: Users },
   { href: "/projects", label: "پروژه‌ها", icon: FolderKanban },
+  { href: "/manager/video-storage", label: "مدیریت ویدیوها", icon: Film },
   {
     href: "group:public-website",
     label: "مدیریت وبسایت عمومی",
@@ -266,6 +268,7 @@ const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
   { prefix: "/manager/messages", permission: "contact.view" },
   { prefix: "/manager/customers", permission: "customers.view" },
   { prefix: "/manager/portfolio", permission: "portfolio.view" },
+  { prefix: "/manager/video-storage", permission: "video_storage.view" },
   { prefix: "/manager/hero", permission: "hero.view" },
   { prefix: "/manager", permission: "dashboard.view" },
   { prefix: "/sales", permission: "dashboard.view" },
@@ -314,6 +317,12 @@ const EXTRA_NAV: Array<NavItem & { permission: string }> = [
     label: "نمونه‌کارها",
     icon: Images,
     permission: "portfolio.view",
+  },
+  {
+    href: "/manager/video-storage",
+    label: "مدیریت ویدیوها",
+    icon: Film,
+    permission: "video_storage.view",
   },
   {
     href: "/manager/hero",
