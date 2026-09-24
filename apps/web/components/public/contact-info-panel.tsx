@@ -1,5 +1,9 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
 import { Mail, MessageCircle, Phone } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { apiGet } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
@@ -13,6 +17,8 @@ const CHANNEL_ICONS: Record<ContactChannel["id"], LucideIcon> = {
   phone: Phone,
   email: Mail,
 };
+
+const STALE_MS = 5 * 60_000;
 
 function ContactInfoCard({ channel }: { channel: ContactChannel }) {
   const Icon = CHANNEL_ICONS[channel.id];
@@ -34,7 +40,8 @@ function ContactInfoCard({ channel }: { channel: ContactChannel }) {
         className={cn(
           "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-brand/20 bg-brand/10 text-brand",
           "transition-[border-color,background-color,transform] duration-200",
-          !disabled && "group-hover:border-brand/40 group-hover:bg-brand/15 group-hover:scale-105",
+          !disabled &&
+            "group-hover:border-brand/40 group-hover:bg-brand/15 group-hover:scale-105",
         )}
         aria-hidden
       >
@@ -79,18 +86,35 @@ function ContactInfoCard({ channel }: { channel: ContactChannel }) {
 
 export function ContactInfoPanel({
   info,
-  isLoading,
+  isLoading: isLoadingProp,
 }: {
-  info?: PublicContactInfo;
+  info?: PublicContactInfo | null;
   isLoading?: boolean;
 }) {
-  const channels = info
-    ? [info.whatsapp, info.phone, info.email]
+  const contactQ = useQuery({
+    queryKey: ["public-contact-info"],
+    queryFn: () => apiGet<PublicContactInfo>("/public/contact-info"),
+    staleTime: STALE_MS,
+    initialData: info ?? undefined,
+    initialDataUpdatedAt: info ? Date.now() : undefined,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+  const resolved = contactQ.data ?? info ?? undefined;
+  const channels = resolved
+    ? [resolved.whatsapp, resolved.phone, resolved.email].filter(
+        (channel): channel is ContactChannel => Boolean(channel?.id),
+      )
     : [];
+  const isLoading =
+    Boolean(isLoadingProp) || (contactQ.isLoading && !resolved);
 
   return (
     <aside className="overflow-visible rounded-3xl border border-border/60 bg-card p-5 shadow-sm sm:p-6 lg:p-7">
-      <p className="text-xs font-semibold tracking-wide text-brand">راه‌های ارتباطی</p>
+      <p className="text-xs font-semibold tracking-wide text-brand">
+        راه‌های ارتباطی
+      </p>
       <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground sm:text-xl">
         مستقیم با ما در تماس باشید
       </h3>

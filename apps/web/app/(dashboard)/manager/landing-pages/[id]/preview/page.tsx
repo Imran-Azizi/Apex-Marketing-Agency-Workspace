@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { LandingPageRenderer } from "@/components/landing/landing-page-renderer";
 import { cn } from "@/lib/utils";
 import type { LandingPage } from "@/lib/landing-pages";
+import type { PublicContactInfo } from "@/lib/contact";
 
 export default function LandingPagePreviewPage() {
   const params = useParams<{ id: string }>();
@@ -20,6 +21,12 @@ export default function LandingPagePreviewPage() {
     queryKey: ["landing-page", params.id],
     queryFn: () => apiGet<LandingPage>(`/landing-pages/${params.id}`),
     enabled: Boolean(params.id),
+  });
+  const contactQ = useQuery({
+    queryKey: ["public-contact-info"],
+    queryFn: () => apiGet<PublicContactInfo>("/public/contact-info"),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   if (query.isLoading) {
@@ -65,7 +72,11 @@ export default function LandingPagePreviewPage() {
         </div>
       </div>
       <div className={cn("mx-auto overflow-hidden rounded-2xl border bg-background shadow-sm", frame)}>
-        <LandingPageRenderer content={page.content} showForm />
+        <LandingPageRenderer
+          content={page.content}
+          contact={contactQ.data}
+          showForm
+        />
       </div>
     </div>
   );
