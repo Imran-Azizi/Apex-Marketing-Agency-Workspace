@@ -16,8 +16,8 @@ export function PortfolioGrid({
         className,
       )}
     >
-      {items.map((item) => (
-        <PortfolioCard key={item.id} item={item} />
+      {items.map((item, index) => (
+        <PortfolioCard key={item.id} item={item} index={index} />
       ))}
     </div>
   );

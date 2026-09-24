@@ -55,6 +55,9 @@ test("public storage keys allow marketing prefixes only", () => {
   assert.equal(isPublicStorageKey("apex/images/hero/slide.jpg"), true);
   assert.equal(isPublicStorageKey("images/portfolio/thumb.webp"), true);
   assert.equal(isPublicStorageKey("videos/portfolio/show.mp4"), true);
+  assert.equal(isPublicStorageKey("images/landing/hero.webp"), true);
+  assert.equal(isPublicStorageKey("videos/landing/clip.mp4"), true);
+  assert.equal(isPublicStorageKey("audio/landing/voice.mp3"), true);
   assert.equal(isPublicStorageKey("apex/projects/abc/final/watermarked/x.mp4"), false);
   assert.equal(isPublicStorageKey("../etc/passwd"), false);
   assert.equal(isCleanFinalStorageKey("projects/abc/final/clean/video.mp4"), true);

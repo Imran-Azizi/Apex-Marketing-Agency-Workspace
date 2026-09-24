@@ -34,6 +34,7 @@ import servicesRoutes from "./modules/services/index.js";
 import contactRoutes from "./modules/contact/index.js";
 import heroRoutes from "./modules/hero/index.js";
 import customersRoutes from "./modules/customers/index.js";
+import landingPagesRoutes from "./modules/landing-pages/index.js";
 import financeRoutes from "./modules/finance/index.js";
 import chatRoutes from "./modules/chat/index.js";
 import salesAssistantRoutes from "./modules/sales-assistant/index.js";
@@ -296,6 +297,7 @@ export function createApp() {
   app.use("/api/v1/contact", contactRoutes);
   app.use("/api/v1/hero", heroRoutes);
   app.use("/api/v1/customers", customersRoutes);
+  app.use("/api/v1/landing-pages", landingPagesRoutes);
   app.use("/api/v1/finance", financeRoutes);
   app.use("/api/v1/chat", chatRoutes);
   app.use("/api/v1/sales-assistant", salesAssistantRoutes);

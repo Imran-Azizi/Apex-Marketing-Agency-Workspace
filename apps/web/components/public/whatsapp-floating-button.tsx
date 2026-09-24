@@ -1,5 +1,9 @@
+"use client";
+
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { isSafeWhatsAppHref } from "@/lib/contact";
+import { WhatsAppLeadDialog } from "@/components/public/whatsapp-lead-dialog";
 
 const LABEL = "تماس با ما در واتساپ";
 
@@ -19,7 +23,7 @@ function WhatsAppGlyph({ className }: { className?: string }) {
 
 /**
  * Fixed public-site WhatsApp CTA.
- * Server component — no client JS. Renders nothing when config/href is invalid.
+ * Opens a lead-capture dialog first; WhatsApp opens only after CRM lead success.
  */
 export function WhatsAppFloatingButton({
   href,
@@ -28,6 +32,8 @@ export function WhatsAppFloatingButton({
   href?: string | null;
   className?: string;
 }) {
+  const [open, setOpen] = useState(false);
+
   if (!isSafeWhatsAppHref(href)) return null;
 
   return (
@@ -38,12 +44,13 @@ export function WhatsAppFloatingButton({
         className,
       )}
     >
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        type="button"
         aria-label={LABEL}
         title={LABEL}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
         className={cn(
           "pointer-events-auto group relative inline-flex h-14 w-14 items-center justify-center",
           "rounded-full bg-[#25D366] text-white",
@@ -68,7 +75,13 @@ export function WhatsAppFloatingButton({
         >
           {LABEL}
         </span>
-      </a>
+      </button>
+
+      <WhatsAppLeadDialog
+        open={open}
+        onOpenChange={setOpen}
+        fallbackHref={href}
+      />
     </div>
   );
 }

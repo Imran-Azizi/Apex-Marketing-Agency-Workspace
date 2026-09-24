@@ -3,9 +3,11 @@ import Link from "next/link";
 import { PortalLoginForm } from "@/components/auth/portal-login-form";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { AUTH_AUDIENCE_COPY } from "@/components/auth/auth-audience";
+import { NOINDEX_ROBOTS } from "@/lib/seo";
 
 export const metadata: Metadata = {
   title: AUTH_AUDIENCE_COPY.portal.documentTitle,
+  robots: NOINDEX_ROBOTS,
 };
 
 export default function PortalLoginPage() {

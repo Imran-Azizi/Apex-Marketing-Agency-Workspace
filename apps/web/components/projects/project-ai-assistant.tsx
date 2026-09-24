@@ -10,7 +10,10 @@ import {
 } from "@/components/shared/tab-styles";
 import {
   canSendVersionToCustomer,
+  isManagerReleasedVersion,
+  versionHasContent,
   versionSendBlockReason,
+  type ManagerSectionConfirmState,
 } from "@/lib/content-version";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -102,6 +105,7 @@ interface ContentVersion {
   narration?: unknown;
   storyboard?: unknown;
   extras?: Record<string, unknown> | null;
+  managerSectionConfirm?: ManagerSectionConfirmState | null;
   createdAt: string;
   feedback?: CustomerFeedbackItem[];
   approvals?: ApprovalTimelineItem[];
@@ -359,6 +363,11 @@ export function ProjectAiAssistant({
     "content.edit",
     me?.role,
   );
+  const canApproveContent = hasPermission(
+    me?.permissions,
+    "content.approve",
+    me?.role,
+  );
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(
     null,
   );
@@ -371,6 +380,9 @@ export function ProjectAiAssistant({
   const [manualUploadOpen, setManualUploadOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ContentVersion | null>(null);
   const [sendConfirmOpen, setSendConfirmOpen] = useState(false);
+  const [releaseTarget, setReleaseTarget] = useState<ContentVersion | null>(
+    null,
+  );
   const [generationPrompt, setGenerationPrompt] = useState("");
   const [generatePromptOpen, setGeneratePromptOpen] = useState(false);
   const [contentTab, setContentTab] = useState<
@@ -509,6 +521,25 @@ export function ProjectAiAssistant({
       ),
   });
 
+  const releaseMut = useMutation({
+    mutationFn: (versionId: string) =>
+      apiPost<ContentVersion>(
+        `/ai/${projectId}/versions/${versionId}/release-for-production`,
+        {},
+      ),
+    onSuccess: () => {
+      toast.success(
+        "محتوا تأیید شد — اکنون می‌توانید نریتور و ادیتور را اختصاص دهید",
+      );
+      setReleaseTarget(null);
+      invalidateAll();
+    },
+    onError: (e) =>
+      toast.error(
+        e instanceof Error ? e.message : "تأیید داخلی محتوا ناموفق بود",
+      ),
+  });
+
   const compareQ = useQuery({
     queryKey: ["ai-compare", projectId, compareLeft, compareRight],
     queryFn: () =>
@@ -626,7 +657,16 @@ export function ProjectAiAssistant({
   }, [steps]);
 
   const sendBlockReason = selected ? versionSendBlockReason(selected) : null;
-  const canSendForApproval = !!selected && canSendVersionToCustomer(selected);
+  /** Any version with content that is not already manager-locked may be confirmed. */
+  const versionReleasable = (v: ContentVersion | null | undefined) => {
+    if (!v || !versionHasContent(v)) return false;
+    if (isManagerReleasedVersion(v)) return false;
+    if (v.status === "APPROVED" && v.isLocked) return false;
+    return true;
+  };
+  const canSendForApproval =
+    !!selected && canSendVersionToCustomer(selected);
+  const canRelease = versionReleasable(selected);
 
   const feedbackCount = overviewQ.data?.customerFeedback?.length || 0;
 
@@ -914,7 +954,7 @@ export function ProjectAiAssistant({
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-1">
+                <ul className="space-y-1.5">
                   {versions.map((v) => {
                     const active = selected?.id === v.id;
                     const locked =
@@ -922,6 +962,7 @@ export function ProjectAiAssistant({
                       (v.status === "PENDING_CUSTOMER_APPROVAL" &&
                         v.publishedToClient) ||
                       (v.status === "REVISION_REQUESTED" && v.isLocked);
+                    const released = isManagerReleasedVersion(v);
                     const sendable = canSendVersionToCustomer(v);
                     return (
                       <li key={v.id}>
@@ -955,6 +996,14 @@ export function ProjectAiAssistant({
                                 >
                                   {STATUS_LABEL[v.status] || v.status}
                                 </Badge>
+                                {released ? (
+                                  <Badge
+                                    variant="success"
+                                    className="text-[10px] font-normal"
+                                  >
+                                    تأیید مدیر
+                                  </Badge>
+                                ) : null}
                                 {(v.status === "APPROVED" ||
                                   (v.status === "PENDING_CUSTOMER_APPROVAL" &&
                                     v.publishedToClient)) && (
@@ -975,6 +1024,7 @@ export function ProjectAiAssistant({
                                     </Badge>
                                   )}
                                 {sendable &&
+                                  !released &&
                                   !(
                                     v.status === "PENDING_CUSTOMER_APPROVAL" &&
                                     v.publishedToClient
@@ -992,7 +1042,7 @@ export function ProjectAiAssistant({
                               {formatDate(v.createdAt)}
                             </p>
                           </button>
-                          {!locked && (
+                          {!locked ? (
                             <div className="flex items-center pe-1.5">
                               <Button
                                 type="button"
@@ -1015,7 +1065,7 @@ export function ProjectAiAssistant({
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       </li>
                     );
@@ -1076,10 +1126,44 @@ export function ProjectAiAssistant({
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    {canRelease ? (
+                      <Button
+                        variant="brand"
+                        size="sm"
+                        className="h-9 gap-1.5 px-3 font-semibold"
+                        disabled={releaseMut.isPending || isBusy}
+                        title="تأیید این نسخه توسط مدیر و آماده‌سازی برای نریتور و ادیتور"
+                        onClick={() => {
+                          if (!canApproveContent) {
+                            toast.error(
+                              "دسترسی تأیید محتوا برای حساب شما فعال نیست. از تنظیمات → دسترسی‌ها، مجوز «تأیید محتوا» را فعال کنید.",
+                            );
+                            return;
+                          }
+                          setReleaseTarget(selected);
+                        }}
+                      >
+                        {releaseMut.isPending ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        )}
+                        تأیید نسخه
+                      </Button>
+                    ) : null}
+                    {selected && isManagerReleasedVersion(selected) ? (
+                      <Badge
+                        variant="success"
+                        className="h-9 gap-1 px-2.5 font-normal"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        تأییدشده توسط مدیر
+                      </Badge>
+                    ) : null}
                     <Button
                       variant="outline"
                       size="sm"
-                      className="gap-1.5"
+                      className="h-9 gap-1.5"
                       disabled={isBusy}
                       onClick={() =>
                         regenerateMut.mutate(
@@ -1100,12 +1184,20 @@ export function ProjectAiAssistant({
                       تولید مجدد
                     </Button>
                     <Button
-                      variant="brand"
+                      variant="outline"
                       size="sm"
-                      className="gap-1.5"
+                      className="h-9 gap-1.5"
                       disabled={!canSendForApproval || sendMut.isPending}
                       title={sendBlockReason || undefined}
-                      onClick={() => setSendConfirmOpen(true)}
+                      onClick={() => {
+                        if (!canApproveContent) {
+                          toast.error(
+                            "دسترسی تأیید محتوا برای حساب شما فعال نیست",
+                          );
+                          return;
+                        }
+                        setSendConfirmOpen(true);
+                      }}
                     >
                       {sendMut.isPending ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1388,6 +1480,48 @@ export function ProjectAiAssistant({
                 <Send className="h-4 w-4" />
               )}
               تأیید و ارسال
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!releaseTarget}
+        onOpenChange={(open) => {
+          if (!open && !releaseMut.isPending) setReleaseTarget(null);
+        }}
+      >
+        <DialogContent className="w-[calc(100%-1.5rem)] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>تأیید نسخه توسط مدیر</DialogTitle>
+            <DialogDescription className="leading-6">
+              {releaseTarget
+                ? `نسخه ${releaseTarget.versionNumber.toLocaleString("fa-AF", { numberingSystem: "latn" })} به‌صورت داخلی تأیید می‌شود، محتوا قفل می‌گردد و پروژه برای اختصاص نریتور و ادیتور آماده می‌شود — بدون ارسال به پورتال مشتری.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              disabled={releaseMut.isPending}
+              onClick={() => setReleaseTarget(null)}
+            >
+              انصراف
+            </Button>
+            <Button
+              variant="brand"
+              className="gap-2"
+              disabled={releaseMut.isPending || !releaseTarget}
+              onClick={() => {
+                if (releaseTarget) releaseMut.mutate(releaseTarget.id);
+              }}
+            >
+              {releaseMut.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              تأیید نسخه
             </Button>
           </DialogFooter>
         </DialogContent>

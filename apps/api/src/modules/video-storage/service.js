@@ -1020,7 +1020,25 @@ export async function streamCompanyVideo(req, res, file) {
   pipeMediaStream(stream, res);
 }
 
+const LANDING_UPLOAD_PURPOSES = new Set([
+  UPLOAD_PURPOSE.LANDING_IMAGE,
+  UPLOAD_PURPOSE.LANDING_VIDEO,
+  UPLOAD_PURPOSE.LANDING_AUDIO,
+]);
+
 export function assertUploadPurposeAllowed(purpose, auth) {
+  if (LANDING_UPLOAD_PURPOSES.has(purpose)) {
+    if (
+      !hasAnyPermission(
+        auth?.permissions,
+        ["landing_pages.create", "landing_pages.edit"],
+        auth?.roleCode,
+      )
+    ) {
+      throw new AppError("شما اجازه دسترسی به این منبع را ندارید", 403, "FORBIDDEN");
+    }
+    return;
+  }
   if (purpose === UPLOAD_PURPOSE.VIDEO_STORAGE) {
     if (
       !hasAnyPermission(

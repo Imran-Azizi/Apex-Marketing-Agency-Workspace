@@ -257,6 +257,57 @@ router.delete(
   },
 );
 
+const confirmSectionSchema = z.object({
+  section: z.enum(['scenario', 'narration', 'storyboard']),
+  confirmed: z.boolean(),
+});
+
+router.post(
+  '/:projectId/versions/:versionId/confirm-section',
+  requireCsrf,
+  requirePermission('content.approve'),
+  requireProjectParam,
+  validate(confirmSectionSchema),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await aiService.confirmSection(
+          req.params.projectId,
+          req.params.versionId,
+          req.body || {},
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  '/:projectId/versions/:versionId/release-for-production',
+  requireCsrf,
+  requirePermission('content.approve'),
+  requireProjectParam,
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await aiService.releaseForProduction(
+          req.params.projectId,
+          req.params.versionId,
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.post(
   '/:projectId/versions/:versionId/send-for-approval',
   requireCsrf,

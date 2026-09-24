@@ -8,9 +8,18 @@ import {
   buildContactMessageNotification,
 } from "../../services/notifications.js";
 import { buildWhatsappCta, getWhatsappNumber } from "../../services/whatsapp.js";
-import { formatE164Display, whatsappDigitsForLink } from "../../utils/whatsappNormalize.js";
+import {
+  formatE164Display,
+  parseInternationalPhone,
+  whatsappDigitsForLink,
+  WHATSAPP_VALIDATION_MESSAGE,
+} from "../../utils/whatsappNormalize.js";
 import { withContactVisibility } from "./visibility.js";
 import { formatCustomerNameWithCompany } from "../../utils/crmCustomerName.js";
+import {
+  ingestWebsiteContact,
+  ingestWhatsAppWebsiteLead,
+} from "../crm/ingestion.js";
 
 export const CONTACT_SUBJECTS = [
   { value: "GENERAL", label: "درخواست عمومی" },
@@ -69,9 +78,13 @@ export const submitContactSchema = z.object({
     .trim()
     .min(1, "شماره تماس الزامی است")
     .refine((value) => {
-      const digits = phoneDigits(value);
-      return digits.length >= 8 && digits.length <= 15;
-    }, "شماره تماس معتبر وارد کنید"),
+      try {
+        parseInternationalPhone(value);
+        return true;
+      } catch {
+        return false;
+      }
+    }, WHATSAPP_VALIDATION_MESSAGE),
   company: z
     .string()
     .trim()
@@ -87,6 +100,37 @@ export const submitContactSchema = z.object({
     .trim()
     .min(10, "پیام باید حداقل ۱۰ حرف باشد")
     .max(2000, "پیام نباید بیشتر از ۲۰۰۰ حرف باشد"),
+});
+
+/** Public WhatsApp floating CTA — lead form before opening wa.me */
+export const submitWhatsAppLeadSchema = z.object({
+  name: z
+    .string({ required_error: "نام الزامی است" })
+    .trim()
+    .min(2, "نام باید حداقل ۲ حرف باشد")
+    .max(80, "نام نباید بیشتر از ۸۰ حرف باشد"),
+  whatsapp: z
+    .string({ required_error: "شماره واتساپ الزامی است" })
+    .trim()
+    .min(1, "شماره واتساپ الزامی است")
+    .refine((value) => {
+      try {
+        parseInternationalPhone(value);
+        return true;
+      } catch {
+        return false;
+      }
+    }, WHATSAPP_VALIDATION_MESSAGE),
+  companyName: z
+    .string({ required_error: "نام شرکت الزامی است" })
+    .trim()
+    .min(2, "نام شرکت باید حداقل ۲ حرف باشد")
+    .max(120, "نام شرکت بیش از حد طولانی است"),
+  jobTitle: z
+    .string({ required_error: "موقف الزامی است" })
+    .trim()
+    .min(2, "موقف باید حداقل ۲ حرف باشد")
+    .max(120, "موقف بیش از حد طولانی است"),
 });
 
 function settingString(value, keys) {
@@ -218,13 +262,22 @@ export const contactService = {
   async submit(raw, req) {
     const name = sanitizeText(raw.name, 80);
     const email = sanitizeText(raw.email, 160).toLowerCase();
-    const phone = sanitizeText(raw.phone, 40);
+    const phoneRaw = sanitizeText(raw.phone, 40);
     const company = sanitizeText(raw.company || "", 120) || null;
     const subject =
       SUBJECT_LABELS[raw.subject] != null
         ? raw.subject
         : DEFAULT_CONTACT_SUBJECT;
     const message = sanitizeMultiline(raw.message, 2000);
+
+    let parsedPhone;
+    try {
+      parsedPhone = parseInternationalPhone(phoneRaw);
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw new AppError(WHATSAPP_VALIDATION_MESSAGE, 400, "INVALID_PHONE");
+    }
+    const phone = parsedPhone.e164;
 
     const since = new Date(Date.now() - DUPLICATE_WINDOW_MS);
     const duplicate = await prisma.contactMessage.findFirst({
@@ -244,6 +297,36 @@ export const contactService = {
       );
     }
 
+    // Lead must be persisted before we acknowledge success to the visitor.
+    let ingested;
+    try {
+      ingested = await ingestWebsiteContact({
+        name,
+        email,
+        phone,
+        company,
+        subject: subjectLabel(subject),
+        message,
+      });
+    } catch (err) {
+      console.error("[contact] CRM lead ingest failed", err?.message || err);
+      if (err instanceof AppError) throw err;
+      throw new AppError(
+        "ثبت سرنخ در سیستم فروش ناموفق بود. لطفاً دوباره تلاش کنید.",
+        500,
+        "LEAD_CREATE_FAILED",
+      );
+    }
+
+    const crmCustomerId = ingested?.customer?.id || null;
+    if (!crmCustomerId) {
+      throw new AppError(
+        "ثبت سرنخ در سیستم فروش ناموفق بود. لطفاً دوباره تلاش کنید.",
+        500,
+        "LEAD_CREATE_FAILED",
+      );
+    }
+
     const row = await prisma.contactMessage.create({
       data: {
         name,
@@ -255,31 +338,9 @@ export const contactService = {
         isRead: false,
         ipAddress: req?.ip || null,
         userAgent: String(req?.get?.("user-agent") || "").slice(0, 300) || null,
+        crmCustomerId,
       },
     });
-
-    let crmCustomerId = null;
-    try {
-      const { ingestWebsiteContact } = await import("../crm/ingestion.js");
-      const ingested = await ingestWebsiteContact({
-        name,
-        email,
-        phone,
-        company,
-        subject: subjectLabel(row.subject),
-        message,
-        contactMessageId: row.id,
-      });
-      crmCustomerId = ingested?.customer?.id || null;
-      if (crmCustomerId) {
-        await prisma.contactMessage.update({
-          where: { id: row.id },
-          data: { crmCustomerId },
-        });
-      }
-    } catch (err) {
-      console.error("[contact] CRM lead ingest failed", err?.message || err);
-    }
 
     await notifyManagersOnce(
       buildContactMessageNotification({
@@ -290,7 +351,111 @@ export const contactService = {
       }),
     );
 
-    return { id: row.id, crmCustomerId };
+    return {
+      id: row.id,
+      crmCustomerId,
+      leadCreated: Boolean(ingested?.created),
+      leadDuplicate: Boolean(ingested?.duplicate),
+      leadReopened: Boolean(ingested?.reopened),
+    };
+  },
+
+  /**
+   * Public WhatsApp FAB: create CRM lead first, then return the business wa.me URL.
+   * WhatsApp must only open on the client after this succeeds.
+   */
+  async submitWhatsAppLead(raw, req) {
+    const name = sanitizeText(raw.name, 80);
+    const whatsappRaw = sanitizeText(raw.whatsapp, 40);
+    const companyName = sanitizeText(raw.companyName, 120);
+    const jobTitle = sanitizeText(raw.jobTitle, 120);
+
+    let parsedPhone;
+    try {
+      parsedPhone = parseInternationalPhone(whatsappRaw);
+    } catch (err) {
+      if (err instanceof AppError) throw err;
+      throw new AppError(WHATSAPP_VALIDATION_MESSAGE, 400, "INVALID_WHATSAPP");
+    }
+
+    const intro = [
+      `سلام، من ${name}`,
+      companyName ? `از ${companyName}` : null,
+      jobTitle ? `(${jobTitle})` : null,
+      "هستم. می‌خواهم درباره خدمات اپیکس معلومات بگیرم.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    let ingested;
+    try {
+      ingested = await ingestWhatsAppWebsiteLead({
+        name,
+        whatsapp: parsedPhone.e164,
+        companyName,
+        jobTitle,
+        message: intro,
+      });
+    } catch (err) {
+      console.error(
+        "[whatsapp-lead] CRM lead ingest failed",
+        err?.message || err,
+      );
+      if (err instanceof AppError) throw err;
+      throw new AppError(
+        "ثبت سرنخ در سیستم فروش ناموفق بود. لطفاً دوباره تلاش کنید.",
+        500,
+        "LEAD_CREATE_FAILED",
+      );
+    }
+
+    const crmCustomerId = ingested?.customer?.id || null;
+    if (!crmCustomerId) {
+      throw new AppError(
+        "ثبت سرنخ در سیستم فروش ناموفق بود. لطفاً دوباره تلاش کنید.",
+        500,
+        "LEAD_CREATE_FAILED",
+      );
+    }
+
+    const cta = await buildWhatsappCta({
+      message: intro,
+      fromPublicWebsite: true,
+    });
+    if (!cta?.url) {
+      throw new AppError(
+        "لینک واتساپ در حال حاضر در دسترس نیست. لطفاً بعداً تلاش کنید.",
+        503,
+        "WHATSAPP_UNAVAILABLE",
+      );
+    }
+
+    await writeAudit({
+      userId: null,
+      action: ingested?.created
+        ? "PUBLIC_WHATSAPP_LEAD_CREATE"
+        : "PUBLIC_WHATSAPP_LEAD_MATCH",
+      entityType: "CrmCustomer",
+      entityId: crmCustomerId,
+      after: {
+        source: "WHATSAPP_WEBSITE",
+        channel: "public_whatsapp_cta",
+        created: Boolean(ingested?.created),
+        duplicate: Boolean(ingested?.duplicate),
+        reopened: Boolean(ingested?.reopened),
+        customerCode: ingested?.customer?.customerCode || null,
+      },
+      req,
+    });
+
+    return {
+      crmCustomerId,
+      customerCode: ingested?.customer?.customerCode || null,
+      leadCreated: Boolean(ingested?.created),
+      leadDuplicate: Boolean(ingested?.duplicate),
+      leadReopened: Boolean(ingested?.reopened),
+      whatsappUrl: cta.url,
+    };
   },
 
   async list({

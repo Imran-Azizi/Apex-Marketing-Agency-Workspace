@@ -313,7 +313,6 @@ export function CustomerCarousel({
               <CustomerCard
                 customer={customer}
                 index={looping ? Math.max(0, index - cloneCount) : index}
-                className="animate-public-fade"
                 onExpandedChange={(expanded) => {
                   setExpandedCount((count) =>
                     Math.max(0, count + (expanded ? 1 : -1)),
@@ -331,7 +330,7 @@ export function CustomerCarousel({
             type="button"
             variant="outline"
             size="icon"
-            className="h-9 w-9 rounded-full border-border/80 bg-card shadow-sm hover:border-brand/40 hover:bg-brand/10"
+            className="public-lift h-9 w-9 rounded-full border-border/80 bg-card shadow-sm hover:border-brand/40 hover:bg-brand/10"
             aria-label="بعدی"
             onClick={() => {
               pauseTemporarily();
@@ -344,7 +343,7 @@ export function CustomerCarousel({
             type="button"
             variant="outline"
             size="icon"
-            className="h-9 w-9 rounded-full border-border/80 bg-card shadow-sm hover:border-brand/40 hover:bg-brand/10"
+            className="public-lift h-9 w-9 rounded-full border-border/80 bg-card shadow-sm hover:border-brand/40 hover:bg-brand/10"
             aria-label="قبلی"
             onClick={() => {
               pauseTemporarily();

@@ -9,6 +9,7 @@ export const publicOriginCache = createTtlCache();
  */
 export function invalidatePublicPortfolioCache() {
   publicOriginCache.invalidate('portfolio-categories');
+  publicOriginCache.invalidate('seo-index');
   publicOriginCache.invalidatePrefix('portfolio:');
   publicOriginCache.invalidatePrefix('portfolio-slug:');
 }
@@ -26,6 +27,12 @@ export function invalidatePublicCustomersCache() {
 /** Drop cached public hero slides after manager create/edit/reorder/delete. */
 export function invalidatePublicHeroCache() {
   publicOriginCache.invalidate('hero');
+}
+
+/** Drop cached public landing pages after manager publish/unpublish/delete. */
+export function invalidatePublicLandingPagesCache() {
+  publicOriginCache.invalidate('seo-index');
+  publicOriginCache.invalidatePrefix('landing-slug:');
 }
 
 /** Drop cached public section descriptions after manager settings save. */

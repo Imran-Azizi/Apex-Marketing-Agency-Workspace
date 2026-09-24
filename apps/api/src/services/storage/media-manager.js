@@ -15,6 +15,9 @@ export const UPLOAD_PURPOSE = Object.freeze({
   SERVICE_IMAGE: "service-image",
   HERO_IMAGE: "hero-image",
   CUSTOMER_IMAGE: "customer-image",
+  LANDING_IMAGE: "landing-image",
+  LANDING_VIDEO: "landing-video",
+  LANDING_AUDIO: "landing-audio",
   PORTFOLIO_VIDEO: "portfolio-video",
   PORTFOLIO_THUMBNAIL: "portfolio-thumbnail",
   VIDEO_STORAGE: "video-storage",
@@ -264,6 +267,30 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
     return {
       folderPath: `${MEDIA_ROOTS.IMAGES}/customers`,
       category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.LANDING_IMAGE) {
+    return {
+      folderPath: `${MEDIA_ROOTS.IMAGES}/landing`,
+      category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.LANDING_VIDEO) {
+    return {
+      folderPath: `${MEDIA_ROOTS.VIDEOS}/landing`,
+      category: MEDIA_ROOTS.VIDEOS,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.LANDING_AUDIO) {
+    return {
+      folderPath: `${MEDIA_ROOTS.AUDIO}/landing`,
+      category: MEDIA_ROOTS.AUDIO,
       purpose,
     };
   }

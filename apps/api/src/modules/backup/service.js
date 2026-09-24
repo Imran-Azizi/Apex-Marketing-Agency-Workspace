@@ -1,11 +1,15 @@
 /**
- * APEX logical database backup / restore.
- * Exports Prisma business tables to a gzipped JSON archive, stores via object storage,
- * emails the archive when SMTP is configured, and supports validated restore.
+ * APEX full-system backup / restore.
+ * Archives every durable Prisma table plus referenced Bunny media into a tar.gz
+ * package, stores it locally (optional cloud mirror), emails when SMTP allows,
+ * and supports validated wipe-and-restore of the complete system.
  */
 import crypto from 'crypto';
-import { gzipSync, gunzipSync } from 'zlib';
-import { Readable } from 'stream';
+import { gunzipSync } from 'zlib';
+import { pipeline } from 'stream/promises';
+import { createWriteStream } from 'fs';
+import fsp from 'fs/promises';
+import path from 'path';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { prisma } from '../../db/prisma.js';
@@ -16,10 +20,14 @@ import { sendMail, isEmailConfigured } from '../../services/email.js';
 import { env } from '../../config/env.js';
 import {
   saveLocalBackup,
-  readLocalBackup,
   localBackupExists,
   deleteLocalBackup,
   openLocalBackupStream,
+  moveIntoLocalBackup,
+  stagingDirFor,
+  clearStaging,
+  localBackupPath,
+  ensureBackupRoot,
 } from '../../services/backupLocalStore.js';
 import {
   backupEmailDeliveryPlan,
@@ -29,68 +37,35 @@ import {
   safeEmailErrorMessage,
   withBackupEmailLock,
 } from './emailDelivery.js';
+import {
+  BACKUP_TABLES,
+  SKIP_TABLES,
+  SELF_REF_NULL_ON_CREATE,
+  assertBackupTablesComplete,
+} from './tables.js';
+import { collectMediaKeysFromTables } from './media-keys.js';
+import {
+  ARCHIVE_FORMAT,
+  ARCHIVE_VERSION,
+  LEGACY_VERSION,
+  ensureEmptyDir,
+  writeJsonGzip,
+  readJsonGzipFile,
+  writeManifest,
+  writeMediaIndex,
+  packStagingDir,
+  unpackArchive,
+  readManifest,
+  mediaRelPath,
+  sha256File,
+  sniffFileKind,
+  fileExists,
+} from './archive.js';
 
-export const BACKUP_FORMAT = 'apex-backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_FORMAT = ARCHIVE_FORMAT;
+export const BACKUP_VERSION = ARCHIVE_VERSION;
+export { BACKUP_TABLES, SKIP_TABLES };
 export const SCHEDULE_SETTING_KEY = 'backup_schedule';
-
-/** Ephemeral tables excluded from backup/restore. */
-const SKIP_TABLES = new Set(['Session', 'OtpCode', 'SystemBackup']);
-
-/**
- * Insert order (parents before children). Delete order is reverse.
- * Keep this aligned with Prisma FK dependencies or restore will 500.
- */
-export const BACKUP_TABLES = [
-  'Role',
-  'Permission',
-  'RolePermission',
-  'User',
-  'Setting',
-  'Service',
-  'Style',
-  'Format',
-  'TeamProfile',
-  'Rate',
-  'AudioSample',
-  'CrmCustomer',
-  'PortalAccount',
-  'ClientAsset',
-  'Project',
-  'Opportunity',
-  'PortalInvite',
-  'ProjectFinance',
-  'ProjectAssignment',
-  'ProjectFile',
-  'ProjectTimelineEvent',
-  'ProjectContext',
-  'AssetReference',
-  'ContentVersion',
-  'NarrationTask',
-  'NarrationTake',
-  'EditingTask',
-  'EditingResource',
-  'Approval',
-  'ClientFeedback',
-  'AiAgent',
-  'AiWorkflowExecution',
-  'AiRun',
-  'AiActivityLog',
-  'AiSetting',
-  'Invoice',
-  'InvoiceItem',
-  'Payment',
-  'Expense',
-  'EmployeePayable',
-  'EmployeeCompensationProfile',
-  'SalaryPayment',
-  'SalaryAdvance',
-  'FinancePnlTarget',
-  'DownloadPermission',
-  'DownloadHistory',
-  'Notification',
-  'AuditLog',
-];
 
 const DEFAULT_SCHEDULE = {
   emailTo: '',
@@ -98,6 +73,9 @@ const DEFAULT_SCHEDULE = {
   weekly: { enabled: false, dayOfWeek: 0, time: '23:00' },
   monthly: { enabled: false, dayOfMonth: 1, time: '23:00' },
 };
+
+const MEDIA_CONCURRENCY = 4;
+const MEDIA_DOWNLOAD_RETRIES = 3;
 
 function prismaDelegate(modelName) {
   const key = modelName.charAt(0).toLowerCase() + modelName.slice(1);
@@ -113,7 +91,6 @@ function isPrismaDecimal(value) {
   if (Decimal.isDecimal?.(value)) return true;
   if (value instanceof Prisma.Decimal) return true;
   if (value.constructor?.name === 'Decimal') return true;
-  // JSON shape produced when Decimal was accidentally Object.entries-serialized
   return (
     typeof value.s === 'number' &&
     typeof value.e === 'number' &&
@@ -130,7 +107,6 @@ function decimalToPlain(value) {
   if (value.constructor?.name === 'Decimal' && typeof value.toString === 'function') {
     return value.toString();
   }
-  // Legacy backups accidentally JSON-serialized Decimal internals as { s, e, d }
   if (
     typeof value === 'object' &&
     typeof value.s === 'number' &&
@@ -166,10 +142,6 @@ const modelByName = Object.fromEntries(
   Prisma.dmmf.datamodel.models.map((m) => [m.name, m]),
 );
 
-/**
- * Keep only scalar/enum columns and revive Decimal / DateTime / Bytes for Prisma create.
- * Also repairs older backups where Decimal was saved as {s,e,d}.
- */
 function sanitizeRowForRestore(modelName, row) {
   if (!row || typeof row !== 'object') return row;
   const model = modelByName[modelName];
@@ -214,7 +186,6 @@ function sanitizeRowForRestore(modelName, row) {
       continue;
     }
 
-    // Legacy accidental Decimal object on non-decimal fields — leave as-is unless shape matches
     if (isPrismaDecimal(val) && field.type !== 'Json') {
       out[field.name] = decimalToPlain(val);
       continue;
@@ -234,7 +205,25 @@ function formatBytes(bytes) {
   const n = Number(bytes) || 0;
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function toBigInt(value) {
+  if (typeof value === 'bigint') return value;
+  if (value == null) return 0n;
+  try {
+    return BigInt(value);
+  } catch {
+    return 0n;
+  }
+}
+
+function jsonSafeBigInt(value) {
+  const n = toBigInt(value);
+  // Keep JSON-safe number when within safe integer range
+  if (n <= BigInt(Number.MAX_SAFE_INTEGER)) return Number(n);
+  return n.toString();
 }
 
 export function getDefaultSchedule() {
@@ -290,7 +279,6 @@ export async function saveScheduleSettings(value, auth, req) {
     req,
   });
 
-  // Hot-reload cron jobs
   try {
     const { reloadBackupScheduler } = await import('../../services/backupScheduler.js');
     await reloadBackupScheduler();
@@ -337,42 +325,198 @@ function computeNextRuns(schedule, from = new Date()) {
   return next;
 }
 
-async function buildPayload() {
+async function updateProgress(backupId, percent, phase, extra = {}) {
+  try {
+    await prisma.systemBackup.update({
+      where: { id: backupId },
+      data: {
+        progressPercent: Math.max(0, Math.min(100, Math.round(percent))),
+        progressPhase: phase,
+        ...extra,
+      },
+    });
+  } catch (err) {
+    console.warn('[backup] progress update failed:', err?.message || err);
+  }
+}
+
+async function exportDatabaseTables(onProgress) {
+  assertBackupTablesComplete();
   const tables = {};
   let recordCount = 0;
+  const total = BACKUP_TABLES.filter((n) => !SKIP_TABLES.has(n)).length;
+  let done = 0;
+
   for (const name of BACKUP_TABLES) {
     if (SKIP_TABLES.has(name)) continue;
     const rows = await prismaDelegate(name).findMany();
     tables[name] = rows.map(serializeValue);
     recordCount += rows.length;
+    done += 1;
+    if (onProgress) {
+      await onProgress(done, total, name);
+    }
   }
-  const body = {
-    format: BACKUP_FORMAT,
-    version: BACKUP_VERSION,
-    createdAt: new Date().toISOString(),
-    app: 'APEX_SYSTEM',
-    tables,
-  };
-  const checksum = crypto
-    .createHash('sha256')
-    .update(JSON.stringify(body))
-    .digest('hex');
-  const finalPayload = { ...body, checksum };
-  const finalJson = JSON.stringify(finalPayload);
-  const gzip = gzipSync(Buffer.from(finalJson, 'utf8'));
+
   return {
-    gzip,
-    checksum,
+    tables,
     tableCount: Object.keys(tables).length,
     recordCount,
-    jsonBytes: Buffer.byteLength(finalJson),
   };
 }
 
-function parseBackupBuffer(buffer) {
+async function mapPool(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function run() {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      results[i] = await worker(items[i], i);
+    }
+  }
+  const runners = Array.from({ length: Math.min(concurrency, items.length || 1) }, () => run());
+  await Promise.all(runners);
+  return results;
+}
+
+async function downloadMediaToStaging(stagingDir, mediaKeys, onProgress) {
+  const entries = [];
+  const missing = [];
+  const errors = [];
+  let mediaBytes = 0n;
+  let completed = 0;
+
+  await mapPool(mediaKeys, MEDIA_CONCURRENCY, async (storageKey) => {
+    const rel = mediaRelPath(storageKey);
+    const abs = path.join(stagingDir, rel);
+    await fsp.mkdir(path.dirname(abs), { recursive: true });
+
+    let lastErr = null;
+    for (let attempt = 1; attempt <= MEDIA_DOWNLOAD_RETRIES; attempt++) {
+      try {
+        const { stream } = await storage.openReadStream(storageKey);
+        await pipeline(stream, createWriteStream(abs));
+        const stat = await fsp.stat(abs);
+        const sha256 = await sha256File(abs);
+        entries.push({
+          key: storageKey,
+          path: rel.replace(/\\/g, '/'),
+          sizeBytes: stat.size,
+          sha256,
+        });
+        mediaBytes += BigInt(stat.size);
+        lastErr = null;
+        break;
+      } catch (err) {
+        lastErr = err;
+        const status = Number(err?.status || err?.statusCode || 0);
+        const code = String(err?.code || '');
+        if (status === 404 || code === 'NOT_FOUND') {
+          missing.push({ key: storageKey, reason: 'not_found' });
+          try {
+            await fsp.unlink(abs);
+          } catch {
+            /* ignore */
+          }
+          lastErr = null;
+          break;
+        }
+        if (attempt < MEDIA_DOWNLOAD_RETRIES) {
+          await new Promise((r) => setTimeout(r, 400 * attempt));
+        }
+      }
+    }
+
+    if (lastErr) {
+      errors.push({
+        key: storageKey,
+        message: lastErr?.message || String(lastErr),
+      });
+    }
+
+    completed += 1;
+    if (onProgress) {
+      await onProgress(completed, mediaKeys.length);
+    }
+  });
+
+  if (errors.length) {
+    const sample = errors
+      .slice(0, 3)
+      .map((e) => e.key)
+      .join(', ');
+    throw new AppError(
+      `دانلود ${errors.length} فایل رسانه ناموفق بود (نمونه: ${sample})`,
+      502,
+      'BACKUP_MEDIA_FETCH',
+      { errors: errors.slice(0, 20) },
+    );
+  }
+
+  return { entries, missing, mediaBytes };
+}
+
+async function uploadMediaFromStaging(stagingDir, mediaIndex, onProgress) {
+  const files = Array.isArray(mediaIndex?.files) ? mediaIndex.files : [];
+  let completed = 0;
+  const failures = [];
+
+  await mapPool(files, MEDIA_CONCURRENCY, async (entry) => {
+    const rel = entry.path || mediaRelPath(entry.key);
+    const abs = path.join(stagingDir, rel);
+    if (!(await fileExists(abs))) {
+      failures.push({ key: entry.key, message: 'missing in archive' });
+      completed += 1;
+      if (onProgress) await onProgress(completed, files.length);
+      return;
+    }
+
+    try {
+      if (entry.sha256) {
+        const hash = await sha256File(abs);
+        if (hash !== entry.sha256) {
+          throw new AppError(
+            `checksum mismatch for ${entry.key}`,
+            400,
+            'BACKUP_MEDIA_CORRUPT',
+          );
+        }
+      }
+      const stat = await fsp.stat(abs);
+      await storage.saveFile(abs, {
+        filename: path.basename(entry.key),
+        storageKey: entry.key,
+        contentType: 'application/octet-stream',
+        overwrite: true,
+        sizeBytes: stat.size,
+      });
+    } catch (err) {
+      failures.push({ key: entry.key, message: err?.message || String(err) });
+    }
+
+    completed += 1;
+    if (onProgress) await onProgress(completed, files.length);
+  });
+
+  if (failures.length) {
+    throw new AppError(
+      `بازگردانی ${failures.length} فایل رسانه ناموفق بود`,
+      502,
+      'BACKUP_MEDIA_RESTORE',
+      { failures: failures.slice(0, 20) },
+    );
+  }
+
+  return { restored: files.length };
+}
+
+/**
+ * Legacy v1: gzipped JSON database-only payload (kept for restore compatibility).
+ */
+function parseLegacyBackupBuffer(buffer) {
   let raw;
   try {
-    // Accept gzip or plain JSON
     if (buffer[0] === 0x1f && buffer[1] === 0x8b) {
       raw = gunzipSync(buffer).toString('utf8');
     } else {
@@ -389,8 +533,14 @@ function parseBackupBuffer(buffer) {
     throw new AppError('فرمت فایل بک اپ نامعتبر است', 400, 'BACKUP_INVALID');
   }
 
-  if (payload.format !== BACKUP_FORMAT || payload.version !== BACKUP_VERSION) {
-    throw new AppError('نسخه فایل بک اپ پشتیبانی نمی‌شود', 400, 'BACKUP_VERSION');
+  if (payload.format !== BACKUP_FORMAT) {
+    throw new AppError('فرمت فایل بک اپ نامعتبر است', 400, 'BACKUP_INVALID');
+  }
+  if (payload.version !== LEGACY_VERSION && payload.version !== ARCHIVE_VERSION) {
+    // v2 database.json.gz inside archive also uses version 2 with tables
+    if (!(payload.tables && payload.version === ARCHIVE_VERSION)) {
+      throw new AppError('نسخه فایل بک اپ پشتیبانی نمی‌شود', 400, 'BACKUP_VERSION');
+    }
   }
   if (!payload.tables || typeof payload.tables !== 'object') {
     throw new AppError('ساختار داده بک اپ ناقص است', 400, 'BACKUP_INVALID');
@@ -405,6 +555,7 @@ function parseBackupBuffer(buffer) {
       app: rest.app,
       tables: rest.tables,
     };
+    if (rest.scope) verifyBody.scope = rest.scope;
     const verifyHash = crypto
       .createHash('sha256')
       .update(JSON.stringify(verifyBody))
@@ -417,7 +568,7 @@ function parseBackupBuffer(buffer) {
   return payload;
 }
 
-async function emailBackup({ to, fileName, gzip, backupId, type, createdAt }) {
+async function emailBackup({ to, fileName, archivePath, sizeBytes, backupId, type, createdAt }) {
   const plan = backupEmailDeliveryPlan({ emailTo: to, emailSentAt: null });
   if (!plan.shouldSend) {
     if (plan.reason === 'smtp_not_configured') {
@@ -441,22 +592,25 @@ async function emailBackup({ to, fileName, gzip, backupId, type, createdAt }) {
   const attachments = [];
   let oversizedNote = '';
   let attached = false;
-  if (gzip.length <= maxAttach) {
+  const size = Number(sizeBytes) || 0;
+
+  if (size > 0 && size <= maxAttach && archivePath) {
+    const content = await fsp.readFile(archivePath);
     attachments.push({
       filename: fileName,
-      content: gzip,
+      content,
       contentType: 'application/gzip',
     });
     attached = true;
   } else {
-    oversizedNote = `File size (${formatBytes(gzip.length)}) exceeds the email attachment limit (${formatBytes(maxAttach)}); the archive remains available for download in Backup & Restore.`;
+    oversizedNote = `File size (${formatBytes(size)}) exceeds the email attachment limit (${formatBytes(maxAttach)}); the full-system archive remains available for download in Backup & Restore.`;
   }
 
   const content = buildBackupEmailContent({
     fileName,
     backupId,
     type,
-    sizeLabel: formatBytes(gzip.length),
+    sizeLabel: formatBytes(size),
     createdAt: createdAt || new Date(),
     attached,
     oversizedNote,
@@ -479,7 +633,6 @@ async function persistBackupEmailOutcome(backupId, { emailSentAt, emailError }) 
     where: { id: backupId },
     data: {
       emailSentAt,
-      // Soft delivery failure kept on SUCCESS rows so download/restore stay available.
       errorMessage: softEmailError,
     },
   });
@@ -490,10 +643,7 @@ async function persistBackupEmailOutcome(backupId, { emailSentAt, emailError }) 
       WHERE id = ${backupId}
     `;
   } catch (err) {
-    console.warn(
-      '[backup] emailError column update skipped:',
-      err?.message || err,
-    );
+    console.warn('[backup] emailError column update skipped:', err?.message || err);
   }
 }
 
@@ -506,8 +656,13 @@ function serializeBackupRow(row) {
       : null);
   return {
     ...row,
+    sizeBytes: jsonSafeBigInt(row.sizeBytes),
+    mediaBytes: jsonSafeBigInt(row.mediaBytes ?? 0),
+    mediaFileCount: row.mediaFileCount ?? 0,
+    progressPercent: row.progressPercent ?? (row.status === 'SUCCESS' ? 100 : 0),
+    progressPhase: row.progressPhase || null,
+    scope: row.scope || 'FULL_SYSTEM',
     emailError,
-    // Keep backup failure messages; hide soft email markers from generic error text.
     errorMessage:
       typeof row.errorMessage === 'string' && row.errorMessage.startsWith('EMAIL: ')
         ? null
@@ -519,34 +674,127 @@ async function runBackupJob(backupId) {
   const backup = await prisma.systemBackup.findUnique({ where: { id: backupId } });
   if (!backup) return;
   if (backup.status === 'SUCCESS' || backup.status === 'FAILED') {
-    // Do not re-run completed jobs (prevents duplicate emails on accidental re-entry).
     return;
   }
 
+  const stagingDir = stagingDirFor(backupId);
+  let packedPath = null;
+
   try {
-    const built = await buildPayload();
+    await ensureBackupRoot();
+    await ensureEmptyDir(stagingDir);
+    await updateProgress(backupId, 2, 'آماده‌سازی');
+
+    // 1) Export all database tables
+    const exported = await exportDatabaseTables(async (done, total) => {
+      const pct = 2 + Math.round((done / Math.max(1, total)) * 28);
+      await updateProgress(backupId, pct, `پایگاه داده (${done}/${total})`);
+    });
+
+    const createdAt = new Date().toISOString();
+    const dbBody = {
+      format: BACKUP_FORMAT,
+      version: ARCHIVE_VERSION,
+      createdAt,
+      app: 'APEX_SYSTEM',
+      scope: 'FULL_SYSTEM',
+      tables: exported.tables,
+    };
+    const dbChecksum = crypto
+      .createHash('sha256')
+      .update(JSON.stringify(dbBody))
+      .digest('hex');
+    const dbPayload = { ...dbBody, checksum: dbChecksum };
+
+    await writeJsonGzip(path.join(stagingDir, 'database.json.gz'), dbPayload);
+    await updateProgress(backupId, 32, 'جمع‌آوری فایل‌های رسانه', {
+      tableCount: exported.tableCount,
+      recordCount: exported.recordCount,
+    });
+
+    // 2) Collect + download media
+    const mediaKeys = collectMediaKeysFromTables(exported.tables);
+    await updateProgress(backupId, 35, `رسانه: ${mediaKeys.length} فایل`, {
+      mediaFileCount: mediaKeys.length,
+    });
+
+    const mediaResult = await downloadMediaToStaging(
+      stagingDir,
+      mediaKeys,
+      async (done, total) => {
+        const pct = 35 + Math.round((done / Math.max(1, total)) * 45);
+        await updateProgress(backupId, pct, `دانلود رسانه (${done}/${total})`);
+      },
+    );
+
+    await writeMediaIndex(stagingDir, mediaResult.entries);
+    await updateProgress(backupId, 82, 'بسته‌بندی آرشیو', {
+      mediaFileCount: mediaResult.entries.length,
+      mediaBytes: mediaResult.mediaBytes,
+    });
+
+    const manifest = {
+      format: BACKUP_FORMAT,
+      version: ARCHIVE_VERSION,
+      createdAt,
+      app: 'APEX_SYSTEM',
+      scope: 'FULL_SYSTEM',
+      tableCount: exported.tableCount,
+      recordCount: exported.recordCount,
+      mediaFileCount: mediaResult.entries.length,
+      mediaBytes: Number(mediaResult.mediaBytes),
+      mediaMissingCount: mediaResult.missing.length,
+      mediaMissing: mediaResult.missing.slice(0, 100),
+      databaseChecksum: dbChecksum,
+      includes: {
+        database: true,
+        media: true,
+        settings: true,
+      },
+    };
+    await writeManifest(stagingDir, manifest);
+
+    // 3) Pack tar.gz outside staging (never include the archive in itself)
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const fileName = `apex-backup-${stamp}.json.gz`;
-    // Local key is always authoritative for download/restore
+    const fileName = `apex-backup-${stamp}.tar.gz`;
+    packedPath = path.join(path.dirname(stagingDir), `${backupId}-packed.tar.gz`);
+    const packed = await packStagingDir(stagingDir, packedPath);
+
+    // Verify pack is readable and non-empty
+    if (!packed.sizeBytes || packed.sizeBytes < 64) {
+      throw new AppError('آرشیو بک اپ خالی یا ناقص است', 500, 'BACKUP_EMPTY');
+    }
+
+    await updateProgress(backupId, 92, 'ذخیره نهایی');
+    const finalPath = await moveIntoLocalBackup(backupId, fileName, packedPath);
+    packedPath = null;
+
+    // Re-hash after move (authoritative)
+    const archiveChecksum = await sha256File(finalPath);
     const storageKey = `local:backups/${backupId}/${fileName}`;
 
-    await saveLocalBackup(backupId, fileName, built.gzip);
-
-    // Optional cloud mirror — never required for SUCCESS (local file is authoritative).
+    // Optional cloud mirror (skip very large archives — local file is authoritative)
     let cloudKey = null;
-    try {
-      const cloudStorageKey = `documents/backups/${fileName}`;
-      const saved = await storage.saveBuffer(built.gzip, {
-        filename: fileName,
-        folder: 'documents',
-        contentType: 'application/octet-stream',
-        storageKey: cloudStorageKey,
-      });
-      cloudKey = saved.key || cloudStorageKey;
-    } catch (cloudErr) {
-      console.warn(
-        '[backup] cloud mirror skipped:',
-        cloudErr?.message || cloudErr,
+    const CLOUD_MIRROR_MAX = 100 * 1024 * 1024;
+    if (packed.sizeBytes <= CLOUD_MIRROR_MAX) {
+      try {
+        const cloudStorageKey = `documents/backups/${fileName}`;
+        const buf = await fsp.readFile(finalPath);
+        const saved = await storage.saveBuffer(buf, {
+          filename: fileName,
+          folder: 'documents',
+          contentType: 'application/gzip',
+          storageKey: cloudStorageKey,
+        });
+        cloudKey = saved.key || cloudStorageKey;
+      } catch (cloudErr) {
+        console.warn('[backup] cloud mirror skipped:', cloudErr?.message || cloudErr);
+      }
+    } else {
+      console.info(
+        '[backup] cloud mirror skipped — archive exceeds',
+        CLOUD_MIRROR_MAX,
+        'bytes',
       );
     }
 
@@ -556,20 +804,26 @@ async function runBackupJob(backupId) {
         status: 'SUCCESS',
         fileName,
         storageKey: cloudKey ? `${storageKey}|${cloudKey}` : storageKey,
-        sizeBytes: built.gzip.length,
-        checksum: built.checksum,
-        tableCount: built.tableCount,
-        recordCount: built.recordCount,
+        sizeBytes: BigInt(packed.sizeBytes),
+        checksum: archiveChecksum,
+        tableCount: exported.tableCount,
+        recordCount: exported.recordCount,
+        mediaFileCount: mediaResult.entries.length,
+        mediaBytes: mediaResult.mediaBytes,
+        progressPercent: 100,
+        progressPhase: 'تکمیل شد',
+        scope: 'FULL_SYSTEM',
         completedAt: new Date(),
         errorMessage: null,
       },
     });
 
-    // Email only after the backup file is successfully persisted.
+    await clearStaging(backupId);
+
     const mailResult = await withBackupEmailLock(backupId, async () => {
       const fresh = await prisma.systemBackup.findUnique({
         where: { id: backupId },
-        select: { emailTo: true, emailSentAt: true, type: true, createdAt: true },
+        select: { emailTo: true, emailSentAt: true, type: true, createdAt: true, sizeBytes: true },
       });
       if (!fresh) return { emailSentAt: null, emailError: null };
       if (fresh.emailSentAt) {
@@ -579,17 +833,14 @@ async function runBackupJob(backupId) {
         return await emailBackup({
           to: fresh.emailTo,
           fileName,
-          gzip: built.gzip,
+          archivePath: finalPath,
+          sizeBytes: fresh.sizeBytes,
           backupId,
           type: fresh.type || backup.type,
           createdAt: fresh.createdAt || new Date(),
         });
       } catch (mailErr) {
-        console.error(
-          '[backup] email failed for',
-          backupId,
-          safeEmailErrorMessage(mailErr),
-        );
+        console.error('[backup] email failed for', backupId, safeEmailErrorMessage(mailErr));
         return {
           emailSentAt: null,
           emailError: safeEmailErrorMessage(mailErr),
@@ -607,9 +858,18 @@ async function runBackupJob(backupId) {
       data: {
         status: 'FAILED',
         errorMessage: err?.message || 'Backup failed',
+        progressPhase: 'ناموفق',
         completedAt: new Date(),
       },
     });
+    await clearStaging(backupId);
+    if (packedPath) {
+      try {
+        await fsp.unlink(packedPath);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
@@ -622,22 +882,18 @@ function parseStorageKeys(storageKey) {
   if (raw.startsWith('local:')) {
     return { localKey: raw, cloudKey: null };
   }
-  // Legacy Cloudinary/S3-only key
   return { localKey: null, cloudKey: raw || null };
 }
 
-/**
- * Load backup bytes: local disk first, then optional cloud mirror.
- * Caches cloud bytes locally after a successful cloud read.
- */
-async function loadBackupBuffer(backup) {
+async function loadBackupToPath(backup) {
   const fileName = backup.fileName;
   if (!fileName) {
     throw new AppError('نام فایل بک اپ موجود نیست', 400, 'BACKUP_NOT_READY');
   }
 
+  const localPath = localBackupPath(backup.id, fileName);
   if (await localBackupExists(backup.id, fileName)) {
-    return readLocalBackup(backup.id, fileName);
+    return localPath;
   }
 
   const { cloudKey } = parseStorageKeys(backup.storageKey);
@@ -651,13 +907,8 @@ async function loadBackupBuffer(backup) {
 
   try {
     const buffer = await storage.readBuffer(cloudKey);
-    // Cache for future downloads/restores
-    try {
-      await saveLocalBackup(backup.id, fileName, buffer);
-    } catch (cacheErr) {
-      console.warn('[backup] local cache write failed:', cacheErr?.message || cacheErr);
-    }
-    return buffer;
+    await saveLocalBackup(backup.id, fileName, buffer);
+    return localPath;
   } catch (err) {
     console.error('[backup] cloud read failed:', err?.message || err);
     throw new AppError(
@@ -666,6 +917,85 @@ async function loadBackupBuffer(backup) {
       'BACKUP_CLOUD_READ',
     );
   }
+}
+
+async function restoreDatabaseTables(tables) {
+  await prisma.$transaction(
+    async (tx) => {
+      const reverse = [...BACKUP_TABLES].reverse();
+      for (const name of reverse) {
+        if (SKIP_TABLES.has(name)) continue;
+        const key = name.charAt(0).toLowerCase() + name.slice(1);
+        if (tx[key]?.deleteMany) {
+          await tx[key].deleteMany({});
+        }
+      }
+
+      for (const name of BACKUP_TABLES) {
+        if (SKIP_TABLES.has(name)) continue;
+        const rows = tables[name];
+        if (!Array.isArray(rows) || !rows.length) continue;
+        const key = name.charAt(0).toLowerCase() + name.slice(1);
+        if (!tx[key]?.createMany && !tx[key]?.create) {
+          throw new AppError(
+            `مدل ${name} برای بازگردانی در دسترس نیست`,
+            500,
+            'BACKUP_MODEL_MISSING',
+          );
+        }
+
+        const selfNulls = SELF_REF_NULL_ON_CREATE[name] || [];
+        const data = rows.map((row) => {
+          const cleaned = sanitizeRowForRestore(name, row);
+          for (const field of selfNulls) {
+            if (field in cleaned) cleaned[field] = null;
+          }
+          return cleaned;
+        });
+
+        try {
+          await tx[key].createMany({ data });
+        } catch (bulkErr) {
+          console.warn(
+            `[backup] createMany failed for ${name}, falling back to create:`,
+            bulkErr?.message || bulkErr,
+          );
+          for (let i = 0; i < data.length; i++) {
+            try {
+              await tx[key].create({ data: data[i] });
+            } catch (rowErr) {
+              throw new AppError(
+                `بازگردانی جدول ${name} در ردیف ${i + 1} ناموفق بود: ${prismaErrorMessage(rowErr)}`,
+                500,
+                'BACKUP_RESTORE_ROW',
+                { table: name, index: i },
+              );
+            }
+          }
+        }
+
+        // Second pass for self-referential FKs
+        if (selfNulls.length) {
+          for (let i = 0; i < rows.length; i++) {
+            const original = sanitizeRowForRestore(name, rows[i]);
+            const patch = {};
+            for (const field of selfNulls) {
+              if (original[field] != null) patch[field] = original[field];
+            }
+            if (!Object.keys(patch).length) continue;
+            const id = original.id;
+            if (!id) continue;
+            try {
+              await tx[key].update({ where: { id }, data: patch });
+            } catch (updErr) {
+              console.warn(`[backup] self-ref update failed for ${name}:`, updErr?.message);
+            }
+          }
+        }
+      }
+    },
+    { timeout: 600_000, maxWait: 60_000 },
+  );
 }
 
 export const backupService = {
@@ -691,6 +1021,20 @@ export const backupService = {
       nextRuns: computeNextRuns(schedule),
       emailConfigured: isEmailConfigured(),
       latest: serializeBackupRow(latest),
+      scope: 'FULL_SYSTEM',
+      includes: {
+        database: true,
+        media: true,
+        settings: true,
+        catalog: true,
+        crm: true,
+        projects: true,
+        finance: true,
+        portfolio: true,
+        landingPages: true,
+        chat: true,
+        assistants: true,
+      },
       stats: {
         total: Object.values(statusMap).reduce((a, b) => a + b, 0),
         success: statusMap.SUCCESS || 0,
@@ -752,7 +1096,7 @@ export const backupService = {
         row.emailError = extras[0].emailError;
       }
     } catch {
-      /* column may be pending migrate; serializeBackupRow still reads EMAIL: prefix */
+      /* column may be pending migrate */
     }
     return serializeBackupRow(row);
   },
@@ -775,6 +1119,9 @@ export const backupService = {
         status: 'PROCESSING',
         emailTo,
         createdById: auth?.userId || null,
+        progressPercent: 0,
+        progressPhase: 'در صف',
+        scope: 'FULL_SYSTEM',
       },
     });
 
@@ -783,11 +1130,10 @@ export const backupService = {
       action: 'BACKUP_CREATE',
       entityType: 'SystemBackup',
       entityId: backup.id,
-      after: { type, emailTo },
+      after: { type, emailTo, scope: 'FULL_SYSTEM' },
       req,
     });
 
-    // Fire-and-forget so the HTTP request returns quickly
     setImmediate(() => {
       runBackupJob(backup.id).catch((err) =>
         console.error('[backup] unhandled job error', err),
@@ -828,7 +1174,7 @@ export const backupService = {
     if (cloudKey) {
       await storage.deleteStoredObject(cloudKey, {
         required: true,
-        logTag: "backup",
+        logTag: 'backup',
       });
     }
     await deleteLocalBackup(backup.id);
@@ -853,11 +1199,15 @@ export const backupService = {
       throw new AppError('بک اپ برای بازگردانی آماده نیست', 400, 'BACKUP_NOT_READY');
     }
 
-    const buffer = await loadBackupBuffer(backup);
-    return this.restoreFromBuffer(buffer, { confirm: true, auth, req, sourceBackupId: id });
+    const archivePath = await loadBackupToPath(backup);
+    return this.restoreFromArchivePath(archivePath, {
+      confirm: true,
+      auth,
+      req,
+      sourceBackupId: id,
+    });
   },
 
-  /** Stream helper for HTTP download route */
   async openDownloadStream(id) {
     const backup = await this.get(id);
     if (backup.status !== 'SUCCESS' || !backup.fileName) {
@@ -872,124 +1222,255 @@ export const backupService = {
         backup,
       };
     }
-    const buffer = await loadBackupBuffer(backup);
+    const archivePath = await loadBackupToPath(backup);
+    const { createReadStream } = await import('fs');
     return {
-      stream: Readable.from(buffer),
+      stream: createReadStream(archivePath),
       fileName: backup.fileName,
-      sizeBytes: buffer.length,
+      sizeBytes: backup.sizeBytes,
       backup,
     };
   },
 
-  async restoreFromBuffer(buffer, { confirm, auth, req, sourceBackupId } = {}) {
+  async restoreFromBuffer(buffer, opts = {}) {
+    // Persist buffer to temp file then restore (supports large uploads via disk path preferred)
+    await ensureBackupRoot();
+    const tmpDir = stagingDirFor(`restore-${Date.now()}`);
+    await ensureEmptyDir(tmpDir);
+    const tmpFile = path.join(tmpDir, 'upload.bin');
+    try {
+      await fsp.writeFile(tmpFile, buffer);
+      return await this.restoreFromArchivePath(tmpFile, opts);
+    } finally {
+      await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  },
+
+  async restoreFromArchivePath(archivePath, { confirm, auth, req, sourceBackupId } = {}) {
     if (confirm !== true && confirm !== 'true') {
       throw new AppError('تأیید بازگردانی الزامی است', 400, 'CONFIRM_REQUIRED');
     }
 
-    const payload = parseBackupBuffer(buffer);
+    const kind = await sniffFileKind(archivePath);
+    let tables;
+    let mediaIndex = { files: [] };
+    let createdAt = null;
+    let scope = 'DATABASE_ONLY';
+    let stagingDir = null;
 
-    await writeAudit({
-      userId: auth?.userId,
-      action: 'BACKUP_RESTORE_START',
-      entityType: 'SystemBackup',
-      entityId: sourceBackupId || null,
-      after: {
-        createdAt: payload.createdAt,
-        tables: Object.keys(payload.tables || {}),
-      },
-      req,
-    });
-
-    // Wipe + reload in FK-safe order inside one interactive transaction
     try {
-      await prisma.$transaction(
-        async (tx) => {
-          const reverse = [...BACKUP_TABLES].reverse();
-          for (const name of reverse) {
-            if (SKIP_TABLES.has(name)) continue;
-            const key = name.charAt(0).toLowerCase() + name.slice(1);
-            if (tx[key]?.deleteMany) {
-              await tx[key].deleteMany({});
+      if (kind === 'legacy' || kind === 'gzip-unknown' || kind === 'unknown') {
+        // Try legacy JSON first; if that fails and kind is gzip-unknown, try archive unpack
+        try {
+          const buffer = await fsp.readFile(archivePath);
+          // Quick check: gunzip and see if JSON
+          let isLegacy = false;
+          try {
+            const raw =
+              buffer[0] === 0x1f && buffer[1] === 0x8b
+                ? gunzipSync(buffer).toString('utf8')
+                : buffer.toString('utf8');
+            if (raw.trimStart().startsWith('{')) {
+              const payload = parseLegacyBackupBuffer(buffer);
+              tables = payload.tables;
+              createdAt = payload.createdAt;
+              scope = payload.scope || 'DATABASE_ONLY';
+              isLegacy = true;
             }
+          } catch {
+            /* fall through to archive */
           }
 
-          for (const name of BACKUP_TABLES) {
-            if (SKIP_TABLES.has(name)) continue;
-            const rows = payload.tables[name];
-            if (!Array.isArray(rows) || !rows.length) continue;
-            const key = name.charAt(0).toLowerCase() + name.slice(1);
-            if (!tx[key]?.createMany && !tx[key]?.create) {
-              throw new AppError(
-                `مدل ${name} برای بازگردانی در دسترس نیست`,
-                500,
-                'BACKUP_MODEL_MISSING',
-              );
-            }
-
-            const data = rows.map((row) => sanitizeRowForRestore(name, row));
+          if (!isLegacy) {
+            stagingDir = stagingDirFor(`restore-unpack-${Date.now()}`);
+            await unpackArchive(archivePath, stagingDir);
+            const manifest = await readManifest(stagingDir);
+            const dbPayload = await readJsonGzipFile(path.join(stagingDir, 'database.json.gz'));
+            tables = dbPayload.tables;
+            createdAt = manifest.createdAt || dbPayload.createdAt;
+            scope = manifest.scope || 'FULL_SYSTEM';
             try {
-              await tx[key].createMany({ data });
-            } catch (bulkErr) {
-              console.warn(
-                `[backup] createMany failed for ${name}, falling back to create:`,
-                bulkErr?.message || bulkErr,
+              const idxRaw = await fsp.readFile(
+                path.join(stagingDir, 'media-index.json'),
+                'utf8',
               );
-              for (let i = 0; i < data.length; i++) {
-                try {
-                  await tx[key].create({ data: data[i] });
-                } catch (rowErr) {
-                  throw new AppError(
-                    `بازگردانی جدول ${name} در ردیف ${i + 1} ناموفق بود: ${prismaErrorMessage(rowErr)}`,
-                    500,
-                    'BACKUP_RESTORE_ROW',
-                    { table: name, index: i },
-                  );
-                }
-              }
+              mediaIndex = JSON.parse(idxRaw);
+            } catch {
+              mediaIndex = { files: [] };
             }
           }
+        } catch (err) {
+          if (err instanceof AppError) throw err;
+          throw new AppError('فایل بک اپ قابل خواندن نیست', 400, 'BACKUP_CORRUPT');
+        }
+      } else {
+        stagingDir = stagingDirFor(`restore-unpack-${Date.now()}`);
+        await unpackArchive(archivePath, stagingDir);
+        const manifest = await readManifest(stagingDir);
+        const dbPayload = await readJsonGzipFile(path.join(stagingDir, 'database.json.gz'));
+        tables = dbPayload.tables;
+        createdAt = manifest.createdAt || dbPayload.createdAt;
+        scope = manifest.scope || 'FULL_SYSTEM';
+        try {
+          const idxRaw = await fsp.readFile(path.join(stagingDir, 'media-index.json'), 'utf8');
+          mediaIndex = JSON.parse(idxRaw);
+        } catch {
+          mediaIndex = { files: [] };
+        }
+      }
+
+      if (!tables || typeof tables !== 'object') {
+        throw new AppError('ساختار داده بک اپ ناقص است', 400, 'BACKUP_INVALID');
+      }
+
+      await writeAudit({
+        userId: auth?.userId,
+        action: 'BACKUP_RESTORE_START',
+        entityType: 'SystemBackup',
+        entityId: sourceBackupId || null,
+        after: {
+          createdAt,
+          scope,
+          tables: Object.keys(tables),
+          mediaFiles: mediaIndex.files?.length || 0,
         },
-        { timeout: 300_000, maxWait: 30_000 },
-      );
-    } catch (err) {
-      if (err instanceof AppError) throw err;
-      console.error('[backup] restore transaction failed:', err);
-      throw new AppError(
-        `بازگردانی ناموفق بود: ${prismaErrorMessage(err)}`,
-        500,
-        'BACKUP_RESTORE_FAILED',
-      );
+        req,
+      });
+
+      try {
+        await restoreDatabaseTables(tables);
+      } catch (err) {
+        if (err instanceof AppError) throw err;
+        console.error('[backup] restore transaction failed:', err);
+        throw new AppError(
+          `بازگردانی پایگاه داده ناموفق بود: ${prismaErrorMessage(err)}`,
+          500,
+          'BACKUP_RESTORE_FAILED',
+        );
+      }
+
+      let mediaRestored = 0;
+      if (stagingDir && mediaIndex.files?.length) {
+        const result = await uploadMediaFromStaging(stagingDir, mediaIndex);
+        mediaRestored = result.restored;
+      }
+
+      await writeAudit({
+        userId: auth?.userId,
+        action: 'BACKUP_RESTORE_COMPLETE',
+        entityType: 'SystemBackup',
+        entityId: sourceBackupId || null,
+        after: {
+          restoredAt: new Date().toISOString(),
+          scope,
+          mediaRestored,
+        },
+        req,
+      });
+
+      return {
+        restored: true,
+        scope,
+        tableCount: Object.keys(tables).length,
+        recordCount: Object.values(tables).reduce(
+          (sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0),
+          0,
+        ),
+        mediaFileCount: mediaRestored,
+        createdAt,
+      };
+    } finally {
+      if (stagingDir) {
+        await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
-
-    await writeAudit({
-      userId: auth?.userId,
-      action: 'BACKUP_RESTORE_COMPLETE',
-      entityType: 'SystemBackup',
-      entityId: sourceBackupId || null,
-      after: { restoredAt: new Date().toISOString() },
-      req,
-    });
-
-    return {
-      restored: true,
-      tableCount: Object.keys(payload.tables).length,
-      createdAt: payload.createdAt,
-    };
   },
 
-  validateUploadBuffer(buffer) {
-    const payload = parseBackupBuffer(buffer);
-    return {
-      valid: true,
-      format: payload.format,
-      version: payload.version,
-      createdAt: payload.createdAt,
-      tableCount: Object.keys(payload.tables).length,
-      recordCount: Object.values(payload.tables).reduce(
-        (sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0),
-        0,
-      ),
-    };
+  async validateUploadBuffer(buffer) {
+    // Prefer writing to temp for large buffers
+    await ensureBackupRoot();
+    const tmpDir = stagingDirFor(`validate-${Date.now()}`);
+    await ensureEmptyDir(tmpDir);
+    const tmpFile = path.join(tmpDir, 'upload.bin');
+    try {
+      await fsp.writeFile(tmpFile, buffer);
+      return await this.validateUploadPath(tmpFile);
+    } finally {
+      await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  },
+
+  async validateUploadPath(filePath) {
+    const kind = await sniffFileKind(filePath);
+    const stagingDir = stagingDirFor(`validate-unpack-${Date.now()}`);
+
+    try {
+      // Attempt legacy JSON
+      try {
+        const buffer = await fsp.readFile(filePath);
+        const raw =
+          buffer[0] === 0x1f && buffer[1] === 0x8b
+            ? gunzipSync(buffer).toString('utf8')
+            : buffer.toString('utf8');
+        if (raw.trimStart().startsWith('{')) {
+          const payload = parseLegacyBackupBuffer(buffer);
+          return {
+            valid: true,
+            format: payload.format,
+            version: payload.version,
+            scope: payload.scope || 'DATABASE_ONLY',
+            createdAt: payload.createdAt,
+            tableCount: Object.keys(payload.tables).length,
+            recordCount: Object.values(payload.tables).reduce(
+              (sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0),
+              0,
+            ),
+            mediaFileCount: 0,
+            warning:
+              'این بک اپ قدیمی فقط شامل پایگاه داده است و فایل‌های رسانه را ندارد.',
+          };
+        }
+      } catch {
+        /* try archive */
+      }
+
+      if (kind === 'unknown') {
+        throw new AppError('فرمت فایل بک اپ نامعتبر است', 400, 'BACKUP_INVALID');
+      }
+
+      await unpackArchive(filePath, stagingDir);
+      const manifest = await readManifest(stagingDir);
+      const dbPayload = await readJsonGzipFile(path.join(stagingDir, 'database.json.gz'));
+      let mediaFileCount = manifest.mediaFileCount || 0;
+      try {
+        const idx = JSON.parse(
+          await fsp.readFile(path.join(stagingDir, 'media-index.json'), 'utf8'),
+        );
+        mediaFileCount = idx.files?.length ?? mediaFileCount;
+      } catch {
+        /* optional */
+      }
+
+      return {
+        valid: true,
+        format: manifest.format,
+        version: manifest.version,
+        scope: manifest.scope || 'FULL_SYSTEM',
+        createdAt: manifest.createdAt || dbPayload.createdAt,
+        tableCount: manifest.tableCount || Object.keys(dbPayload.tables || {}).length,
+        recordCount:
+          manifest.recordCount ||
+          Object.values(dbPayload.tables || {}).reduce(
+            (sum, rows) => sum + (Array.isArray(rows) ? rows.length : 0),
+            0,
+          ),
+        mediaFileCount,
+        mediaBytes: manifest.mediaBytes || 0,
+        warning: null,
+      };
+    } finally {
+      await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    }
   },
 
   formatBytes,

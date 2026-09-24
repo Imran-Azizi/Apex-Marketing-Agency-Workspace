@@ -71,6 +71,12 @@ const nextConfig: NextConfig = {
     }
     const wsOrigin = apiOrigin.replace(/^http/, "ws");
     const isDev = process.env.NODE_ENV !== "production";
+    // Never mark hashed (or fixed-name) chunks immutable in development —
+    // the same URL is rewritten on every edit and browsers would keep a
+    // year-long stale copy of components like project-ai-assistant.
+    const staticAssetCache = isDev
+      ? "no-store, must-revalidate"
+      : "public, max-age=31536000, immutable";
     const mediaOrigins = new Set<string>([apiOrigin]);
     try {
       const parsed = new URL(apiOrigin);
@@ -113,7 +119,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
+            value: staticAssetCache,
           },
         ],
       },

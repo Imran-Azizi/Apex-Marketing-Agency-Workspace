@@ -24,7 +24,7 @@ const PortfolioRelated = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="border-t border-border/60 pt-10 sm:pt-12" aria-hidden>
+      <div className="pt-10 sm:pt-12" aria-hidden>
         <div className="mb-7 h-8 w-40 rounded-md bg-muted/60 sm:mb-8" />
         <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -98,8 +98,7 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
             poster={item.thumbnailUrl || undefined}
             title={item.title}
             type={item.video?.mimeType || "video/mp4"}
-            eager
-            loadingLabel="در حال بارگذاری"
+            protect
             className="rounded-none"
           />
         </div>

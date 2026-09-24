@@ -103,12 +103,15 @@ export default function DashboardLayout({
     );
   }
 
+  // Full-bleed editors (e.g. landing builder) own their scroll; keep chrome fixed.
+  const isImmersiveEditor = /^\/manager\/landing-pages\/[^/]+$/.test(pathname);
+
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-dvh max-h-dvh overflow-hidden">
       <AppBootLoader />
       <SessionKeepAlive />
       <DashboardSidebar role={me.role} permissions={me.permissions} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <DashboardTopbar
           userName={getDisplayName(me)}
           role={me.role}
@@ -116,7 +119,15 @@ export default function DashboardLayout({
           profileImageUrl={me.profileImageUrl}
           permissions={me.permissions}
         />
-        <main className="min-w-0 flex-1 overflow-auto p-3 sm:p-4 lg:p-6">{children}</main>
+        <main
+          className={
+            isImmersiveEditor
+              ? "relative min-h-0 min-w-0 flex-1 overflow-hidden p-0"
+              : "min-h-0 min-w-0 flex-1 overflow-auto p-3 sm:p-4 lg:p-6"
+          }
+        >
+          {children}
+        </main>
       </div>
       <FloatingChatLauncher />
     </div>

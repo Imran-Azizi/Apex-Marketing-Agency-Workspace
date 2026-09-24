@@ -36,8 +36,8 @@ export function DashboardSidebar({ role, permissions }: DashboardSidebarProps) {
   }
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-e bg-sidebar text-sidebar-foreground lg:flex">
-      <div className="flex h-16 items-center border-b border-sidebar-border px-6">
+    <aside className="hidden h-full min-h-0 w-64 shrink-0 flex-col overflow-hidden border-e bg-sidebar text-sidebar-foreground lg:flex">
+      <div className="flex h-16 shrink-0 items-center border-b border-sidebar-border px-6">
         <Logo
           size="md"
           onDark
@@ -50,7 +50,7 @@ export function DashboardSidebar({ role, permissions }: DashboardSidebarProps) {
         <DashboardNav items={navItems} pathname={pathname} />
       </div>
 
-      <div className="border-t border-sidebar-border p-4 space-y-2">
+      <div className="shrink-0 space-y-2 border-t border-sidebar-border p-4">
         {role && (
           <Badge variant="secondary" className="w-full justify-center">
             {role as InternalRole}

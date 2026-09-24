@@ -26,6 +26,11 @@ enum SessionAudience {
   PORTAL
 }
 
+enum LandingPageStatus {
+  DRAFT
+  PUBLISHED
+}
+
 enum CrmPipelineStage {
   NEW_LEAD
   CONTACTED
@@ -349,6 +354,8 @@ model User {
   postersReviewed         ProjectPoster[]     @relation("PosterReviewer")
   postersDelivered        ProjectPoster[]     @relation("PosterDeliverer")
   companyVideosUploaded   CompanyVideo[]      @relation("CompanyVideoUploader")
+  landingPagesCreated     LandingPage[]       @relation("LandingPageCreator")
+  landingPagesUpdated     LandingPage[]       @relation("LandingPageUpdater")
 
   @@index([deletedAt])
   @@index([roleId])
@@ -1765,10 +1772,21 @@ model SystemBackup {
   status       BackupStatus @default(PROCESSING)
   fileName     String?
   storageKey   String?
-  sizeBytes    Int          @default(0)
+  /// Archive size in bytes (BigInt — full-system archives with media can exceed 2GB).
+  sizeBytes    BigInt       @default(0)
   checksum     String?
   tableCount   Int          @default(0)
   recordCount  Int          @default(0)
+  /// Number of media/object files included in the archive.
+  mediaFileCount Int        @default(0)
+  /// Total media bytes included (before tar/gzip packaging).
+  mediaBytes   BigInt       @default(0)
+  /// 0–100 while status = PROCESSING.
+  progressPercent Int       @default(0)
+  /// Human-readable phase for UI (e.g. database, media, packaging).
+  progressPhase String?
+  /// FULL_SYSTEM | DATABASE_ONLY (legacy v1 archives).
+  scope        String       @default("FULL_SYSTEM")
   errorMessage String?
   emailTo      String?
   emailSentAt  DateTime?
@@ -2224,4 +2242,33 @@ model CompanyVideo {
   @@index([deletedAt])
   @@index([processingStatus])
   @@map("company_videos")
+}
+
+/// Manager-designed public landing pages (draft vs published snapshot)
+model LandingPage {
+  id               String            @id @default(cuid())
+  title            String
+  slug             String            @unique
+  description      String?           @db.Text
+  /// Working copy — never served on the public website.
+  draftContent     Json
+  /// Snapshot copied on Publish. Public route reads only this.
+  publishedContent Json?
+  status           LandingPageStatus @default(DRAFT)
+  isPublished      Boolean           @default(false)
+  publishedAt      DateTime?
+  createdById      String?
+  createdBy        User?             @relation("LandingPageCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById      String?
+  updatedBy        User?             @relation("LandingPageUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
+
+  @@index([isPublished, deletedAt])
+  @@index([status, deletedAt])
+  @@index([deletedAt])
+  @@index([createdAt])
+  @@index([slug, deletedAt])
+  @@map("landing_pages")
 }

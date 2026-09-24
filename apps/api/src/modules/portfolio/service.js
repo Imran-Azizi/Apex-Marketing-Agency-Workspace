@@ -220,12 +220,7 @@ export function serializePublicItem(item, { compact = false } = {}) {
   const categories = (item.categories || [])
     .map((row) => row.category)
     .filter(Boolean);
-  const storageKey = item.storageKey || item.videoFile?.storageKey || null;
   const mimeType = item.videoFile?.mimeType || 'video/mp4';
-  const playbackUrl =
-    !compact && storageKey && isPublicStorageKey(storageKey)
-      ? mediaUrlFor(storageKey)
-      : null;
 
   const description = String(item.description || '').trim() || null;
   const successStory = String(item.successStory || '').trim() || null;
@@ -254,8 +249,9 @@ export function serializePublicItem(item, { compact = false } = {}) {
     })),
     video: {
       mimeType,
+      // Opaque ranged stream only — never embed durable CDN/file URLs in public JSON.
       streamPath: `/public/portfolio/${item.id}/stream`,
-      playbackUrl,
+      playbackUrl: null,
     },
   };
 }
@@ -937,13 +933,20 @@ export const portfolioService = {
   },
 };
 
-export async function streamPortfolioVideo(req, res, file) {
+export async function streamPortfolioVideo(req, res, file, options = {}) {
   const storageKey = file.storageKey;
   const contentTypeHint = file.mimeType || 'video/mp4';
+  /**
+   * Public website playback: always proxy through this API so the browser
+   * never receives a durable CDN/file URL in the video element or Network
+   * redirect chain. Manager/admin streams may still CDN-redirect for speed.
+   */
+  const protect = Boolean(options.protect);
 
   // Public portfolio objects: redirect straight to Bunny CDN (supports Range).
   // Skip Storage API HEAD to reduce time-to-first-byte.
   if (
+    !protect &&
     isPublicStorageKey(storageKey) &&
     storage.prefersDirectCdnRedirect({ signed: false })
   ) {
@@ -979,7 +982,7 @@ export async function streamPortfolioVideo(req, res, file) {
     'video/mp4';
 
   // Prefer CDN redirect when the driver can issue a public/signed URL.
-  if (storage.prefersDirectCdnRedirect({ signed: false })) {
+  if (!protect && storage.prefersDirectCdnRedirect({ signed: false })) {
     try {
       const url =
         (await storage.createPresignedGetUrl(storageKey).catch(() => null)) ||
@@ -1005,13 +1008,25 @@ export async function streamPortfolioVideo(req, res, file) {
   const range = req.headers.range;
 
   res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+  res.setHeader(
+    'Cache-Control',
+    protect
+      ? 'private, max-age=0, must-revalidate'
+      : 'public, max-age=300, stale-while-revalidate=600',
+  );
   res.setHeader('Content-Type', contentType);
+  // Generic inline name — avoid advertising the original filename for "Save as".
   res.setHeader(
     'Content-Disposition',
-    `inline; filename*=UTF-8''${encodeURIComponent(file.name || path.basename(storageKey) || 'portfolio.mp4')}`,
+    protect
+      ? "inline; filename=\"apex-portfolio.mp4\""
+      : `inline; filename*=UTF-8''${encodeURIComponent(file.name || path.basename(storageKey) || 'portfolio.mp4')}`,
   );
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (protect) {
+    // Discourage intermediate caches from treating this as a downloadable asset.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  }
 
   const pipe = (stream) => {
     stream.on('error', (err) => {

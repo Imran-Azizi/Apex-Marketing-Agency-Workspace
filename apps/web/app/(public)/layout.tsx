@@ -11,6 +11,13 @@ import type { PublicService } from "@/lib/services";
 import type { PublicContactInfo } from "@/lib/contact";
 import { COMPANY_INTRO_TITLE } from "@/lib/company";
 import type { PublicSiteCopy } from "@/lib/public-copy";
+import {
+  homeDescription,
+  homeTitle,
+  INDEX_ROBOTS,
+  SITE_LOCALE,
+  SITE_NAME,
+} from "@/lib/seo";
 
 /** Must be a numeric literal — Next.js cannot analyze imported segment config. */
 export const revalidate = 60;
@@ -21,13 +28,27 @@ export async function generateMetadata(): Promise<Metadata> {
     PUBLIC_REVALIDATE_SECONDS,
     ["public-site-copy"],
   );
-  const description = copy?.company?.trim() || undefined;
+  const description = homeDescription(copy?.company);
+  const title = homeTitle();
   return {
     title: {
-      default: COMPANY_INTRO_TITLE,
-      template: `%s — ${COMPANY_INTRO_TITLE}`,
+      default: title,
+      template: `%s | ${COMPANY_INTRO_TITLE}`,
     },
     description,
+    robots: INDEX_ROBOTS,
+    openGraph: {
+      type: "website",
+      locale: SITE_LOCALE,
+      siteName: SITE_NAME,
+      title,
+      description,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+    },
   };
 }
 
@@ -66,9 +87,11 @@ export default function PublicLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="public-dot-pattern flex min-h-screen flex-col">
+    <div className="public-dot-pattern flex min-h-screen flex-col overflow-x-clip">
       <PublicHeader />
-      <main className="relative flex-1 overflow-x-hidden">{children}</main>
+      <main className="relative min-h-min w-full flex-1 animate-public-page-enter">
+        {children}
+      </main>
       <Suspense fallback={null}>
         <PublicChrome />
       </Suspense>

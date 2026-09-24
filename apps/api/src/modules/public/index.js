@@ -8,6 +8,7 @@ import { validate } from '../../middleware/validate.js';
 import {
   contactService,
   submitContactSchema,
+  submitWhatsAppLeadSchema,
 } from '../contact/service.js';
 import {
   portfolioService,
@@ -110,7 +111,7 @@ router.get('/portfolio', cachePublic(60), async (req, res, next) => {
 router.get('/portfolio/:id/stream', async (req, res, next) => {
   try {
     const file = await portfolioService.getPublishedStreamTarget(req.params.id);
-    await streamPortfolioVideo(req, res, file);
+    await streamPortfolioVideo(req, res, file, { protect: true });
   } catch (e) {
     next(e);
   }
@@ -123,6 +124,20 @@ router.get('/portfolio/:slug', cachePublic(60), async (req, res, next) => {
       await remember(`portfolio-slug:${req.params.slug}`, PUBLIC_TTL_MS, () =>
         portfolioService.getPublicBySlug(req.params.slug),
       ),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/landing-pages/:slug', cachePublic(60), async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await remember(`landing-slug:${req.params.slug}`, PUBLIC_TTL_MS, async () => {
+        const { landingPagesService } = await import('../landing-pages/service.js');
+        return landingPagesService.getPublicBySlug(req.params.slug);
+      }),
     );
   } catch (e) {
     next(e);
@@ -170,6 +185,20 @@ router.post(
   },
 );
 
+router.post(
+  '/whatsapp-lead',
+  contactLimiter,
+  requireCsrf,
+  validate(submitWhatsAppLeadSchema),
+  async (req, res, next) => {
+    try {
+      created(res, await contactService.submitWhatsAppLead(req.body, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.get('/whatsapp-cta', cachePublic(60), async (req, res, next) => {
   try {
     const cta = await buildWhatsappCta({
@@ -182,6 +211,44 @@ router.get('/whatsapp-cta', cachePublic(60), async (req, res, next) => {
 });
 
 router.use('/webhooks/whatsapp', whatsappWebhookRoutes);
+
+router.get('/seo-index', cachePublic(60), async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await remember('seo-index', PUBLIC_TTL_MS, async () => {
+        const [portfolio, landingPages] = await Promise.all([
+          prisma.portfolioItem.findMany({
+            where: { deletedAt: null, status: 'PUBLISHED' },
+            select: { slug: true, updatedAt: true },
+            orderBy: { updatedAt: 'desc' },
+          }),
+          prisma.landingPage.findMany({
+            where: {
+              deletedAt: null,
+              isPublished: true,
+              status: 'PUBLISHED',
+            },
+            select: { slug: true, updatedAt: true },
+            orderBy: { updatedAt: 'desc' },
+          }),
+        ]);
+        return {
+          portfolio: portfolio.map((row) => ({
+            slug: row.slug,
+            updatedAt: row.updatedAt,
+          })),
+          landingPages: landingPages.map((row) => ({
+            slug: row.slug,
+            updatedAt: row.updatedAt,
+          })),
+        };
+      }),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
 
 router.get('/formats', cachePublic(300), async (req, res, next) => {
   try {

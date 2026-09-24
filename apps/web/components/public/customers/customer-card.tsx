@@ -16,10 +16,10 @@ function CustomerImage({ src, alt }: { src: string | null; alt: string }) {
       alt={alt}
       sizes="80px"
       quality={85}
-      className="object-center transition-transform duration-500 group-hover:scale-[1.05]"
+      className="object-center transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-[1.05]"
       fallback={
         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/20 via-muted to-background">
-          <UserRound className="h-6 w-6 text-brand/70" />
+          <UserRound className="h-6 w-6 text-brand/70 transition-transform duration-300 group-hover:scale-105" />
         </div>
       }
     />
@@ -97,7 +97,8 @@ export function CustomerCard({
       dir="rtl"
       className={cn(
         "group relative flex h-full flex-col items-center rounded-2xl border border-border/70 bg-card px-3.5 pb-3.5 pt-4 text-start shadow-sm",
-        "transition-all duration-300 hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-md hover:shadow-brand/5",
+        "transition-[transform,box-shadow,border-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "hover:-translate-y-1 hover:border-brand/30 hover:shadow-md hover:shadow-brand/5",
         className,
       )}
       style={{ animationDelay: `${Math.min(index, 8) * 50}ms` }}
@@ -108,7 +109,7 @@ export function CustomerCard({
           "relative size-[4.5rem] shrink-0 overflow-hidden rounded-full sm:size-20",
           "border border-brand/25 bg-muted",
           "ring-2 ring-background ring-offset-2 ring-offset-card",
-          "transition-[border-color] duration-300 group-hover:border-brand/45",
+          "transition-[border-color,transform] duration-300 group-hover:border-brand/45 group-hover:scale-[1.02]",
         )}
       >
         <CustomerImage src={imageSrc} alt={customer.name} />

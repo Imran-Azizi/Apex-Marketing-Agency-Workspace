@@ -189,13 +189,17 @@ export function HeroSlideView({
                   <p className="hero-slide-copy-title text-balance text-2xl font-bold tracking-tight sm:text-3xl">
                     {slide.title}
                   </p>
-                ) : (
+                ) : visible ? (
                   <h1
-                    id={visible ? "hero-heading" : undefined}
+                    id="hero-heading"
                     className="hero-slide-copy-title line-clamp-3 text-balance font-extrabold tracking-tight sm:line-clamp-3 lg:line-clamp-none"
                   >
                     {slide.title}
                   </h1>
+                ) : (
+                  <p className="hero-slide-copy-title line-clamp-3 text-balance font-extrabold tracking-tight sm:line-clamp-3 lg:line-clamp-none">
+                    {slide.title}
+                  </p>
                 )}
                 {slide.description ? (
                   <p
@@ -221,7 +225,7 @@ export function HeroSlideView({
                       variant="brand"
                       size="lg"
                       tabIndex={showButton ? 0 : -1}
-                      className="h-11 max-w-full rounded-xl px-5 text-sm font-semibold shadow-lg shadow-black/35 min-[375px]:h-12 min-[375px]:min-w-[10.25rem] min-[375px]:px-6 sm:min-w-[11rem] sm:px-7 sm:text-base lg:min-w-[12rem] lg:px-8"
+                      className="public-lift h-11 max-w-full rounded-xl px-5 text-sm font-semibold shadow-lg shadow-black/35 min-[375px]:h-12 min-[375px]:min-w-[10.25rem] min-[375px]:px-6 sm:min-w-[11rem] sm:px-7 sm:text-base lg:min-w-[12rem] lg:px-8"
                       onClick={() => handleHeroButtonClick(slide)}
                     >
                       {slide.buttonText}

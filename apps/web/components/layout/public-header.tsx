@@ -39,7 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const navLinkBase =
-  "relative rounded-full px-2.5 py-1.5 text-[13px] font-medium outline-none transition-colors duration-200 lg:px-3.5 lg:text-sm motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+  "public-nav-link relative rounded-full px-2.5 py-1.5 text-[13px] font-medium outline-none transition-[color,background-color,box-shadow] duration-200 ease-out lg:px-3.5 lg:text-sm motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 
 const PUBLIC_NAV_ICONS: Record<PublicSectionId, LucideIcon> = {
   home: Home,
@@ -141,7 +141,7 @@ export function PublicHeader() {
             <Button
               variant="outline"
               size="sm"
-              className="hidden h-9 rounded-full border-border/80 px-4 lg:inline-flex"
+              className="hidden h-9 rounded-full border-border/80 px-4 public-lift lg:inline-flex"
               asChild
             >
               <Link href="/login">ورود تیم</Link>
@@ -149,7 +149,7 @@ export function PublicHeader() {
             <Button
               size="sm"
               variant="brand"
-              className="h-9 rounded-full px-3 text-xs shadow-sm shadow-brand/20 motion-safe:transition-transform motion-safe:hover:-translate-y-px sm:px-4 sm:text-sm"
+              className="public-lift h-9 rounded-full px-3 text-xs shadow-sm shadow-brand/20 sm:px-4 sm:text-sm"
               asChild
             >
               <Link href="/portal/login">پورتال مشتری</Link>
@@ -219,8 +219,9 @@ export function PublicHeader() {
                             aria-current={active ? "page" : undefined}
                             onClick={(event) => goToItem(item.id, event)}
                             className={cn(
-                              "group relative flex min-h-12 w-full items-center gap-3 overflow-hidden rounded-2xl px-3.5 py-3 text-start text-[0.95rem] font-medium outline-none transition-colors duration-200",
+                              "group relative flex min-h-12 w-full items-center gap-3 overflow-hidden rounded-2xl px-3.5 py-3 text-start text-[0.95rem] font-medium outline-none transition-[color,background-color,transform,box-shadow] duration-200 ease-out",
                               "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                              "active:scale-[0.99]",
                               active
                                 ? "bg-brand/[0.12] text-brand shadow-[inset_0_0_0_1px_hsl(var(--brand)/0.18)]"
                                 : "text-foreground/85 hover:bg-muted/60 hover:text-foreground",

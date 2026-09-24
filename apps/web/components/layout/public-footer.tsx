@@ -1,4 +1,5 @@
 import { FooterNavBlock } from "@/components/layout/footer-nav-block";
+import { PublicReveal } from "@/components/public/public-reveal";
 import { COMPANY_INTRO_TITLE } from "@/lib/company";
 import type { PublicContactInfo } from "@/lib/contact";
 import { serviceTitle, type PublicService } from "@/lib/services";
@@ -43,11 +44,13 @@ export function PublicFooter({
       />
 
       <div className="mx-auto max-w-7xl px-4 py-9 sm:px-6 sm:py-14 lg:px-8 lg:py-16">
-        <FooterNavBlock
-          publishedServices={publishedServices}
-          hasMoreServices={hasMoreServices}
-          aboutText={aboutText}
-        />
+        <PublicReveal>
+          <FooterNavBlock
+            publishedServices={publishedServices}
+            hasMoreServices={hasMoreServices}
+            aboutText={aboutText}
+          />
+        </PublicReveal>
       </div>
 
       <div className="border-t border-border/50 bg-background/60">

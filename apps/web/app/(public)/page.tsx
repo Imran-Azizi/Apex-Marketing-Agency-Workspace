@@ -24,9 +24,22 @@ import {
   type PublicPortfolioTabs,
 } from "@/lib/portfolio";
 import type { PublicSiteCopy } from "@/lib/public-copy";
+import { JsonLd } from "@/components/seo/json-ld";
+import { homeGraph } from "@/lib/structured-data";
+import { homeDescription, homeTitle, pageMetadata } from "@/lib/seo";
 
 /** Must be a numeric literal — Next.js cannot analyze imported segment config. */
 export const revalidate = 60;
+
+export async function generateMetadata() {
+  const copy = await fetchSiteCopy();
+  const description = homeDescription(copy?.company);
+  return pageMetadata({
+    title: homeTitle(),
+    description,
+    path: "/",
+  });
+}
 
 function fetchSiteCopy() {
   return fetchPublicJson<PublicSiteCopy>(
@@ -62,7 +75,7 @@ function SectionCardsFallback({
   title: string;
 }) {
   return (
-    <section id={id} className="scroll-mt-20 border-t border-border/50">
+    <section id={id} className="scroll-mt-20 bg-transparent">
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
         <h2 className="mb-7 text-center text-xl font-bold tracking-tight sm:mb-10 sm:text-2xl">
           {title}
@@ -198,9 +211,24 @@ async function ContactBlock() {
   );
 }
 
+async function HomeStructuredData() {
+  const [contact, copy] = await Promise.all([
+    fetchPublicJson<PublicContactInfo>(
+      "/public/contact-info",
+      PUBLIC_REVALIDATE_SECONDS,
+      ["public-contact"],
+    ),
+    fetchSiteCopy(),
+  ]);
+  return <JsonLd data={homeGraph(contact, homeDescription(copy?.company))} />;
+}
+
 export default function HomePage() {
   return (
-    <div className="overflow-x-hidden">
+    <div className="min-w-0">
+      <Suspense fallback={null}>
+        <HomeStructuredData />
+      </Suspense>
       <Suspense fallback={<HeroFallback />}>
         <HeroBlock />
       </Suspense>

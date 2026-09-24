@@ -181,8 +181,9 @@ export const PERMISSION_CATALOG = [
       { code: "content.delete", label: "حذف", description: "حذف نسخه محتوا" },
       {
         code: "content.approve",
-        label: "تأیید داخلی",
-        description: "ارسال محتوا برای تأیید مشتری",
+        label: "تأیید محتوا",
+        description:
+          "تأیید داخلی نسخه‌های محتوا (سناریو/نریشن/استوری‌بورد) و ارسال برای تأیید مشتری",
       },
     ],
   },
@@ -501,6 +502,38 @@ export const PERMISSION_CATALOG = [
     ],
   },
   {
+    id: "landing_pages",
+    label: "صفحات لندنگ",
+    description: "طراحی، انتشار و مدیریت صفحات لندنگ وب‌سایت عمومی",
+    actions: [
+      {
+        code: "landing_pages.view",
+        label: "مشاهده",
+        description: "مشاهده فهرست صفحات لندنگ در پنل",
+      },
+      {
+        code: "landing_pages.create",
+        label: "ایجاد",
+        description: "ایجاد صفحه لندنگ جدید",
+      },
+      {
+        code: "landing_pages.edit",
+        label: "ویرایش",
+        description: "ویرایش محتوا، تنظیمات و پیش‌نویس صفحه لندنگ",
+      },
+      {
+        code: "landing_pages.publish",
+        label: "انتشار",
+        description: "انتشار یا لغو انتشار صفحه لندنگ",
+      },
+      {
+        code: "landing_pages.delete",
+        label: "حذف",
+        description: "حذف صفحه لندنگ",
+      },
+    ],
+  },
+  {
     id: "customers",
     label: "مشتریان ما",
     description: "مدیریت معرفی مشتریان وب‌سایت عمومی",
@@ -741,6 +774,9 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "projects.assign",
     "projects.complete",
     "content.view",
+    "content.edit",
+    "content.generate",
+    "content.approve",
     "poster.view",
     "chat.view",
     "chat.send",

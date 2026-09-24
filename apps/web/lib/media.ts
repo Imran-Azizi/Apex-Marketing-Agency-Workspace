@@ -14,15 +14,14 @@ export function portfolioPublicStreamUrl(portfolioId: string): string {
 }
 
 /**
- * Best playback URL for the public player:
- * prefer direct CDN when the API provides it, otherwise the ranged stream endpoint.
+ * Best playback URL for the public portfolio player.
+ * Always uses the opaque ranged stream endpoint — never embeds durable CDN
+ * file URLs in the page (download deterrence for نمونه های کاری).
  */
 export function portfolioPublicPlaybackUrl(item: {
   id: string;
   video?: { playbackUrl?: string | null; streamPath?: string | null } | null;
 }): string {
-  const direct = item.video?.playbackUrl?.trim();
-  if (direct) return direct;
   return portfolioPublicStreamUrl(item.id);
 }
 

@@ -160,7 +160,7 @@ export function PublicPortfolioListView({
               <Button
                 variant={expanded ? "outline" : "brand"}
                 size="lg"
-                className="h-11 w-full max-w-xs rounded-xl px-8 sm:h-11 sm:w-auto sm:min-w-[10.5rem] sm:rounded-full"
+                className="public-lift h-11 w-full max-w-xs rounded-xl px-8 sm:h-11 sm:w-auto sm:min-w-[10.5rem] sm:rounded-full"
                 onClick={() => setExpanded((value) => !value)}
               >
                 {expanded ? "نمایش کمتر" : "مشاهده بیشتر"}

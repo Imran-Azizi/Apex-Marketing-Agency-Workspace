@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import fsp from 'fs/promises';
 import { z } from 'zod';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireInternal, requirePermission } from '../../middleware/rbac.js';
@@ -7,19 +8,42 @@ import { requireCsrf } from '../../middleware/csrf.js';
 import { validate } from '../../middleware/validate.js';
 import { ok, created, AppError } from '../../utils/response.js';
 import {
+  BACKUP_UPLOAD_ROOT,
+  ensureBackupRoot,
+} from '../../services/backupLocalStore.js';
+import {
   backupService,
   getScheduleSettings,
   saveScheduleSettings,
 } from './service.js';
 
-const upload = multer({
-  storage: multer.memoryStorage(),
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024 * 1024; // 50 GiB — full-system archives with media
+
+const diskUpload = multer({
+  storage: multer.diskStorage({
+    destination: async (_req, _file, cb) => {
+      try {
+        await ensureBackupRoot();
+        cb(null, BACKUP_UPLOAD_ROOT);
+      } catch (err) {
+        cb(err);
+      }
+    },
+    filename: (_req, file, cb) => {
+      const safe = String(file.originalname || 'backup.bin').replace(
+        /[^a-zA-Z0-9._-]+/g,
+        '_',
+      );
+      cb(null, `${Date.now()}-${safe}`);
+    },
+  }),
+  limits: { fileSize: MAX_UPLOAD_BYTES },
 });
 
 function acceptBackupUpload(req, res, next) {
-  req.setTimeout(15 * 60 * 1000);
-  res.setTimeout(15 * 60 * 1000);
-  upload.single('file')(req, res, (err) => {
+  req.setTimeout(60 * 60 * 1000);
+  res.setTimeout(60 * 60 * 1000);
+  diskUpload.single('file')(req, res, (err) => {
     if (!err) return next();
     if (err instanceof AppError) return next(err);
     if (err instanceof multer.MulterError) {
@@ -29,6 +53,16 @@ function acceptBackupUpload(req, res, next) {
     }
     return next(err);
   });
+}
+
+async function cleanupUpload(req) {
+  const p = req.file?.path;
+  if (!p) return;
+  try {
+    await fsp.unlink(p);
+  } catch {
+    /* ignore */
+  }
 }
 
 const scheduleSchema = z.object({
@@ -133,9 +167,9 @@ router.get('/:id/download', requirePermission('backup.download'), async (req, re
     res.setHeader('Content-Type', 'application/gzip');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(fileName || 'apex-backup.json.gz')}"`,
+      `attachment; filename="${encodeURIComponent(fileName || 'apex-backup.tar.gz')}"`,
     );
-    if (sizeBytes) {
+    if (sizeBytes != null && sizeBytes !== '') {
       res.setHeader('Content-Length', String(sizeBytes));
     }
 
@@ -163,6 +197,8 @@ router.delete('/:id', requireCsrf, requirePermission('backup.delete'), async (re
 
 router.post('/:id/restore', requireCsrf, requirePermission('backup.restore'), async (req, res, next) => {
   try {
+    req.setTimeout(60 * 60 * 1000);
+    res.setTimeout(60 * 60 * 1000);
     ok(
       res,
       await backupService.restoreFromBackupId(req.params.id, req.body || {}, req.auth, req),
@@ -179,12 +215,14 @@ router.post(
   acceptBackupUpload,
   async (req, res, next) => {
     try {
-      if (!req.file?.buffer) {
+      if (!req.file?.path) {
         throw new AppError('فایل بک اپ الزامی است', 400, 'FILE_REQUIRED');
       }
-      ok(res, backupService.validateUploadBuffer(req.file.buffer));
+      ok(res, await backupService.validateUploadPath(req.file.path));
     } catch (e) {
       next(e);
+    } finally {
+      await cleanupUpload(req);
     }
   },
 );
@@ -196,12 +234,12 @@ router.post(
   acceptBackupUpload,
   async (req, res, next) => {
     try {
-      if (!req.file?.buffer) {
+      if (!req.file?.path) {
         throw new AppError('فایل بک اپ الزامی است', 400, 'FILE_REQUIRED');
       }
       ok(
         res,
-        await backupService.restoreFromBuffer(req.file.buffer, {
+        await backupService.restoreFromArchivePath(req.file.path, {
           confirm: req.body?.confirm,
           auth: req.auth,
           req,
@@ -209,6 +247,8 @@ router.post(
       );
     } catch (e) {
       next(e);
+    } finally {
+      await cleanupUpload(req);
     }
   },
 );

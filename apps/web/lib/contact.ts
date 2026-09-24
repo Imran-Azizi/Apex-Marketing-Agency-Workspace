@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE } from "@/lib/phone";
+import { whatsappFieldSchema } from "@/lib/phone";
 
 export const CONTACT_SUBJECTS = [
   { value: "GENERAL", label: "درخواست عمومی" },
@@ -132,11 +132,7 @@ export const contactFormSchema = z.object({
     .min(1, "ایمیل الزامی است")
     .email("ایمیل معتبر وارد کنید")
     .max(160, "ایمیل بیش از حد طولانی است"),
-  phone: z
-    .string()
-    .trim()
-    .min(1, "شماره تماس الزامی است")
-    .refine(isValidWhatsAppNumber, WHATSAPP_VALIDATION_MESSAGE),
+  phone: whatsappFieldSchema,
   company: z.string().trim().max(120, "نام شرکت بیش از حد طولانی است").optional().or(z.literal("")),
   message: z
     .string()

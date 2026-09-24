@@ -348,7 +348,7 @@ function PremiumUploadCard({
                   className="aspect-video w-full object-contain"
                   muted
                   playsInline
-                  preload="metadata"
+                  preload="none"
                   controls={state.phase !== "uploading"}
                 />
               ) : (

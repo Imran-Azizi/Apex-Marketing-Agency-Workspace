@@ -425,7 +425,14 @@ export function HeroSlideshow({
           swipeRef.current = null;
         }}
       >
-        {!bootstrapped ? <HeroSlideshowSkeleton /> : null}
+        {!bootstrapped ? (
+        <>
+          <HeroSlideshowSkeleton />
+          <h1 id="hero-heading" className="sr-only">
+            {current?.title || "شرکت تبلیغاتی اپیکس"}
+          </h1>
+        </>
+      ) : null}
 
         {slides.map((slide, i) => {
           if (!mountedIndexes.has(i)) return null;

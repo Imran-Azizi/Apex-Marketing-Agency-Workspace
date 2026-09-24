@@ -86,6 +86,21 @@ export async function notifyWebHeroRevalidate({ paths = [] } = {}) {
   });
 }
 
+/** Revalidate a published landing page after publish/unpublish/delete. */
+export async function notifyWebLandingPagesRevalidate({
+  slug = null,
+  previousSlug = null,
+  paths = [],
+} = {}) {
+  const targetPaths = new Set(paths.filter(Boolean));
+  if (slug) targetPaths.add(`/${slug}`);
+  if (previousSlug && previousSlug !== slug) targetPaths.add(`/${previousSlug}`);
+  return notifyWebRevalidate({
+    tags: ['public-landing-pages'],
+    paths: [...targetPaths],
+  });
+}
+
 /** Revalidate public section descriptions after settings writes. */
 export async function notifyWebSiteCopyRevalidate({ paths = [] } = {}) {
   return notifyWebRevalidate({

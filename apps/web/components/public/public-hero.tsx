@@ -25,25 +25,35 @@ function EmptyHero() {
       >
         <div className="relative mx-auto flex h-full w-full max-w-7xl items-center px-4 pt-[var(--public-header-height,4.25rem)] sm:px-6 lg:px-8">
           <div className="max-w-2xl py-10 sm:py-14">
-            <p className="mb-3 text-sm font-medium tracking-wide text-brand">
+            <p
+              className="hero-enter mb-3 text-sm font-medium tracking-wide text-brand"
+              style={{ ["--hero-delay" as string]: "40ms" }}
+            >
               آژانس هوشمند بازاریابی اپیکس
             </p>
             <h1
               id="hero-heading"
-              className="text-balance text-[1.75rem] font-extrabold leading-[1.25] tracking-tight sm:text-4xl lg:text-[3.25rem] lg:leading-[1.12]"
+              className="hero-enter text-balance text-[1.75rem] font-extrabold leading-[1.25] tracking-tight sm:text-4xl lg:text-[3.25rem] lg:leading-[1.12]"
+              style={{ ["--hero-delay" as string]: "120ms" }}
             >
               برند شما شایسته{" "}
               <span className="text-brand">محتوایی اثرگذار</span> است
             </h1>
-            <p className="mt-4 max-w-lg text-pretty text-sm leading-7 text-muted-foreground sm:mt-5 sm:text-base sm:leading-8">
+            <p
+              className="hero-enter mt-4 max-w-lg text-pretty text-sm leading-7 text-muted-foreground sm:mt-5 sm:text-base sm:leading-8"
+              style={{ ["--hero-delay" as string]: "200ms" }}
+            >
               از استراتژی تا تولید و انتشار؛ اپیکس پیام برندتان را واضح، جذاب و
               ماندگار به مخاطب می‌رساند — با تیمی که نتیجه را اولویت می‌دهد.
             </p>
-            <div className="mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row">
+            <div
+              className="hero-enter mt-7 flex flex-col gap-3 sm:mt-8 sm:flex-row"
+              style={{ ["--hero-delay" as string]: "280ms" }}
+            >
               <Button
                 variant="brand"
                 size="lg"
-                className="h-11 rounded-xl sm:h-12"
+                className="public-lift h-11 rounded-xl shadow-md shadow-brand/20 sm:h-12"
                 onClick={() => scrollToSection("contact")}
               >
                 شروع همکاری
@@ -51,7 +61,7 @@ function EmptyHero() {
               <Button
                 variant="outline"
                 size="lg"
-                className="h-11 rounded-xl sm:h-12"
+                className="public-lift h-11 rounded-xl sm:h-12"
                 onClick={() => scrollToSection("portfolio")}
               >
                 مشاهده نمونه‌کارها

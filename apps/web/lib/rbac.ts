@@ -14,6 +14,7 @@ import {
   Inbox,
   Presentation,
   Handshake,
+  LayoutTemplate,
   Kanban,
   Wallet,
   Receipt,
@@ -106,6 +107,11 @@ const MANAGER_NAV: NavItem[] = [
         href: "/manager/hero",
         label: "مدیریت اسلایدهای",
         icon: Presentation,
+      },
+      {
+        href: "/manager/landing-pages",
+        label: "صفحات لندنگ",
+        icon: LayoutTemplate,
       },
       {
         href: "/manager/customers",
@@ -270,6 +276,7 @@ const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
   { prefix: "/manager/portfolio", permission: "portfolio.view" },
   { prefix: "/manager/video-storage", permission: "video_storage.view" },
   { prefix: "/manager/hero", permission: "hero.view" },
+  { prefix: "/manager/landing-pages", permission: "landing_pages.view" },
   { prefix: "/manager", permission: "dashboard.view" },
   { prefix: "/sales", permission: "dashboard.view" },
   { prefix: "/editor", permission: "video.view" },
@@ -329,6 +336,12 @@ const EXTRA_NAV: Array<NavItem & { permission: string }> = [
     label: "مدیریت اسلایدهای",
     icon: Presentation,
     permission: "hero.view",
+  },
+  {
+    href: "/manager/landing-pages",
+    label: "صفحات لندنگ",
+    icon: LayoutTemplate,
+    permission: "landing_pages.view",
   },
   {
     href: "/manager/customers",

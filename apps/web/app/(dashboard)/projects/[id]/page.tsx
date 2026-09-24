@@ -66,8 +66,8 @@ function PanelSkeleton({ className }: { className?: string }) {
 
 const ProjectAiAssistant = dynamic(
   () =>
-    import("@/components/projects/project-ai-assistant").then(
-      (m) => m.ProjectAiAssistant,
+    import("@/components/projects/project-content-workspace").then(
+      (m) => m.ProjectContentWorkspace,
     ),
   { ssr: false, loading: () => <PanelSkeleton /> },
 );
@@ -217,7 +217,9 @@ function tabsForAccess(
       );
     }
     if (tab.id === "production") {
-      return can("video.view") || can("projects.assign") || can("video.approve");
+      return (
+        can("video.view") || can("projects.assign") || can("video.approve")
+      );
     }
     return can("projects.view") || can("crm.view");
   });

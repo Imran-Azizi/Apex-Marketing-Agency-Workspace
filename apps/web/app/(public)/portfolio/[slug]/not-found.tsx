@@ -8,6 +8,7 @@ export default function PortfolioWorkNotFound() {
       dir="rtl"
       className="mx-auto flex min-h-[60vh] max-w-lg flex-col items-center justify-center px-4 py-16 text-center"
     >
+      <meta name="robots" content="noindex, follow" />
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-brand/25 bg-brand/10">
         <Film className="h-7 w-7 text-brand" aria-hidden />
       </div>

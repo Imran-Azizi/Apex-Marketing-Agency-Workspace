@@ -11,6 +11,7 @@ import { formatCurrency, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CoverImage } from "@/components/media/cover-image";
+import { usePublicReveal } from "@/components/public/public-reveal";
 
 function orderLabel(index: number) {
   return String(index + 1).padStart(2, "0");
@@ -32,10 +33,10 @@ function ServiceImage({
       sizes="(max-width: 640px) 100vw, (max-width: 1280px) 50vw, 33vw"
       quality={72}
       priority={priority}
-      className="[@media(hover:hover)]:transition-transform [@media(hover:hover)]:duration-500 [@media(hover:hover)]:group-hover:scale-[1.03]"
+      className="[@media(hover:hover)]:transition-transform [@media(hover:hover)]:duration-500 [@media(hover:hover)]:ease-[cubic-bezier(0.22,1,0.36,1)] [@media(hover:hover)]:group-hover:scale-[1.04]"
       fallback={
         <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand/15 via-muted to-background">
-          <Clapperboard className="h-8 w-8 text-brand/70 sm:h-10 sm:w-10" />
+          <Clapperboard className="h-8 w-8 text-brand/70 transition-transform duration-300 group-hover:scale-105 sm:h-10 sm:w-10" />
         </div>
       }
     />
@@ -45,9 +46,12 @@ function ServiceImage({
 export function ServiceCardsGrid({
   services,
   className,
+  startIndex = 0,
 }: {
   services: PublicService[];
   className?: string;
+  /** Offset for order badges / reveal stagger when rendering a continuation grid. */
+  startIndex?: number;
 }) {
   return (
     <div
@@ -57,7 +61,11 @@ export function ServiceCardsGrid({
       )}
     >
       {services.map((service, index) => (
-        <ServiceCard key={service.id} service={service} index={index} />
+        <ServiceCard
+          key={service.id}
+          service={service}
+          index={startIndex + index}
+        />
       ))}
     </div>
   );
@@ -74,18 +82,21 @@ export function ServiceCard({
   const imageSrc = serviceImageSrc(service);
   const ctaHref = service.ctaHref?.trim() || null;
   const ctaLabel = service.ctaLabel?.trim() || "جزئیات بیشتر";
+  const reveal = usePublicReveal<HTMLElement>(Math.min(index, 5) * 70);
 
   return (
     <article
+      ref={reveal.ref}
+      data-service-index={index}
       className={cn(
         "group flex h-full flex-col overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm sm:rounded-3xl",
         "[content-visibility:auto] [contain-intrinsic-size:auto_360px]",
-        "[@media(hover:hover)]:transition-[transform,box-shadow,border-color] [@media(hover:hover)]:duration-300",
-        "[@media(hover:hover)]:hover:-translate-y-1 [@media(hover:hover)]:hover:border-brand/35",
+        "[@media(hover:hover)]:transition-[transform,box-shadow,border-color] [@media(hover:hover)]:duration-300 [@media(hover:hover)]:ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "[@media(hover:hover)]:hover:-translate-y-1.5 [@media(hover:hover)]:hover:border-brand/35",
         "[@media(hover:hover)]:hover:shadow-lg [@media(hover:hover)]:hover:shadow-brand/5",
-        "motion-safe:animate-public-fade motion-reduce:animate-none",
+        reveal.className,
       )}
-      style={{ animationDelay: `${Math.min(index, 5) * 45}ms` }}
+      style={reveal.style}
     >
       <div className="relative aspect-[16/10] overflow-hidden bg-muted sm:aspect-[16/10]">
         <ServiceImage src={imageSrc} alt={title} priority={false} />
@@ -124,11 +135,11 @@ export function ServiceCard({
               asChild
               size="sm"
               variant="outline"
-              className="h-10 w-full gap-1.5 rounded-xl sm:h-9 sm:w-auto sm:rounded-full"
+              className="public-lift h-10 w-full gap-1.5 rounded-xl sm:h-9 sm:w-auto sm:rounded-full"
             >
               <Link href={ctaHref} prefetch={false}>
                 {ctaLabel}
-                <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
+                <ArrowLeft className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:-translate-x-0.5" />
               </Link>
             </Button>
           </div>

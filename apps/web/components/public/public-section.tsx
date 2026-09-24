@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { PublicReveal } from "@/components/public/public-reveal";
 import { cn } from "@/lib/utils";
 
 export function PublicSection({
@@ -8,7 +9,7 @@ export function PublicSection({
   description,
   children,
   className,
-  tone = "default",
+  contentClassName,
 }: {
   id: string;
   eyebrow?: string;
@@ -16,19 +17,23 @@ export function PublicSection({
   description?: string;
   children: ReactNode;
   className?: string;
-  tone?: "default" | "muted";
+  contentClassName?: string;
 }) {
   return (
     <section
       id={id}
-      className={cn(
-        "scroll-mt-20 border-t border-border/50",
-        tone === "muted" ? "bg-muted/20" : "bg-transparent",
-        className,
-      )}
+      className={cn("scroll-mt-20 overflow-visible bg-transparent", className)}
     >
-      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-20 lg:px-8 lg:py-24">
-        <header className="mx-auto mb-7 max-w-2xl text-center sm:mb-14">
+      <div
+        className={cn(
+          "mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-20 lg:px-8 lg:py-24",
+          contentClassName,
+        )}
+      >
+        <PublicReveal
+          as="header"
+          className="mx-auto mb-7 max-w-2xl overflow-visible text-center sm:mb-14"
+        >
           {eyebrow ? (
             <p className="mb-2 text-xs font-semibold tracking-wide text-brand sm:mb-3">
               {eyebrow}
@@ -42,7 +47,7 @@ export function PublicSection({
               {description}
             </p>
           ) : null}
-        </header>
+        </PublicReveal>
         {children}
       </div>
     </section>

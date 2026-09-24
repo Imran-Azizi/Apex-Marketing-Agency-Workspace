@@ -12,7 +12,7 @@ export function PortfolioRelated({
   return (
     <section
       aria-labelledby="related-videos-heading"
-      className="border-t border-border/60 pt-10 sm:pt-12"
+      className="pt-10 sm:pt-12"
     >
       <header className="mb-7 sm:mb-8">
         <p className="mb-2 text-xs font-semibold tracking-wide text-brand">

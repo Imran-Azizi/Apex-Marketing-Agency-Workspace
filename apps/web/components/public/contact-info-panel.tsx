@@ -20,8 +20,8 @@ function ContactInfoCard({ channel }: { channel: ContactChannel }) {
   const disabled = !channel.href || !channel.value;
 
   const className = cn(
-    "group flex w-full items-center gap-4 rounded-2xl border border-border/70 bg-card/80 p-4 text-start shadow-sm",
-    "transition-all duration-200",
+    "group flex w-full items-center gap-3 rounded-2xl border border-border/70 bg-card/80 p-3.5 text-start shadow-sm sm:gap-4 sm:p-4",
+    "transition-[transform,box-shadow,border-color,background-color] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     disabled
       ? "cursor-not-allowed opacity-60"
@@ -33,8 +33,8 @@ function ContactInfoCard({ channel }: { channel: ContactChannel }) {
       <span
         className={cn(
           "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-brand/20 bg-brand/10 text-brand",
-          "transition-colors",
-          !disabled && "group-hover:border-brand/40 group-hover:bg-brand/15",
+          "transition-[border-color,background-color,transform] duration-200",
+          !disabled && "group-hover:border-brand/40 group-hover:bg-brand/15 group-hover:scale-105",
         )}
         aria-hidden
       >
@@ -45,8 +45,11 @@ function ContactInfoCard({ channel }: { channel: ContactChannel }) {
           {channel.label}
         </span>
         <span
-          className="mt-0.5 block truncate text-sm font-semibold text-foreground"
-          dir={channel.id === "email" ? "ltr" : "ltr"}
+          className={cn(
+            "mt-0.5 block text-sm font-semibold text-foreground",
+            channel.id === "email" ? "break-all" : "truncate",
+          )}
+          dir="ltr"
         >
           {channel.value || "—"}
         </span>
@@ -86,16 +89,13 @@ export function ContactInfoPanel({
     : [];
 
   return (
-    <aside className="flex h-full flex-col rounded-3xl border border-border/70 bg-gradient-to-b from-card via-card to-muted/20 p-6 shadow-sm dark:from-card/80 dark:via-card/70 dark:to-background/40 sm:p-7">
+    <aside className="overflow-visible rounded-3xl border border-border/60 bg-card p-5 shadow-sm sm:p-6 lg:p-7">
       <p className="text-xs font-semibold tracking-wide text-brand">راه‌های ارتباطی</p>
-      <h2 className="mt-2 text-xl font-bold tracking-tight text-foreground">
+      <h3 className="mt-2 text-lg font-semibold tracking-tight text-foreground sm:text-xl">
         مستقیم با ما در تماس باشید
-      </h2>
-      <p className="mt-2 text-sm leading-7 text-muted-foreground">
-        از طریق واتساپ، تماس تلفنی یا ایمیل می‌توانید با تیم اپیکس ارتباط بگیرید.
-      </p>
+      </h3>
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-5 space-y-3 sm:mt-6">
         {isLoading
           ? Array.from({ length: 3 }).map((_, i) => (
               <Skeleton key={i} className="h-[4.5rem] w-full rounded-2xl" />
@@ -105,7 +105,7 @@ export function ContactInfoPanel({
             ))}
       </div>
 
-      <div className="mt-8 rounded-2xl border border-brand/20 bg-brand/5 px-4 py-4 text-sm leading-7 text-muted-foreground dark:bg-brand/10">
+      <div className="mt-5 rounded-2xl bg-brand/5 px-4 py-3.5 text-sm leading-7 text-muted-foreground sm:mt-6 sm:py-4 dark:bg-brand/10">
         {CONTACT_HOURS_TEXT}
       </div>
     </aside>

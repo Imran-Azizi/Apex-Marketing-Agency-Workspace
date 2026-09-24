@@ -49,7 +49,7 @@ export function DashboardTopbar({
   }
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-background px-4 lg:px-6">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b bg-background px-4 lg:px-6">
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetTrigger asChild>
           <Button variant="ghost" size="icon" className="lg:hidden">

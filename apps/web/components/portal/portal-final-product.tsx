@@ -14,16 +14,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { VideoPlayer } from "@/components/media/video-player";
+import { VideoPlayer, VideoPosterTile } from "@/components/media/video-player";
 import { mediaStreamUrl } from "@/lib/media";
 import { VIDEO_TYPE_LABELS, type FinalVideoType } from "@/lib/final-product";
-import { downloadMediaFile, formatFileSize } from "@/lib/upload";
+import { downloadMediaFile, formatFileSizeParts } from "@/lib/upload";
 import { cn, formatDate } from "@/lib/utils";
 import {
   CalendarDays,
   Check,
   CheckCircle2,
-  Clock3,
   Download,
   Eye,
   Film,
@@ -32,7 +31,6 @@ import {
   Lock,
   MessageSquare,
   PackageCheck,
-  Play,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -169,19 +167,10 @@ function isVideoNew(
   return video.isNewForCustomer === true && !viewedIds.has(video.id);
 }
 
-function formatDuration(totalSec: number | null | undefined): string {
-  if (totalSec == null || !Number.isFinite(totalSec) || totalSec <= 0) {
-    return "—";
-  }
-  const sec = Math.round(totalSec);
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  const mm = m.toLocaleString("fa-AF", { numberingSystem: "latn" });
-  const ss = s.toLocaleString("fa-AF", {
-    numberingSystem: "latn",
-    minimumIntegerDigits: 2,
-  });
-  return `${mm}:${ss}`;
+function formatSizeRtl(bytes?: number | null): string {
+  const parts = formatFileSizeParts(bytes);
+  if (!parts) return "—";
+  return `${parts.value} ${parts.unit}`;
 }
 
 /** Readable title for long download filenames (keeps full name in tooltip). */
@@ -197,8 +186,8 @@ function displayVideoTitle(name: string): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) cleaned = base;
-  if (cleaned.length <= 56) return cleaned;
-  return `${cleaned.slice(0, 48).trim()}…`;
+  if (cleaned.length <= 64) return cleaned;
+  return `${cleaned.slice(0, 56).trim()}…`;
 }
 
 function portalStatusBadge(
@@ -615,15 +604,17 @@ function LatestDeliveryRow({
 
   return (
     <section className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold">آخرین ارسال مدیر</h3>
-        {anyNew ? (
-          <Badge variant="brand" className="h-5 px-2 text-[10px]">
-            جدید
-          </Badge>
-        ) : null}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold tracking-tight">آخرین ارسال مدیر</h3>
+          {anyNew ? (
+            <Badge variant="brand" className="h-5 px-2 text-[10px]">
+              جدید
+            </Badge>
+          ) : null}
+        </div>
         <span className="text-[11px] text-muted-foreground">
-          نسخه دارای واترمارک و بدون واترمارک در یک ردیف
+          نسخه دارای واترمارک و بدون واترمارک
         </span>
       </div>
 
@@ -631,7 +622,7 @@ function LatestDeliveryRow({
         className={cn(
           "rounded-2xl border p-3 sm:p-4",
           anyNew
-            ? "border-brand/35 bg-brand/[0.03] ring-1 ring-brand/10"
+            ? "border-brand/30 bg-gradient-to-bl from-brand/[0.06] via-card to-card"
             : "border-border/70 bg-muted/10",
         )}
       >
@@ -791,7 +782,6 @@ function VideoCard({
   onRequestRevision: (video: PortalFinalVideo) => void;
 }) {
   const [downloading, setDownloading] = useState(false);
-  const [durationSec, setDurationSec] = useState<number | null>(null);
 
   const locked =
     variant === "CLEAN" &&
@@ -808,8 +798,6 @@ function VideoCard({
       : video.canDownload === true || video.allowDownload === true);
 
   const dateValue = video.sentAt || video.createdAt || null;
-  const stream = canPlay ? mediaStreamUrl(video.id) : "";
-  const thumbSrc = stream ? `${stream}#t=0.5` : "";
   const statusBadge = portalStatusBadge(video, variant, isNew, locked);
   const showDecisionActions = canApprove || canRequestRevision;
   // Never show "approved" on a payment-locked clean card — confirmation
@@ -817,46 +805,27 @@ function VideoCard({
   const approved =
     !locked && video.status === "APPROVED_BY_CUSTOMER";
   const title = displayVideoTitle(video.name);
+  const sizeLabel = formatSizeRtl(video.sizeBytes);
 
   return (
     <article
       className={cn(
-        "flex h-full flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-shadow hover:shadow-md",
+        "group flex h-full flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all hover:shadow-md",
         locked
           ? "border-amber-500/35"
           : isNew
-            ? "border-brand/45 ring-1 ring-brand/15"
+            ? "border-brand/40 ring-1 ring-brand/10"
             : approved
               ? "border-emerald-500/30"
-              : "border-border/70",
+              : "border-border/70 hover:border-brand/30",
       )}
     >
       <div className="relative isolate bg-neutral-950">
         {canPlay ? (
-          <button
-            type="button"
+          <VideoPosterTile
+            title={title}
             onClick={() => onView(video)}
-            className="group relative block w-full text-start"
-            aria-label="مشاهده ویدیو"
-          >
-            <video
-              src={thumbSrc}
-              preload="metadata"
-              muted
-              playsInline
-              className="aspect-video w-full bg-neutral-950 object-cover"
-              onLoadedMetadata={(e) => {
-                const d = e.currentTarget.duration;
-                if (Number.isFinite(d) && d > 0) setDurationSec(d);
-              }}
-            />
-            <span className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/10 to-black/20" />
-            <span className="absolute inset-0 flex items-center justify-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-foreground shadow-lg ring-1 ring-black/10 transition-transform duration-200 group-hover:scale-105">
-                <Play className="h-5 w-5 fill-current ps-0.5" />
-              </span>
-            </span>
-          </button>
+          />
         ) : (
           <div className="relative flex aspect-video items-center justify-center overflow-hidden bg-neutral-900">
             <div
@@ -900,47 +869,63 @@ function VideoCard({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3.5 p-4 text-start sm:p-5">
-        <div className="space-y-1">
+      <div className="flex flex-1 flex-col gap-4 p-4 text-start sm:p-5">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant="outline"
+              className={cn(
+                "h-6 border px-2 text-[10px] font-medium",
+                variant === "CLEAN"
+                  ? "border-amber-200/80 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                  : "border-brand/25 bg-brand/5 text-brand",
+              )}
+            >
+              {VIDEO_TYPE_LABELS[variant]}
+            </Badge>
+          </div>
           <h4
             className="line-clamp-2 text-[15px] font-semibold leading-6 tracking-tight text-foreground"
             title={video.name}
           >
             {title}
           </h4>
-          {title !== video.name ? (
-            <p
-              className="truncate text-[11px] text-muted-foreground"
-              dir="ltr"
-              title={video.name}
-            >
-              {video.name}
-            </p>
-          ) : null}
         </div>
 
-        <dl className="grid grid-cols-3 divide-x divide-border/70 overflow-hidden rounded-xl border border-border/70 bg-muted/25 text-[11px] divide-x-reverse">
-          <MetaTile
-            icon={<Clock3 className="h-3.5 w-3.5" />}
-            label="مدت"
-            value={formatDuration(durationSec)}
-          />
-          <MetaTile
-            icon={<HardDrive className="h-3.5 w-3.5" />}
-            label="حجم"
-            value={
-              video.sizeBytes != null ? formatFileSize(video.sizeBytes) : "—"
-            }
-          />
+        <dl
+          className={cn(
+            "grid gap-0 overflow-hidden rounded-xl border border-border/70 bg-muted/20 text-[11px]",
+            "grid-cols-3 divide-x divide-x-reverse divide-border/60",
+          )}
+        >
           <MetaTile
             icon={<CalendarDays className="h-3.5 w-3.5" />}
             label="تاریخ"
             value={dateValue ? formatDate(dateValue) : "—"}
           />
+          <MetaTile
+            icon={<HardDrive className="h-3.5 w-3.5" />}
+            label="حجم"
+            value={sizeLabel}
+            ltr
+          />
+          <MetaTile
+            icon={<Film className="h-3.5 w-3.5" />}
+            label="نسخه"
+            value={
+              video.version != null
+                ? String(
+                    video.version.toLocaleString("fa-AF", {
+                      numberingSystem: "latn",
+                    }),
+                  )
+                : "—"
+            }
+          />
         </dl>
 
         {locked ? (
-          <div className="flex gap-2.5 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2.5">
+          <div className="flex gap-2.5 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-3.5 py-3">
             <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-300" />
             <p className="text-[11px] leading-5 text-muted-foreground">
               {video.accessMessage ||
@@ -950,26 +935,26 @@ function VideoCard({
         ) : null}
 
         {video.status === "REVISION_REQUESTED" && video.revisionNotes ? (
-          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3 py-2.5 text-[11px] leading-5 text-muted-foreground">
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-3.5 py-3 text-[11px] leading-5 text-muted-foreground">
             <span className="font-medium text-foreground">درخواست اصلاح: </span>
             {video.revisionNotes}
           </div>
         ) : null}
 
         {approved ? (
-          <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-[11px] font-medium text-emerald-800 dark:text-emerald-300">
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3.5 py-2.5 text-[11px] font-medium text-emerald-800 dark:text-emerald-300">
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
             این ویدیو تأیید شده است
           </div>
         ) : null}
 
-        <div className="mt-auto space-y-2.5 pt-0.5">
+        <div className="mt-auto space-y-3 pt-0.5">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {canPlay ? (
               <Button
                 size="sm"
                 variant="brand"
-                className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
+                className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium shadow-sm shadow-brand/15"
                 onClick={() => onView(video)}
               >
                 <Eye className="h-3.5 w-3.5" />
@@ -992,8 +977,16 @@ function VideoCard({
             <Button
               size="sm"
               variant="outline"
-              className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
+              className={cn(
+                "h-10 w-full gap-1.5 rounded-xl text-xs font-medium",
+                !canDownload && "opacity-70",
+              )}
               disabled={!canDownload || downloading}
+              title={
+                !canDownload
+                  ? "دانلود پس از تسویه یا باز شدن دسترسی فعال می‌شود"
+                  : undefined
+              }
               onClick={async () => {
                 if (!canDownload) return;
                 setDownloading(true);
@@ -1010,7 +1003,7 @@ function VideoCard({
             >
               {downloading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : locked ? (
+              ) : locked || !canDownload ? (
                 <Lock className="h-3.5 w-3.5" />
               ) : (
                 <Download className="h-3.5 w-3.5" />
@@ -1020,22 +1013,39 @@ function VideoCard({
           </div>
 
           {showDecisionActions ? (
-            <div className="rounded-xl border border-border/70 bg-muted/25 p-3">
-              <p className="mb-2 text-[10px] font-semibold tracking-wide text-muted-foreground">
-                تأیید یا رد این ویدیو
-              </p>
-              {canApprove && variant === "CLEAN" ? (
-                <p className="mb-2.5 text-[11px] leading-5 text-muted-foreground">
-                  با تأیید نسخه بدون واترمارک، در صورت تسویه کامل پرداخت، پروژه
-                  تکمیل می‌شود.
+            <div className="rounded-xl border border-border/70 bg-muted/25 p-3.5">
+              <div className="mb-3 space-y-1">
+                <p className="text-xs font-semibold text-foreground">
+                  تأیید یا رد این ویدیو
                 </p>
-              ) : null}
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {canApprove && variant === "CLEAN" ? (
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    با تأیید نسخه بدون واترمارک، در صورت تسویه کامل پرداخت،
+                    پروژه تکمیل می‌شود.
+                  </p>
+                ) : canApprove ? (
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    در صورت رضایت از پیش‌نمایش، تأیید کنید یا اصلاح بخواهید.
+                  </p>
+                ) : (
+                  <p className="text-[11px] leading-5 text-muted-foreground">
+                    می‌توانید برای این نسخه درخواست اصلاح ارسال کنید.
+                  </p>
+                )}
+              </div>
+              <div
+                className={cn(
+                  "grid gap-2",
+                  canApprove && canRequestRevision
+                    ? "grid-cols-1 sm:grid-cols-2"
+                    : "grid-cols-1",
+                )}
+              >
                 {canApprove ? (
                   <Button
                     variant="brand"
                     size="sm"
-                    className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
+                    className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium shadow-sm shadow-brand/15"
                     disabled={isApproving || isRequesting}
                     onClick={() =>
                       onApprove?.({
@@ -1056,10 +1066,7 @@ function VideoCard({
                   <Button
                     variant="outline"
                     size="sm"
-                    className={cn(
-                      "h-10 w-full gap-1.5 rounded-xl text-xs font-medium",
-                      !canApprove && "sm:col-span-2",
-                    )}
+                    className="h-10 w-full gap-1.5 rounded-xl text-xs font-medium"
                     disabled={isApproving || isRequesting}
                     onClick={() => onRequestRevision(video)}
                   >
@@ -1080,19 +1087,21 @@ function MetaTile({
   label,
   value,
   icon,
+  ltr,
 }: {
   label: string;
   value: string;
   icon?: ReactNode;
+  ltr?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 flex-col items-center gap-1 px-2 py-2.5 text-center sm:px-3">
-      <dt className="flex items-center gap-1 text-[10px] text-muted-foreground">
+    <div className="flex min-w-0 flex-col gap-1 px-3 py-2.5 text-start">
+      <dt className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         {icon ? <span className="opacity-70">{icon}</span> : null}
         {label}
       </dt>
-      <dd className="w-full truncate text-xs font-semibold tabular-nums text-foreground">
-        {value}
+      <dd className="truncate text-xs font-semibold tabular-nums text-foreground">
+        {ltr ? <bdi dir="ltr">{value}</bdi> : value}
       </dd>
     </div>
   );

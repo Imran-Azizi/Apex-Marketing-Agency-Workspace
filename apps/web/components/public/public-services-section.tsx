@@ -1,9 +1,12 @@
-import type { PublicService } from "@/lib/services";
+import {
+  PUBLIC_SERVICES_PREVIEW_LIMIT,
+  type PublicService,
+} from "@/lib/services";
 import { PublicSection } from "@/components/public/public-section";
 import { PublicServicesList } from "@/components/public/public-services-list";
 
 export function PublicServicesSection({
-  previewLimit = 3,
+  previewLimit = PUBLIC_SERVICES_PREVIEW_LIMIT,
   initialServices,
   description,
 }: {
@@ -14,10 +17,8 @@ export function PublicServicesSection({
   return (
     <PublicSection
       id="services"
-      eyebrow="خدمات"
       title="خدمات ما"
       description={description || undefined}
-      tone="muted"
       className="[content-visibility:auto] [contain-intrinsic-size:auto_720px]"
     >
       <PublicServicesList

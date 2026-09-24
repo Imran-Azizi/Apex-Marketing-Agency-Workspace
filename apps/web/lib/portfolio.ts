@@ -79,7 +79,7 @@ export type PublicPortfolioItem = {
   video: {
     mimeType: string;
     streamPath: string;
-    /** Direct Bunny CDN URL when the object is under a public prefix. */
+    /** Always null on the public site — playback uses streamPath only. */
     playbackUrl?: string | null;
   };
 };

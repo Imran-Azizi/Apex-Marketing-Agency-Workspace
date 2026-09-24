@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useMemo, useState } from "react";
 import {
@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { VideoPlayer } from "@/components/media/video-player";
 import { projectThumbnailUrl } from "@/lib/portal";
 import {
   downloadStoredFile,
@@ -907,11 +908,11 @@ export function PortalProjectAssets({
             />
           )}
           {preview?.type === "video" && (
-            <video
+            <VideoPlayer
               src={preview.url}
-              controls
+              title={preview.title}
               autoPlay
-              className="w-full rounded-xl bg-black"
+              className="rounded-xl"
             />
           )}
           {preview?.type === "audio" && (

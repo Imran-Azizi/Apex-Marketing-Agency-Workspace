@@ -259,12 +259,9 @@ function AssetThumb({
   }
   if (isVideo && url) {
     return (
-      <video
-        src={url}
-        className="h-14 w-14 rounded-md object-cover"
-        muted
-        playsInline
-      />
+      <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-md bg-neutral-900 text-brand">
+        <FileVideo className="h-5 w-5" />
+      </div>
     );
   }
   if (isAudio && url) {

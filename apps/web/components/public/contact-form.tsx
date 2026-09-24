@@ -72,7 +72,11 @@ export function ContactForm() {
       reset();
       toast.success("پیام با موفقیت ارسال شد");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "خطا در ارسال پیام");
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "خطا در ارسال پیام. لطفاً دوباره تلاش کنید.",
+      );
     } finally {
       submittingRef.current = false;
     }
@@ -81,7 +85,7 @@ export function ContactForm() {
   if (success) {
     return (
       <div
-        className="flex h-full flex-col items-center justify-center rounded-3xl border border-brand/25 bg-card px-6 py-12 text-center shadow-sm dark:bg-card/80"
+        className="flex flex-col items-center justify-center rounded-3xl border border-brand/25 bg-card px-6 py-12 text-center shadow-sm sm:px-8"
         role="status"
         aria-live="polite"
       >
@@ -111,19 +115,14 @@ export function ContactForm() {
       onSubmit={handleSubmit(onSubmit)}
       noValidate
       aria-busy={busy || undefined}
-      className="rounded-3xl border border-border/70 bg-card/90 p-5 shadow-sm dark:bg-card/75 sm:p-7"
+      className="rounded-3xl border border-border/60 bg-card p-5 shadow-sm sm:p-7 lg:p-8"
     >
-      <div className="mb-6">
-        <h2 className="text-xl font-bold tracking-tight text-foreground">
-          ارسال درخواست
-        </h2>
-        <p className="mt-1 text-sm leading-7 text-muted-foreground">
-          اطلاعات خود را وارد کنید تا کارشناسان ما با شما تماس بگیرند.
-        </p>
-      </div>
+      <h3 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+        ارسال درخواست
+      </h3>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 sm:gap-5">
+        <div className="space-y-2">
           <Label htmlFor="contact-name">نام</Label>
           <Input
             id="contact-name"
@@ -139,7 +138,7 @@ export function ContactForm() {
           <FieldError id="contact-name-error" message={errors.name?.message} />
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="contact-email">ایمیل</Label>
           <Input
             id="contact-email"
@@ -157,7 +156,7 @@ export function ContactForm() {
           <FieldError id="contact-email-error" message={errors.email?.message} />
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="contact-phone">شماره</Label>
           <Controller
             name="phone"
@@ -180,7 +179,7 @@ export function ContactForm() {
           <FieldError id="contact-phone-error" message={errors.phone?.message} />
         </div>
 
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="contact-company">شرکت</Label>
           <Input
             id="contact-company"
@@ -201,7 +200,7 @@ export function ContactForm() {
         </div>
       </div>
 
-      <div className="mt-4 space-y-1.5">
+      <div className="mt-5 space-y-2">
         <Label htmlFor="contact-message">پیام</Label>
         <Textarea
           id="contact-message"
@@ -229,7 +228,7 @@ export function ContactForm() {
         disabled={busy}
         isLoading={busy}
         loadingText="در حال ارسال..."
-        className="mt-6 h-12 w-full rounded-xl text-base font-semibold shadow-md shadow-brand/20 sm:w-auto sm:min-w-[14rem]"
+        className="public-lift mt-6 h-12 w-full rounded-xl text-base font-semibold shadow-md shadow-brand/20 sm:mt-7 sm:w-auto sm:min-w-[14rem]"
       >
         <Send className="h-4 w-4" aria-hidden />
         ارسال درخواست

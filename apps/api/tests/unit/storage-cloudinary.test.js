@@ -135,6 +135,13 @@ test("resolveMediaPlacement routes by purpose", () => {
   );
   assert.equal(customer.folderPath, "images/customers");
   assert.equal(customer.category, MEDIA_ROOTS.IMAGES);
+
+  const landingImage = resolveMediaPlacement(
+    { purpose: UPLOAD_PURPOSE.LANDING_IMAGE },
+    { contentType: "image/jpeg", filename: "banner.jpg" },
+  );
+  assert.equal(landingImage.folderPath, "images/landing");
+  assert.equal(landingImage.category, MEDIA_ROOTS.IMAGES);
 });
 
 test("parseUploadContext maps legacy folders to purpose", () => {

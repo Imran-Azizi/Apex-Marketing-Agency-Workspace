@@ -38,7 +38,7 @@ export function CompanyIntroCta() {
         type="button"
         variant="brand"
         size="lg"
-        className="h-12 min-h-11 rounded-xl px-7 shadow-sm shadow-brand/20 motion-safe:transition-transform motion-safe:hover:-translate-y-px"
+        className="h-12 min-h-11 rounded-xl px-7 shadow-sm shadow-brand/20 public-lift"
         aria-haspopup="dialog"
         aria-expanded={storyOpen}
         onPointerEnter={ensureModal}

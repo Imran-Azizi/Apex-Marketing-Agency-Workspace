@@ -58,7 +58,10 @@ export const SECURITY = Object.freeze({
     "images/services/",
     "images/customers/",
     "images/portfolio/",
+    "images/landing/",
     "videos/portfolio/",
+    "videos/landing/",
+    "audio/landing/",
   ]),
 });
 

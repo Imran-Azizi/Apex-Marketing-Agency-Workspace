@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { vazirmatn } from "@/lib/fonts";
+import { getSiteUrl, searchVerification, SITE_NAME } from "@/lib/seo";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { ThemeToaster } from "@/components/providers/theme-toaster";
@@ -7,8 +8,11 @@ import { LoadingProviders } from "@/components/loading/loading-providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(getSiteUrl()),
   title: "اپیکس ورک‌اسپیس",
   description: "سیستم مدیریت مشتری، پورتال، پروژه‌ها و هوش مصنوعی",
+  applicationName: SITE_NAME,
+  ...(searchVerification() ? { verification: searchVerification() } : {}),
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "48x48" },

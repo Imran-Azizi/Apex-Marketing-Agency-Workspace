@@ -45,6 +45,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   Download,
@@ -55,6 +56,7 @@ import {
   RefreshCcw,
   RotateCcw,
   Search,
+  ShieldCheck,
   Trash2,
   Upload,
   XCircle,
@@ -74,6 +76,11 @@ interface SystemBackup {
   checksum: string | null;
   tableCount: number;
   recordCount: number;
+  mediaFileCount?: number;
+  mediaBytes?: number;
+  progressPercent?: number;
+  progressPhase?: string | null;
+  scope?: string;
   errorMessage: string | null;
   emailTo: string | null;
   emailSentAt: string | null;
@@ -95,6 +102,8 @@ interface Overview {
   nextRuns: { daily?: string; weekly?: string; monthly?: string };
   emailConfigured: boolean;
   latest: SystemBackup | null;
+  scope?: string;
+  includes?: Record<string, boolean>;
   stats: {
     total: number;
     success: number;
@@ -125,7 +134,8 @@ function formatSize(bytes: number) {
   const n = Number(bytes) || 0;
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function StatusBadge({ status }: { status: BackupStatus }) {
@@ -161,6 +171,16 @@ function TypeBadge({ type }: { type: BackupType }) {
   );
 }
 
+function ScopeBadge({ scope }: { scope?: string }) {
+  const full = !scope || scope === "FULL_SYSTEM";
+  return (
+    <Badge variant={full ? "success" : "outline"} className="gap-1">
+      <ShieldCheck className="h-3 w-3" />
+      {full ? "کل سیستم" : "فقط دیتابیس"}
+    </Badge>
+  );
+}
+
 async function downloadBackupFile(id: string, fileName: string | null) {
   await ensureCsrf();
   const res = await fetch(`${API_BASE}/backup/${id}/download`, {
@@ -184,7 +204,7 @@ async function downloadBackupFile(id: string, fileName: string | null) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = fileName || `apex-backup-${id}.json.gz`;
+  a.download = fileName || `apex-backup-${id}.tar.gz`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -203,6 +223,7 @@ export default function BackupPage() {
   );
   const [pendingBackupId, setPendingBackupId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [progressPhase, setProgressPhase] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SystemBackup | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<SystemBackup | null>(null);
   const [uploadMeta, setUploadMeta] = useState<{
@@ -210,10 +231,14 @@ export default function BackupPage() {
     info: {
       tableCount: number;
       recordCount: number;
+      mediaFileCount?: number;
       createdAt: string;
+      scope?: string;
+      warning?: string | null;
     };
   } | null>(null);
   const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false);
+  const [restoreAck, setRestoreAck] = useState(false);
 
   const overview = useQuery({
     queryKey: ["backup-overview"],
@@ -236,26 +261,31 @@ export default function BackupPage() {
     }
   }, [overview.data, scheduleDraft]);
 
-  // Poll a newly created backup until complete
+  // Poll a newly created backup until complete (supports long media backups)
   useEffect(() => {
     if (!pendingBackupId) return;
     let cancelled = false;
     let ticks = 0;
     const id = setInterval(async () => {
       ticks += 1;
-      setProgress((p) => Math.min(92, p + 7));
       try {
         const row = await apiGet<SystemBackup>(`/backup/${pendingBackupId}`);
         if (cancelled) return;
+        if (typeof row.progressPercent === "number") {
+          setProgress(row.progressPercent);
+        } else {
+          setProgress((p) => Math.min(92, p + 2));
+        }
+        setProgressPhase(row.progressPhase || null);
         if (row.status === "SUCCESS" || row.status === "FAILED") {
-          setProgress(100);
+          setProgress(row.status === "SUCCESS" ? 100 : progress);
           clearInterval(id);
           setPendingBackupId(null);
           qc.invalidateQueries({ queryKey: ["backup-list"] });
           qc.invalidateQueries({ queryKey: ["backup-overview"] });
           if (row.status === "SUCCESS") {
             if (row.emailSentAt) {
-              toast.success("بک اپ ایجاد و به ایمیل ارسال شد", {
+              toast.success("بک اپ کامل سیستم ایجاد و به ایمیل ارسال شد", {
                 description: row.emailTo
                   ? `گیرنده: ${row.emailTo}`
                   : undefined,
@@ -267,35 +297,45 @@ export default function BackupPage() {
                   "فایل برای دانلود دستی در دسترس است.",
               });
             } else {
-              toast.success("بک اپ با موفقیت ایجاد شد");
+              toast.success("بک اپ کامل سیستم با موفقیت ایجاد شد");
             }
           } else {
             toast.error(row.errorMessage || "ایجاد بک اپ ناموفق بود");
           }
-          setTimeout(() => setProgress(0), 800);
+          setTimeout(() => {
+            setProgress(0);
+            setProgressPhase(null);
+          }, 1200);
         }
       } catch {
         /* keep polling briefly */
       }
-      if (ticks > 90) {
+      // ~2 hours at 2s interval for large media backups
+      if (ticks > 3600) {
         clearInterval(id);
         setPendingBackupId(null);
         setProgress(0);
+        setProgressPhase(null);
+        toast.message("بک اپ گیری هنوز در حال اجراست", {
+          description: "وضعیت را از جدول تاریخچه بررسی کنید.",
+        });
       }
-    }, 1500);
+    }, 2000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [pendingBackupId, qc]);
+  }, [pendingBackupId, qc, progress]);
 
   const createMut = useMutation({
     mutationFn: () => apiPost<SystemBackup>("/backup", {}),
     onSuccess: (row) => {
-      setProgress(8);
+      setProgress(row.progressPercent || 2);
+      setProgressPhase(row.progressPhase || "شروع");
       setPendingBackupId(row.id);
-      toast.message("بک اپ گیری شروع شد", {
-        description: "در حال آماده‌سازی و ارسال به ایمیل…",
+      toast.message("بک اپ گیری کامل سیستم شروع شد", {
+        description:
+          "شامل پایگاه داده، فایل‌ها، رسانه و تنظیمات — ممکن است چند دقیقه طول بکشد.",
       });
       qc.invalidateQueries({ queryKey: ["backup-list"] });
     },
@@ -356,6 +396,7 @@ export default function BackupPage() {
         form.append("confirm", "true");
         const { data } = await api.post("/backup/restore-upload", form, {
           headers: { "Content-Type": "multipart/form-data" },
+          timeout: 60 * 60 * 1000,
         });
         if (!data?.success) {
           throw new Error(data?.error?.message || "بازگردانی ناموفق بود");
@@ -364,11 +405,20 @@ export default function BackupPage() {
       }
       throw new Error("منبع بازگردانی مشخص نیست");
     },
-    onSuccess: () => {
-      toast.success("بازگردانی با موفقیت انجام شد");
+    onSuccess: (result: { mediaFileCount?: number; tableCount?: number } | undefined) => {
+      toast.success("بازگردانی کامل سیستم با موفقیت انجام شد", {
+        description:
+          result?.tableCount != null
+            ? `${result.tableCount} جدول` +
+              (result.mediaFileCount
+                ? ` · ${result.mediaFileCount} فایل رسانه`
+                : "")
+            : undefined,
+      });
       setRestoreConfirmOpen(false);
       setRestoreTarget(null);
       setUploadMeta(null);
+      setRestoreAck(false);
       qc.invalidateQueries({ queryKey: ["backup-list"] });
     },
     onError: (e) =>
@@ -382,6 +432,7 @@ export default function BackupPage() {
       form.append("file", file);
       const { data } = await api.post("/backup/validate-upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 30 * 60 * 1000,
       });
       if (!data?.success) {
         throw new Error(data?.error?.message || "فایل نامعتبر است");
@@ -389,12 +440,21 @@ export default function BackupPage() {
       return data.data as {
         tableCount: number;
         recordCount: number;
+        mediaFileCount?: number;
         createdAt: string;
+        scope?: string;
+        warning?: string | null;
       };
     },
     onSuccess: (info, file) => {
       setUploadMeta({ file, info });
-      toast.success("فایل بک اپ معتبر است");
+      if (info.warning) {
+        toast.warning("فایل معتبر است — با محدودیت", {
+          description: info.warning,
+        });
+      } else {
+        toast.success("فایل بک اپ کامل سیستم معتبر است");
+      }
     },
     onError: (e) =>
       toast.error(e instanceof Error ? e.message : "اعتبارسنجی ناموفق بود"),
@@ -416,34 +476,40 @@ export default function BackupPage() {
       .join(" · ");
   }, [nextRuns]);
 
+  const restoreSourceLabel = restoreTarget
+    ? restoreTarget.fileName || restoreTarget.id
+    : uploadMeta?.file.name || "فایل بارگذاری‌شده";
+
   return (
     <div className="space-y-6 animate-fade-slide" dir="rtl">
       <PageHeader
         title="بک اپ گیری و بازگردانی"
-        subtitle="ایجاد، زمان‌بندی، دانلود و بازگردانی امن نسخه‌های بک اپ سیستم"
+        subtitle="پشتیبان کامل سیستم — پایگاه داده، فایل‌ها، رسانه، تنظیمات و تمام ماژول‌ها"
       />
+
+      <div className="rounded-xl border border-brand/25 bg-brand/[0.04] px-4 py-3 text-sm text-muted-foreground">
+        هر بک اپ یک <span className="font-medium text-foreground">نسخه کامل از کل سیستم</span> است
+        (نه فقط این صفحه): کاربران، CRM، پروژه‌ها، مالی، پورتفولیو، لندینگ، چت،
+        دستیارها، تنظیمات و تمام فایل‌های رسانه‌ای ذخیره‌شده.
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {
             label: "کل بک اپ‌ها",
             value: overview.data?.stats.total ?? "—",
-            tone: "brand",
           },
           {
             label: "موفق",
             value: overview.data?.stats.success ?? "—",
-            tone: "success",
           },
           {
             label: "ناموفق",
             value: overview.data?.stats.failed ?? "—",
-            tone: "danger",
           },
           {
             label: "در حال پردازش",
             value: overview.data?.stats.processing ?? "—",
-            tone: "warning",
           },
         ].map((s) => (
           <Card key={s.label} className="border-border/60 shadow-sm">
@@ -459,16 +525,16 @@ export default function BackupPage() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        {/* Create backup */}
         <Card className="border-brand/20 bg-gradient-to-bl from-brand/[0.06] via-card to-card shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <HardDriveDownload className="h-5 w-5 text-brand" />
-              ایجاد بک اپ جدید
+              ایجاد بک اپ کامل سیستم
             </CardTitle>
             <CardDescription>
-              نسخه کامل داده‌های سیستم (دیتابیس، کاربران، مشتریان، پروژه‌ها، مالی و
-              تنظیمات) ساخته شده و به ایمیل پیکربندی‌شده ارسال می‌شود.
+              آرشیو شامل تمام جداول پایگاه داده و فایل‌های رسانه است. پس از اتمام،
+              فایل برای دانلود آماده می‌شود و در صورت پیکربندی SMTP به ایمیل ارسال
+              می‌گردد.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -481,15 +547,28 @@ export default function BackupPage() {
                   <span>{formatSize(overview.data.latest.sizeBytes)}</span>
                   <span aria-hidden>·</span>
                   <TypeBadge type={overview.data.latest.type} />
+                  <ScopeBadge scope={overview.data.latest.scope} />
                 </div>
+                {(overview.data.latest.tableCount ||
+                  overview.data.latest.mediaFileCount) && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {overview.data.latest.tableCount} جدول ·{" "}
+                    {overview.data.latest.recordCount} رکورد
+                    {overview.data.latest.mediaFileCount
+                      ? ` · ${overview.data.latest.mediaFileCount} فایل رسانه`
+                      : ""}
+                  </p>
+                )}
               </div>
             ) : null}
 
             {(pendingBackupId || progress > 0) && (
               <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>پیشرفت بک اپ گیری</span>
-                  <span className="tabular-nums">{progress}٪</span>
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="truncate">
+                    {progressPhase || "پیشرفت بک اپ گیری"}
+                  </span>
+                  <span className="tabular-nums shrink-0">{progress}٪</span>
                 </div>
                 <Progress value={progress} />
               </div>
@@ -516,12 +595,11 @@ export default function BackupPage() {
               ) : (
                 <HardDrive className="h-4 w-4" />
               )}
-              ایجاد بک اپ اکنون
+              ایجاد بک اپ کامل اکنون
             </Button>
           </CardContent>
         </Card>
 
-        {/* Restore */}
         <Card className="border-border/60 shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -529,15 +607,15 @@ export default function BackupPage() {
               بازگردانی از بک اپ
             </CardTitle>
             <CardDescription>
-              فایل بک اپ را بارگذاری کنید. قبل از بازگردانی، اعتبارسنجی و تأیید
-              امنیتی انجام می‌شود.
+              فایل آرشیو کامل سیستم (‎.tar.gz‎) یا بک اپ قدیمی را بارگذاری کنید.
+              قبل از بازگردانی، اعتبارسنجی و تأیید صریح الزامی است.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <input
               ref={fileRef}
               type="file"
-              accept=".gz,.json,application/gzip,application/json"
+              accept=".gz,.tar.gz,.tgz,.json,.apexbk,application/gzip,application/json"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -566,17 +644,33 @@ export default function BackupPage() {
                 </p>
                 <ul className="space-y-1 text-muted-foreground">
                   <li>نام: {uploadMeta.file.name}</li>
+                  <li>
+                    محدوده:{" "}
+                    {uploadMeta.info.scope === "FULL_SYSTEM" || !uploadMeta.info.scope
+                      ? "کل سیستم"
+                      : "فقط دیتابیس"}
+                  </li>
                   <li>جداول: {uploadMeta.info.tableCount}</li>
                   <li>رکوردها: {uploadMeta.info.recordCount}</li>
+                  {uploadMeta.info.mediaFileCount != null ? (
+                    <li>فایل‌های رسانه: {uploadMeta.info.mediaFileCount}</li>
+                  ) : null}
                   <li>
                     تاریخ بک اپ: {formatDateTime(uploadMeta.info.createdAt)}
                   </li>
                 </ul>
+                {uploadMeta.info.warning ? (
+                  <p className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    {uploadMeta.info.warning}
+                  </p>
+                ) : null}
                 <Button
                   variant="brand"
                   className="w-full rounded-xl"
                   onClick={() => {
                     setRestoreTarget(null);
+                    setRestoreAck(false);
                     setRestoreConfirmOpen(true);
                   }}
                 >
@@ -588,7 +682,6 @@ export default function BackupPage() {
         </Card>
       </div>
 
-      {/* Scheduler */}
       <Card className="border-border/60 shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -621,12 +714,12 @@ export default function BackupPage() {
                 />
                 <p className="text-xs text-muted-foreground">
                   پس از ذخیره، هر بک اپ جدید به‌صورت خودکار به این آدرس ارسال
-                  می‌شود (نیاز به پیکربندی SMTP در سرور).
+                  می‌شود (نیاز به پیکربندی SMTP در سرور). آرشیوهای خیلی بزرگ فقط
+                  لینک دانلود دارند.
                 </p>
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">
-                {/* Daily */}
                 <div className="rounded-2xl border p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-medium">روزانه</p>
@@ -658,7 +751,6 @@ export default function BackupPage() {
                   />
                 </div>
 
-                {/* Weekly */}
                 <div className="rounded-2xl border p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-medium">هفتگی</p>
@@ -713,7 +805,6 @@ export default function BackupPage() {
                   />
                 </div>
 
-                {/* Monthly */}
                 <div className="rounded-2xl border p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="font-medium">ماهانه</p>
@@ -795,13 +886,12 @@ export default function BackupPage() {
         </CardContent>
       </Card>
 
-      {/* History */}
       <Card className="border-border/60 shadow-sm">
         <CardHeader className="gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <CardTitle className="text-base">تاریخچه بک اپ‌ها</CardTitle>
             <CardDescription>
-              دانلود، بازگردانی یا حذف نسخه‌های ذخیره‌شده
+              تاریخ، حجم، وضعیت و عملیات دانلود / بازگردانی / حذف
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -868,17 +958,19 @@ export default function BackupPage() {
           ) : !list.data?.items.length ? (
             <EmptyState
               title="هنوز بک اپ ثبت نشده"
-              description="با دکمه «ایجاد بک اپ اکنون» اولین نسخه را بسازید."
+              description="با دکمه «ایجاد بک اپ کامل اکنون» اولین نسخه را بسازید."
             />
           ) : (
             <>
               <HorizontalScroll className="rounded-xl">
-                <Table className="min-w-[40rem]">
+                <Table className="min-w-[52rem]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>تاریخ و زمان</TableHead>
                       <TableHead>نوع</TableHead>
+                      <TableHead>محدوده</TableHead>
                       <TableHead>حجم</TableHead>
+                      <TableHead>محتوا</TableHead>
                       <TableHead>وضعیت</TableHead>
                       <TableHead>ایمیل</TableHead>
                       <TableHead className="w-[1%]">عملیات</TableHead>
@@ -893,8 +985,33 @@ export default function BackupPage() {
                         <TableCell>
                           <TypeBadge type={row.type} />
                         </TableCell>
+                        <TableCell>
+                          <ScopeBadge scope={row.scope} />
+                        </TableCell>
                         <TableCell className="tabular-nums text-sm">
                           {row.sizeBytes ? formatSize(row.sizeBytes) : "—"}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {row.status === "PROCESSING" ? (
+                            <span>
+                              {row.progressPhase || "در حال پردازش"}
+                              {typeof row.progressPercent === "number"
+                                ? ` (${row.progressPercent}٪)`
+                                : ""}
+                            </span>
+                          ) : (
+                            <span>
+                              {row.tableCount || 0} جدول
+                              {row.mediaFileCount
+                                ? ` · ${row.mediaFileCount} رسانه`
+                                : ""}
+                            </span>
+                          )}
+                          {row.errorMessage && row.status === "FAILED" ? (
+                            <p className="mt-0.5 max-w-[14rem] truncate text-destructive">
+                              {row.errorMessage}
+                            </p>
+                          ) : null}
                         </TableCell>
                         <TableCell>
                           <StatusBadge status={row.status} />
@@ -938,6 +1055,7 @@ export default function BackupPage() {
                               onClick={() => {
                                 setUploadMeta(null);
                                 setRestoreTarget(row);
+                                setRestoreAck(false);
                                 setRestoreConfirmOpen(true);
                               }}
                             >
@@ -987,7 +1105,6 @@ export default function BackupPage() {
         </CardContent>
       </Card>
 
-      {/* Delete dialog */}
       <Dialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
@@ -1017,48 +1134,66 @@ export default function BackupPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Restore confirm */}
       <Dialog
         open={restoreConfirmOpen}
         onOpenChange={(o) => {
           if (!o) {
             setRestoreConfirmOpen(false);
-            setRestoreTarget(null);
+            setRestoreAck(false);
+            if (!uploadMeta) setRestoreTarget(null);
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="text-destructive">
-              تأیید بازگردانی داده
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              تأیید بازگردانی کامل سیستم
             </DialogTitle>
-            <DialogDescription className="space-y-2 text-start">
+            <DialogDescription className="space-y-3 text-start">
               <span className="block">
-                بازگردانی، داده‌های فعلی سیستم را با نسخه بک اپ جایگزین می‌کند.
+                بازگردانی، <strong className="text-foreground">داده‌ها و فایل‌های فعلی سیستم را
+                بازنویسی</strong> می‌کند و سیستم را به وضعیت بک اپ انتخاب‌شده برمی‌گرداند.
                 این عملیات برگشت‌پذیر نیست.
               </span>
-              <span className="block font-medium text-foreground">
-                فقط مدیر مجاز است این کار را انجام دهد. قبل از ادامه، از وضعیت
-                فعلی نسخه بک اپ بگیرید.
+              <span className="block rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-foreground">
+                منبع: {restoreSourceLabel}
+              </span>
+              <span className="block text-sm">
+                توصیه می‌شود قبل از ادامه یک بک اپ تازه از وضعیت فعلی بگیرید.
               </span>
             </DialogDescription>
           </DialogHeader>
+          <div className="flex items-start gap-3 rounded-xl border p-3">
+            <Checkbox
+              id="restore-ack"
+              checked={restoreAck}
+              onCheckedChange={(c) => setRestoreAck(c === true)}
+            />
+            <Label htmlFor="restore-ack" className="text-sm leading-relaxed cursor-pointer">
+              متوجه هستم که داده‌های موجود ممکن است بازنویسی شوند و مسئولیت این
+              بازگردانی با مدیر است.
+            </Label>
+          </div>
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={() => setRestoreConfirmOpen(false)}
+              onClick={() => {
+                setRestoreConfirmOpen(false);
+                setRestoreAck(false);
+              }}
             >
               انصراف
             </Button>
             <Button
               variant="destructive"
-              disabled={restoreMut.isPending}
+              disabled={restoreMut.isPending || !restoreAck}
               onClick={() => restoreMut.mutate()}
             >
               {restoreMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : null}
-              تأیید و بازگردانی
+              تأیید و بازگردانی کامل
             </Button>
           </DialogFooter>
         </DialogContent>

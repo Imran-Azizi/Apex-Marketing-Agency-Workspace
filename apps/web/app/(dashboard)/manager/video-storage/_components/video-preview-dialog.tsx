@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -12,7 +11,10 @@ import {
 } from "@/components/ui/dialog";
 import { VideoPlayer } from "@/components/media/video-player";
 import { apiGet } from "@/lib/api";
-import { videoStorageThumbnailUrl } from "@/lib/media";
+import {
+  videoStorageStreamUrl,
+  videoStorageThumbnailUrl,
+} from "@/lib/media";
 import { formatDateTime } from "@/lib/utils";
 import { formatFileSize } from "@/lib/upload";
 import {
@@ -38,52 +40,30 @@ export function VideoPreviewDialog({
   onOpenChange: (open: boolean) => void;
   showOwner?: boolean;
 }) {
-  const [src, setSrc] = useState("");
-  const [poster, setPoster] = useState<string | undefined>();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const streamSrc = item?.id ? videoStorageStreamUrl(item.id) : "";
+  const listPlayback = item?.playbackUrl?.trim() || "";
+  const fallbackSrc = listPlayback || streamSrc;
+  const poster =
+    (item?.thumbnailUrl && /^https?:\/\//i.test(item.thumbnailUrl)
+      ? item.thumbnailUrl
+      : null) ||
+    (item?.id && item.hasThumbnail
+      ? videoStorageThumbnailUrl(item.id)
+      : undefined);
 
-  useEffect(() => {
-    if (!open || !item?.id) {
-      setSrc("");
-      setPoster(undefined);
-      setLoading(false);
-      setError(null);
-      return;
+  const getSrc = useCallback(async () => {
+    if (!item?.id) return fallbackSrc;
+    // Prefer a fresh CDN URL when available; never block the idle poster on it.
+    try {
+      const data = await apiGet<PlaybackPayload>(
+        `/video-storage/${item.id}/playback`,
+      );
+      if (data?.playbackUrl) return data.playbackUrl;
+    } catch {
+      // Fall back to list/stream URL — still range-capable.
     }
-
-    let cancelled = false;
-    setSrc("");
-    setError(null);
-    setLoading(true);
-    setPoster(
-      item.hasThumbnail ? videoStorageThumbnailUrl(item.id) : undefined,
-    );
-
-    apiGet<PlaybackPayload>(`/video-storage/${item.id}/playback`)
-      .then((data) => {
-        if (cancelled) return;
-        if (!data?.playbackUrl) {
-          setError("آدرس پخش ویدیو دریافت نشد");
-          return;
-        }
-        setSrc(data.playbackUrl);
-        if (data.thumbnailUrl) setPoster(data.thumbnailUrl);
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        setError(
-          e instanceof Error ? e.message : "آماده‌سازی پخش ویدیو ناموفق بود",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, item?.id, item?.hasThumbnail]);
+    return fallbackSrc;
+  }, [item?.id, fallbackSrc]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -97,7 +77,7 @@ export function VideoPreviewDialog({
             {item?.description || "پیش‌نمایش ویدیوی ذخیره‌شده"}
           </DialogDescription>
         </DialogHeader>
-        {item ? (
+        {item && open ? (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">{STATUS_LABELS[item.status]}</Badge>
@@ -110,30 +90,14 @@ export function VideoPreviewDialog({
               ) : null}
             </div>
 
-            {loading && !src ? (
-              <div className="flex aspect-video items-center justify-center rounded-xl border bg-muted/30">
-                <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-6 w-6 animate-spin" />
-                  در حال آماده‌سازی پخش…
-                </div>
-              </div>
-            ) : null}
-
-            {error && !src ? (
-              <div className="flex aspect-video items-center justify-center rounded-xl border bg-muted/30 px-4 text-center text-sm text-destructive">
-                {error}
-              </div>
-            ) : null}
-
-            {src ? (
-              <VideoPlayer
-                key={`${item.id}-${src}`}
-                src={src}
-                poster={poster}
-                title={item.title}
-                autoPlay
-              />
-            ) : null}
+            <VideoPlayer
+              key={item.id}
+              src={fallbackSrc}
+              getSrc={getSrc}
+              poster={poster || undefined}
+              title={item.title}
+              type={item.mimeType || "video/mp4"}
+            />
 
             <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
               {showOwner ? (

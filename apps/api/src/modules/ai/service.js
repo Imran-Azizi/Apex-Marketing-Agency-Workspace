@@ -25,6 +25,11 @@ import {
 import {
   canManagerDeleteVersion,
   canManagerSendToCustomer,
+  canToggleSectionConfirm,
+  CONTENT_SECTIONS,
+  getManagerSectionConfirm,
+  versionHasSection,
+  withManagerSectionConfirm,
 } from '../../services/contentVersionRules.js';
 import { narrationService } from '../narration/service.js';
 
@@ -794,7 +799,7 @@ export const aiService = {
   },
 
   async listVersions(projectId) {
-    return prisma.contentVersion.findMany({
+    const rows = await prisma.contentVersion.findMany({
       where: { projectId },
       orderBy: { versionNumber: 'desc' },
       include: {
@@ -805,6 +810,7 @@ export const aiService = {
         approvals: { orderBy: { createdAt: 'desc' } },
       },
     });
+    return rows.map(withManagerSectionConfirm);
   },
 
   async getVersion(projectId, versionId) {
@@ -813,7 +819,7 @@ export const aiService = {
       include: { approvals: { orderBy: { createdAt: 'desc' } } },
     });
     if (!version) throw new AppError('نسخه یافت نشد', 404, 'NOT_FOUND');
-    return version;
+    return withManagerSectionConfirm(version);
   },
 
   async compareVersions(projectId, leftId, rightId) {
@@ -1264,6 +1270,7 @@ export const aiService = {
       base.extras && typeof base.extras === 'object' && !Array.isArray(base.extras)
         ? base.extras
         : {};
+    const { managerSectionConfirm: _priorConfirm, ...restExtras } = baseExtras;
 
     const version = await prisma.$transaction(async (tx) => {
       const created = await tx.contentVersion.create({
@@ -1275,7 +1282,7 @@ export const aiService = {
           narration: nextNarration,
           storyboard: nextStoryboard,
           extras: {
-            ...baseExtras,
+            ...restExtras,
             source: 'manual_edit',
             editedSection: section,
             baseVersionId: base.id,
@@ -1499,6 +1506,226 @@ export const aiService = {
       entityType: 'ContentVersion',
       entityId: versionId,
       message: `ارسال نسخه ${version.versionNumber} برای تأیید مشتری`,
+      meta: { versionNumber: version.versionNumber },
+    });
+
+    return this.getVersion(projectId, versionId);
+  },
+
+  /**
+   * Toggle manager confirmation for one content section (سناریو / نریشن / استوری‌بورد).
+   */
+  async confirmSection(projectId, versionId, { section, confirmed } = {}, auth, req) {
+    if (!CONTENT_SECTIONS.includes(section)) {
+      throw new AppError('بخش نامعتبر است', 400, 'VALIDATION');
+    }
+    if (typeof confirmed !== 'boolean') {
+      throw new AppError('وضعیت تأیید الزامی است', 400, 'VALIDATION');
+    }
+
+    const version = await prisma.contentVersion.findFirst({
+      where: { id: versionId, projectId },
+    });
+    if (!version) throw new AppError('نسخه یافت نشد', 404, 'NOT_FOUND');
+    if (!canToggleSectionConfirm(version)) {
+      throw new AppError(
+        'این نسخه قفل یا تأیید شده است و قابل تغییر تأیید بخش نیست',
+        400,
+        'VERSION_LOCKED',
+      );
+    }
+    if (!versionHasSection(version, section)) {
+      throw new AppError('این بخش در نسخه موجود نیست', 400, 'SECTION_EMPTY');
+    }
+
+    const extras =
+      version.extras && typeof version.extras === 'object' && !Array.isArray(version.extras)
+        ? { ...version.extras }
+        : {};
+    const prevConfirm =
+      extras.managerSectionConfirm &&
+      typeof extras.managerSectionConfirm === 'object' &&
+      !Array.isArray(extras.managerSectionConfirm)
+        ? { ...extras.managerSectionConfirm }
+        : {};
+    const prevSection =
+      prevConfirm[section] &&
+      typeof prevConfirm[section] === 'object' &&
+      !Array.isArray(prevConfirm[section])
+        ? { ...prevConfirm[section] }
+        : {};
+
+    const at = new Date().toISOString();
+    prevConfirm[section] = confirmed
+      ? { confirmed: true, at, byUserId: auth.userId || null }
+      : { confirmed: false, at, byUserId: auth.userId || null, ...(prevSection.at ? { previouslyAt: prevSection.at } : {}) };
+
+    extras.managerSectionConfirm = prevConfirm;
+
+    const updated = await prisma.contentVersion.update({
+      where: { id: versionId },
+      data: { extras },
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: confirmed ? 'CONTENT_SECTION_CONFIRMED' : 'CONTENT_SECTION_UNCONFIRMED',
+      entityType: 'ContentVersion',
+      entityId: versionId,
+      after: { section, confirmed, versionNumber: version.versionNumber },
+      req,
+    });
+
+    return withManagerSectionConfirm(updated);
+  },
+
+  /**
+   * Manager internal approve: lock version and unlock narrator/editor assign flows
+   * without waiting for customer approval or sending portal notifications.
+   */
+  async releaseForProduction(projectId, versionId, auth, req) {
+    const version = await prisma.contentVersion.findFirst({
+      where: { id: versionId, projectId },
+    });
+    if (!version) throw new AppError('نسخه یافت نشد', 404, 'NOT_FOUND');
+
+    // Idempotent: already released / approved+locked.
+    if (version.status === 'APPROVED' && version.isLocked) {
+      const confirm = getManagerSectionConfirm(version);
+      if (confirm.releasedAt) {
+        return this.getVersion(projectId, versionId);
+      }
+      // Approved via another path (customer / manual) — treat as done.
+      return this.getVersion(projectId, versionId);
+    }
+
+    if (!canToggleSectionConfirm(version)) {
+      throw new AppError(
+        'این نسخه برای تأیید داخلی در دسترس نیست',
+        400,
+        'VERSION_LOCKED',
+      );
+    }
+
+    const present = CONTENT_SECTIONS.filter((section) =>
+      versionHasSection(version, section),
+    );
+    if (!present.length) {
+      throw new AppError('محتوای قابل تأیید وجود ندارد', 400, 'EMPTY_CONTENT');
+    }
+
+    const releasedAt = new Date();
+    const extras =
+      version.extras && typeof version.extras === 'object' && !Array.isArray(version.extras)
+        ? { ...version.extras }
+        : {};
+    const prevConfirm =
+      extras.managerSectionConfirm &&
+      typeof extras.managerSectionConfirm === 'object' &&
+      !Array.isArray(extras.managerSectionConfirm)
+        ? { ...extras.managerSectionConfirm }
+        : {};
+
+    // One-click release confirms every present section, then unlocks production.
+    const at = releasedAt.toISOString();
+    for (const section of present) {
+      prevConfirm[section] = {
+        confirmed: true,
+        at,
+        byUserId: auth.userId || null,
+      };
+    }
+    extras.managerSectionConfirm = {
+      ...prevConfirm,
+      releasedAt: at,
+      releasedById: auth.userId || null,
+    };
+
+    await prisma.$transaction(async (tx) => {
+      // Supersede other customer-pending versions — this becomes production source of truth.
+      await tx.contentVersion.updateMany({
+        where: {
+          projectId,
+          kind: version.kind,
+          id: { not: versionId },
+          status: 'PENDING_CUSTOMER_APPROVAL',
+          publishedToClient: true,
+        },
+        data: { publishedToClient: false, status: 'SUPERSEDED' },
+      });
+
+      await tx.contentVersion.update({
+        where: { id: versionId },
+        data: {
+          status: 'APPROVED',
+          isLocked: true,
+          publishedToClient: true,
+          publishedAt: releasedAt,
+          approvedById: auth.userId,
+          rejectionReason: null,
+          rejectedById: null,
+          extras,
+        },
+      });
+
+      await tx.approval.create({
+        data: {
+          projectId,
+          contentVersionId: versionId,
+          type: 'MANAGER_CONTENT',
+          decision: 'APPROVED',
+          comment: 'تأیید داخلی مدیر — آماده‌سازی نریشن/ادیت',
+          actorType: 'MANAGER',
+          actorId: auth.userId,
+        },
+      });
+
+      await tx.project.update({
+        where: { id: projectId },
+        data: {
+          status: 'NARRATION_RECORDING',
+          customerFacingStatus: 'IN_PRODUCTION',
+        },
+      });
+
+      await narrationService.ensureTaskForProject(projectId, {
+        tx,
+        contentVersionId: versionId,
+        assignedById: auth.userId,
+      });
+
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId,
+          type: 'CONTENT_MANAGER_RELEASED',
+          title: 'تأیید داخلی محتوا توسط مدیر',
+          body: `نسخه ${version.versionNumber} تأیید شد و برای نریشن/ادیت آماده است`,
+          actorId: auth.userId,
+        },
+      });
+
+      await rebuildProjectContext(projectId, tx);
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'CONTENT_MANAGER_RELEASED',
+      entityType: 'ContentVersion',
+      entityId: versionId,
+      after: {
+        versionNumber: version.versionNumber,
+        status: 'APPROVED',
+        releasedForProduction: true,
+      },
+      req,
+    });
+
+    await logActivity(projectId, {
+      userId: auth.userId,
+      action: 'CONTENT_MANAGER_RELEASED',
+      entityType: 'ContentVersion',
+      entityId: versionId,
+      message: `تأیید داخلی نسخه ${version.versionNumber} — آماده نریشن و ادیت`,
       meta: { versionNumber: version.versionNumber },
     });
 

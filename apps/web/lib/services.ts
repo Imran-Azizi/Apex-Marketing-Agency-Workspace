@@ -1,5 +1,8 @@
 import { resolveAssetSrc, storagePublicUrl } from "@/lib/api";
 
+/** Max services shown on the public homepage before “مشاهده همه خدمات”. */
+export const PUBLIC_SERVICES_PREVIEW_LIMIT = 6;
+
 export type PublicService = {
   id: string;
   name: string;
