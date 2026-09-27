@@ -13,7 +13,7 @@ export function HeroSlidesHeader({
   return (
     <PageHeader
       title="مدیریت اسلایدهای"
-      subtitle="تصاویر و محتوای اسلایدشو وب‌سایت عمومی را مدیریت کنید"
+      subtitle="برای هر اسلاید تصویر دسکتاپ (۱۶:۹) و تصویر موبایل (۳:۴ / ۱۰۸۰×۱۴۴۰) بارگذاری کنید"
       className="mb-0 sm:mb-0"
       actions={
         <div className="flex flex-wrap items-center gap-2">

@@ -6,7 +6,9 @@ import {
   directProjectCosts,
   emptyMonthlyActuals,
   employeeNetPayable,
+  isCurrentPnlMonth,
   netCompanyProfit,
+  pnlMonthBounds,
   priorCalendarMonth,
   projectProfit,
   remainingBalance,
@@ -14,6 +16,12 @@ import {
   targetMetForMonth,
   parseDateBound,
 } from '../../src/modules/finance/metrics.js';
+import {
+  afghanMonthBounds,
+  afghanToGregorian,
+  gregorianToAfghan,
+  isAfghanYear,
+} from '../../src/modules/finance/afghan-calendar.js';
 import {
   deriveSettlementStatus,
   paymentBelongsToProject,
@@ -98,6 +106,44 @@ test('empty monthly actuals are all zero', () => {
 test('prior calendar month rolls year boundary', () => {
   assert.deepEqual(priorCalendarMonth(2026, 1), { year: 2025, month: 12 });
   assert.deepEqual(priorCalendarMonth(2026, 8), { year: 2026, month: 7 });
+  assert.deepEqual(priorCalendarMonth(1405, 1), { year: 1404, month: 12 });
+});
+
+test('Afghan / Gregorian conversion round-trips for PnL months', () => {
+  assert.equal(isAfghanYear(1405), true);
+  assert.equal(isAfghanYear(2026), false);
+  const g = afghanToGregorian(1405, 7, 1);
+  assert.ok(g);
+  const back = gregorianToAfghan(g.gy, g.gm, g.gd);
+  assert.deepEqual(back, { jy: 1405, jm: 7, jd: 1 });
+});
+
+test('Afghan month bounds are inclusive local civil days', () => {
+  const { from, to } = afghanMonthBounds(1405, 7);
+  assert.equal(from.getFullYear(), 2026);
+  assert.equal(from.getMonth() + 1, 9);
+  assert.equal(from.getDate(), 23);
+  assert.equal(from.getHours(), 0);
+  assert.equal(to.getFullYear(), 2026);
+  assert.equal(to.getMonth() + 1, 10);
+  assert.equal(to.getDate(), 22);
+  assert.equal(to.getHours(), 23);
+  assert.equal(to.getMinutes(), 59);
+
+  const viaPnl = pnlMonthBounds(1405, 7);
+  assert.equal(viaPnl.from.getTime(), from.getTime());
+  assert.equal(viaPnl.to.getTime(), to.getTime());
+
+  const gregorianSept = pnlMonthBounds(2026, 9);
+  assert.equal(gregorianSept.from.getDate(), 1);
+  assert.equal(gregorianSept.to.getDate(), 30);
+});
+
+test('isCurrentPnlMonth uses Afghan month when year is Afghan', () => {
+  const sample = new Date(2026, 8, 27, 12, 0, 0, 0); // 27 Sep 2026 = میزان 5, 1405
+  assert.equal(isCurrentPnlMonth(1405, 7, sample), true);
+  assert.equal(isCurrentPnlMonth(1405, 6, sample), false);
+  assert.equal(isCurrentPnlMonth(2026, 9, sample), true);
 });
 
 test('P&L performance inactive before target set', () => {

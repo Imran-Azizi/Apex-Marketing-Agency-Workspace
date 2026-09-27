@@ -12,27 +12,11 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatMoney, type PnlMonth } from "./types";
-
-const MONTH_LABELS = [
-  "ژانویه",
-  "فوریه",
-  "مارس",
-  "آوریل",
-  "مه",
-  "ژوئن",
-  "جولای",
-  "آگوست",
-  "سپتامبر",
-  "اکتبر",
-  "نوامبر",
-  "دسامبر",
-];
 
 interface PnlTargetDialogProps {
   open: boolean;
@@ -78,8 +62,6 @@ export function PnlTargetDialog({
     },
   });
 
-  const monthLabel = MONTH_LABELS[month - 1] || String(month);
-
   function handleSave() {
     const np = Number(netProfitTarget.trim());
     const ad = Number(advertisingBudget.trim());
@@ -110,14 +92,6 @@ export function PnlTargetDialog({
               </div>
               <div className="min-w-0 space-y-1">
                 <DialogTitle className="text-base font-bold">تنظیم هدف ماه</DialogTitle>
-                <DialogDescription className="text-xs leading-relaxed">
-                  هدف سود خالص و بودجه تبلیغات برای{" "}
-                  <span className="font-medium text-foreground">
-                    {monthLabel} {year.toLocaleString("fa-AF", { numberingSystem: "latn" })}
-                  </span>{" "}
-                  را تعیین کنید. پس از ذخیره، محاسبه سود و زیان این ماه فعال می‌شود و
-                  فقط تراکنش‌های همین ماه در شاخص‌ها لحاظ می‌گردند.
-                </DialogDescription>
               </div>
             </div>
           </DialogHeader>
@@ -138,9 +112,6 @@ export function PnlTargetDialog({
               onChange={(e) => setNetProfitTarget(e.target.value)}
               className="tabular-nums"
             />
-            <p className="text-[11px] text-muted-foreground">
-              سود خالص = سود پروژه − مصارف شرکت
-            </p>
           </div>
 
           <div className="space-y-2">
@@ -158,9 +129,6 @@ export function PnlTargetDialog({
               onChange={(e) => setAdvertisingBudget(e.target.value)}
               className="tabular-nums"
             />
-            <p className="text-[11px] text-muted-foreground">
-              بودجه تبلیغات ماهانه برای برنامه‌ریزی مالی ثبت می‌شود.
-            </p>
           </div>
 
           {target ? (

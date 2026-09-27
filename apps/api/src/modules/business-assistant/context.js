@@ -4,6 +4,7 @@
 
 import { prisma } from '../../db/prisma.js';
 import { computeFinanceKpis } from '../finance/kpis.js';
+import { localTodayAfghan } from '../finance/afghan-calendar.js';
 import { stageLabel } from '../crm/pipeline.js';
 import { projectService } from '../projects/service.js';
 import { getSettings } from './settings.js';
@@ -200,8 +201,16 @@ export async function loadBusinessSnapshot(auth = null, options = {}) {
     }),
   ]);
 
+  const afghanToday = localTodayAfghan(now);
   const pnlTarget = await prisma.financePnlTarget.findFirst({
-    where: { year: now.getFullYear(), month: now.getMonth() + 1 },
+    where: afghanToday
+      ? {
+          OR: [
+            { year: afghanToday.jy, month: afghanToday.jm },
+            { year: now.getFullYear(), month: now.getMonth() + 1 },
+          ],
+        }
+      : { year: now.getFullYear(), month: now.getMonth() + 1 },
   });
 
   const pipeline = pipelineGroups.map((g) => ({

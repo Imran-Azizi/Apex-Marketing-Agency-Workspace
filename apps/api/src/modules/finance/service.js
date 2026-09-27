@@ -10,8 +10,11 @@ import {
   derivePnlPerformance,
   emptyMonthlyActuals,
   employeeNetPayable,
-  monthBounds,
+  gregorianToAfghan,
+  isAfghanYear,
+  isCurrentPnlMonth,
   parseDateBound,
+  pnlMonthBounds,
   priorCalendarMonth,
   roundMoney,
   targetMetForMonth,
@@ -119,14 +122,62 @@ export const compensationSchema = z.object({
 });
 
 export const pnlTargetSchema = z.object({
-  year: z.coerce.number().int().min(2000).max(2100),
+  // Afghan Solar Hijri years (1300–1600) or legacy Gregorian years (2000–2100).
+  year: z.coerce.number().int().min(1300).max(2100),
   month: z.coerce.number().int().min(1).max(12),
   netProfitTarget: z.coerce.number(),
   advertisingBudget: z.coerce.number().min(0),
 });
 
+/**
+ * Map a stored Gregorian PnL target onto exactly one Afghan month:
+ * the Afghan month of that Gregorian month's 1st day (same rule as listPnlMonths).
+ */
+function afghanMonthForLegacyTarget(year, month) {
+  return gregorianToAfghan(Number(year), Number(month), 1);
+}
+
+async function findPnlTarget(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  const direct = await prisma.financePnlTarget.findUnique({
+    where: { year_month: { year: y, month: m } },
+  });
+  if (direct) return direct;
+  if (!isAfghanYear(y)) return null;
+
+  // Do NOT match by date-range overlap — that lets one Gregorian target
+  // activate two adjacent Afghan months. Match the same day-1 mapping used
+  // when listing months for the dropdown.
+  const legacyRows = await prisma.financePnlTarget.findMany({
+    where: { year: { gte: 1700 } },
+  });
+  return (
+    legacyRows.find((row) => {
+      const afghan = afghanMonthForLegacyTarget(row.year, row.month);
+      return afghan && afghan.jy === y && afghan.jm === m;
+    }) || null
+  );
+}
+
+/** KPI window for a target: Afghan months use Afghan bounds; legacy rows keep Gregorian. */
+function boundsForPnlTarget(requestYear, requestMonth, target) {
+  if (target && !isAfghanYear(target.year)) {
+    return {
+      year: target.year,
+      month: target.month,
+      ...pnlMonthBounds(target.year, target.month),
+    };
+  }
+  return {
+    year: requestYear,
+    month: requestMonth,
+    ...pnlMonthBounds(requestYear, requestMonth),
+  };
+}
+
 async function computeMonthlyPnlActuals(year, month) {
-  const { from, to } = monthBounds(year, month);
+  const { from, to } = pnlMonthBounds(year, month);
   const kpis = await computeFinanceKpis({ from, to });
   return {
     received: kpis.received,
@@ -140,31 +191,35 @@ async function computeMonthlyPnlActuals(year, month) {
 
 async function resolvePriorMonthNetProfit(year, month) {
   const prior = priorCalendarMonth(year, month);
-  const priorTarget = await prisma.financePnlTarget.findUnique({
-    where: { year_month: { year: prior.year, month: prior.month } },
-  });
+  const priorTarget = await findPnlTarget(prior.year, prior.month);
   if (!priorTarget) return null;
-  const priorActuals = await computeMonthlyPnlActuals(prior.year, prior.month);
+  const bounds = boundsForPnlTarget(prior.year, prior.month, priorTarget);
+  const priorActuals = await computeMonthlyPnlActuals(bounds.year, bounds.month);
   return priorActuals.netCompanyProfit;
 }
 
-function isCurrentCalendarMonth(year, month) {
-  const now = new Date();
-  return Number(year) === now.getFullYear() && Number(month) === now.getMonth() + 1;
-}
-
 async function buildPnlMonthPayload(year, month) {
-  const y = Number(year) || new Date().getFullYear();
-  const m = Number(month) || new Date().getMonth() + 1;
-  const { from, to } = monthBounds(y, m);
+  const now = new Date();
+  const fallbackAfghan = gregorianToAfghan(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    now.getDate(),
+  );
+  const y =
+    Number(year) ||
+    fallbackAfghan?.jy ||
+    now.getFullYear();
+  const m =
+    Number(month) ||
+    fallbackAfghan?.jm ||
+    now.getMonth() + 1;
 
-  const target = await prisma.financePnlTarget.findUnique({
-    where: { year_month: { year: y, month: m } },
-  });
+  const target = await findPnlTarget(y, m);
+  const bounds = boundsForPnlTarget(y, m, target);
 
   const trackingActive = Boolean(target);
   const actuals = trackingActive
-    ? await computeMonthlyPnlActuals(y, m)
+    ? await computeMonthlyPnlActuals(bounds.year, bounds.month)
     : emptyMonthlyActuals();
 
   const netProfitTarget = target ? dec(target.netProfitTarget) : 0;
@@ -174,9 +229,9 @@ async function buildPnlMonthPayload(year, month) {
   return {
     year: y,
     month: m,
-    range: { from: from.toISOString(), to: to.toISOString() },
+    range: { from: bounds.from.toISOString(), to: bounds.to.toISOString() },
     trackingActive,
-    isCurrentMonth: isCurrentCalendarMonth(y, m),
+    isCurrentMonth: isCurrentPnlMonth(y, m, now),
     performance: derivePnlPerformance(actuals.netCompanyProfit, trackingActive),
     targetMet: targetMetForMonth(
       actuals.netCompanyProfit,
@@ -873,22 +928,54 @@ export const financeService = {
   },
 
   async upsertPnlTarget(body, auth) {
-    await prisma.financePnlTarget.upsert({
-      where: { year_month: { year: body.year, month: body.month } },
-      create: {
-        year: body.year,
-        month: body.month,
-        netProfitTarget: body.netProfitTarget,
-        advertisingBudget: body.advertisingBudget,
-        createdById: auth?.userId || null,
-      },
-      update: {
-        netProfitTarget: body.netProfitTarget,
-        advertisingBudget: body.advertisingBudget,
-      },
-    });
+    const year = Number(body.year);
+    const month = Number(body.month);
+    const existing = await findPnlTarget(year, month);
 
-    return buildPnlMonthPayload(body.year, body.month);
+    if (existing && (existing.year !== year || existing.month !== month)) {
+      const conflict = await prisma.financePnlTarget.findUnique({
+        where: { year_month: { year, month } },
+      });
+      if (conflict && conflict.id !== existing.id) {
+        await prisma.$transaction([
+          prisma.financePnlTarget.update({
+            where: { id: conflict.id },
+            data: {
+              netProfitTarget: body.netProfitTarget,
+              advertisingBudget: body.advertisingBudget,
+            },
+          }),
+          prisma.financePnlTarget.delete({ where: { id: existing.id } }),
+        ]);
+      } else {
+        await prisma.financePnlTarget.update({
+          where: { id: existing.id },
+          data: {
+            year,
+            month,
+            netProfitTarget: body.netProfitTarget,
+            advertisingBudget: body.advertisingBudget,
+          },
+        });
+      }
+    } else {
+      await prisma.financePnlTarget.upsert({
+        where: { year_month: { year, month } },
+        create: {
+          year,
+          month,
+          netProfitTarget: body.netProfitTarget,
+          advertisingBudget: body.advertisingBudget,
+          createdById: auth?.userId || null,
+        },
+        update: {
+          netProfitTarget: body.netProfitTarget,
+          advertisingBudget: body.advertisingBudget,
+        },
+      });
+    }
+
+    return buildPnlMonthPayload(year, month);
   },
 
   async listPnlMonths() {
@@ -903,15 +990,38 @@ export const financeService = {
         updatedAt: true,
       },
     });
-    return {
-      items: rows.map((row) => ({
-        year: row.year,
-        month: row.month,
+
+    const items = rows.map((row) => {
+      if (isAfghanYear(row.year)) {
+        return {
+          year: row.year,
+          month: row.month,
+          netProfitTarget: dec(row.netProfitTarget),
+          advertisingBudget: dec(row.advertisingBudget),
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        };
+      }
+      // Legacy Gregorian targets → Afghan month of day 1 for UI continuity.
+      const afghan = gregorianToAfghan(row.year, row.month, 1);
+      return {
+        year: afghan?.jy ?? row.year,
+        month: afghan?.jm ?? row.month,
         netProfitTarget: dec(row.netProfitTarget),
         advertisingBudget: dec(row.advertisingBudget),
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
-      })),
+      };
+    });
+
+    const seen = new Set();
+    return {
+      items: items.filter((item) => {
+        const key = `${item.year}-${item.month}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }),
     };
   },
 };

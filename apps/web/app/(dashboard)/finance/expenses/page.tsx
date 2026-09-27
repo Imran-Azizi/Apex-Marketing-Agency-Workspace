@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import { invalidateFinanceQueries } from "@/lib/finance-queries";
-import { formatDate } from "@/lib/utils";
+import { formatStoredDateAsAfghan } from "@/lib/afghan-calendar";
+import { AfghanDateField } from "@/components/shared/afghan-date-field";
 import { paymentMethodLabel, CUSTOMER_PAYMENT_METHODS } from "@/lib/payment-methods";
 import { useHasPermission } from "@/lib/permissions";
 import { PageHeader } from "@/components/shared/page-header";
@@ -38,9 +39,7 @@ import {
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  endOfMonth,
   formatMoney,
-  startOfMonth,
   toInputDate,
   type FinanceExpense,
 } from "../_components/types";
@@ -63,12 +62,20 @@ function expenseAccountName(row: FinanceExpense) {
   return row.paidBy?.fullName || row.accountLabel || "—";
 }
 
+function expensesListUrl(from: string, to: string) {
+  const params = new URLSearchParams();
+  if (from) params.set("from", from);
+  if (to) params.set("to", to);
+  const query = params.toString();
+  return query ? `/finance/expenses?${query}` : "/finance/expenses";
+}
+
 export default function FinanceExpensesPage() {
   const queryClient = useQueryClient();
   const canCreate = useHasPermission("finance.create");
   const canDelete = useHasPermission("finance.delete");
-  const [from, setFrom] = useState(() => toInputDate(startOfMonth()));
-  const [to, setTo] = useState(() => toInputDate(endOfMonth()));
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [deleting, setDeleting] = useState<FinanceExpense | null>(null);
@@ -76,10 +83,7 @@ export default function FinanceExpensesPage() {
 
   const query = useQuery({
     queryKey: ["finance-expenses", from, to],
-    queryFn: () =>
-      apiGet<ListResponse>(
-        `/finance/expenses?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
-      ),
+    queryFn: () => apiGet<ListResponse>(expensesListUrl(from, to)),
   });
 
   const createMutation = useMutation({
@@ -113,12 +117,28 @@ export default function FinanceExpensesPage() {
         actions={
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">از</Label>
-              <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-[140px]" />
+              <Label htmlFor="expense-range-from" className="text-xs">
+                از
+              </Label>
+              <AfghanDateField
+                id="expense-range-from"
+                aria-label="از تاریخ"
+                value={from}
+                onChange={setFrom}
+                className="w-[13.5rem] max-w-full"
+              />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">تا</Label>
-              <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-[140px]" />
+              <Label htmlFor="expense-range-to" className="text-xs">
+                تا
+              </Label>
+              <AfghanDateField
+                id="expense-range-to"
+                aria-label="تا تاریخ"
+                value={to}
+                onChange={setTo}
+                className="w-[13.5rem] max-w-full"
+              />
             </div>
             {canCreate && (
               <Button onClick={() => setOpen(true)}>
@@ -150,7 +170,9 @@ export default function FinanceExpensesPage() {
             <TableBody>
               {items.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell>{formatDate(row.expenseDate)}</TableCell>
+                  <TableCell className="whitespace-nowrap tabular-nums">
+                    {formatStoredDateAsAfghan(row.expenseDate)}
+                  </TableCell>
                   <TableCell>
                     <div>{row.description || "—"}</div>
                     <div className="text-[11px] text-muted-foreground">
@@ -214,14 +236,16 @@ export default function FinanceExpensesPage() {
                 onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label htmlFor="expense-date">تاریخ</Label>
-                <Input
+                <AfghanDateField
                   id="expense-date"
-                  type="date"
+                  aria-label="تاریخ مصرف"
                   value={form.expenseDate}
-                  onChange={(e) => setForm((f) => ({ ...f, expenseDate: e.target.value }))}
+                  onChange={(expenseDate) =>
+                    setForm((current) => ({ ...current, expenseDate }))
+                  }
                 />
               </div>
               <div className="space-y-1">

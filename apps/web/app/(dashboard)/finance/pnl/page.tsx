@@ -9,6 +9,11 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
+import {
+  AFGHAN_MONTHS,
+  formatAfghanMonthYear,
+  localTodayAfghan,
+} from "@/lib/afghan-calendar";
 import { cn } from "@/lib/utils";
 import { useHasPermission } from "@/lib/permissions";
 import { PageHeader } from "@/components/shared/page-header";
@@ -27,21 +32,6 @@ import {
 } from "@/components/ui/select";
 import { PnlTargetDialog } from "../_components/pnl-target-dialog";
 import { formatMoney, type PnlMonth, type PnlMonthSummary } from "../_components/types";
-
-const MONTH_LABELS = [
-  "ژانویه",
-  "فوریه",
-  "مارس",
-  "آوریل",
-  "مه",
-  "ژوئن",
-  "جولای",
-  "آگوست",
-  "سپتامبر",
-  "اکتبر",
-  "نوامبر",
-  "دسامبر",
-];
 
 const PERFORMANCE_META = {
   INACTIVE: {
@@ -74,11 +64,15 @@ function monthKey(year: number, month: number) {
   return `${year}-${month}`;
 }
 
+function initialAfghanMonth() {
+  return localTodayAfghan() ?? { jy: 1405, jm: 1, jd: 1 };
+}
+
 export default function FinancePnlPage() {
   const canEdit = useHasPermission("finance.edit");
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
+  const initial = initialAfghanMonth();
+  const [year, setYear] = useState(initial.jy);
+  const [month, setMonth] = useState(initial.jm);
   const [targetOpen, setTargetOpen] = useState(false);
 
   const query = useQuery({
@@ -94,6 +88,7 @@ export default function FinancePnlPage() {
   const data = query.data;
   const performance = data?.performance ?? "INACTIVE";
   const perfMeta = PERFORMANCE_META[performance];
+  const selectedLabel = formatAfghanMonthYear(year, month);
 
   const historyOptions = useMemo(() => {
     const items = historyQuery.data?.items ?? [];
@@ -108,7 +103,7 @@ export default function FinancePnlPage() {
       options.push({
         year: item.year,
         month: item.month,
-        label: `${MONTH_LABELS[item.month - 1] || item.month} ${item.year}`,
+        label: formatAfghanMonthYear(item.year, item.month),
       });
     }
 
@@ -116,12 +111,12 @@ export default function FinancePnlPage() {
       options.unshift({
         year,
         month,
-        label: `${MONTH_LABELS[month - 1] || month} ${year} (جاری)`,
+        label: `${selectedLabel} (جاری)`,
       });
     }
 
     return options;
-  }, [historyQuery.data?.items, year, month]);
+  }, [historyQuery.data?.items, year, month, selectedLabel]);
 
   function selectHistoricalMonth(value: string) {
     const [y, m] = value.split("-").map(Number);
@@ -138,24 +133,46 @@ export default function FinancePnlPage() {
         actions={
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
-              <Label className="text-xs">سال</Label>
+              <Label htmlFor="pnl-year" className="text-xs">
+                سال
+              </Label>
               <Input
+                id="pnl-year"
                 type="number"
-                className="w-[100px]"
+                inputMode="numeric"
+                min={1300}
+                max={1600}
+                className="w-[100px] tabular-nums"
                 value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  if (Number.isFinite(next)) setYear(next);
+                }}
+                onBlur={() => {
+                  if (year < 1300) setYear(1300);
+                  else if (year > 1600) setYear(1600);
+                }}
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">ماه</Label>
-              <Input
-                type="number"
-                min={1}
-                max={12}
-                className="w-[80px]"
-                value={month}
-                onChange={(e) => setMonth(Number(e.target.value))}
-              />
+              <Label htmlFor="pnl-month" className="text-xs">
+                ماه
+              </Label>
+              <Select
+                value={String(month)}
+                onValueChange={(value) => setMonth(Number(value))}
+              >
+                <SelectTrigger id="pnl-month" className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AFGHAN_MONTHS.map((name, index) => (
+                    <SelectItem key={name} value={String(index + 1)}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {historyOptions.length > 0 ? (
               <div className="space-y-1">
@@ -164,7 +181,7 @@ export default function FinancePnlPage() {
                   value={monthKey(year, month)}
                   onValueChange={selectHistoricalMonth}
                 >
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-[200px]">
                     <SelectValue placeholder="انتخاب سریع" />
                   </SelectTrigger>
                   <SelectContent>
@@ -236,7 +253,7 @@ export default function FinancePnlPage() {
                   ) : (
                     <p className="mt-1 text-[11px] text-muted-foreground">
                       محاسبه فقط بر اساس تراکنش‌های{" "}
-                      {MONTH_LABELS[data.month - 1]} {data.year}
+                      {formatAfghanMonthYear(data.year, data.month)}
                     </p>
                   )}
                 </div>

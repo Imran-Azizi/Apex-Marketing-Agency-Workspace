@@ -13,6 +13,7 @@ import {
   compensationSchema,
   pnlTargetSchema,
 } from './service.js';
+import { localTodayAfghan } from './afghan-calendar.js';
 
 const router = Router();
 router.use(requireAuth, requireInternal);
@@ -175,12 +176,12 @@ router.post(
 
 router.get('/pnl', requirePermission('finance.view'), async (req, res, next) => {
   try {
-    const now = new Date();
+    const today = localTodayAfghan();
     ok(
       res,
       await financeService.getPnlMonth({
-        year: req.query.year || now.getFullYear(),
-        month: req.query.month || now.getMonth() + 1,
+        year: req.query.year || today?.jy,
+        month: req.query.month || today?.jm,
       }),
     );
   } catch (e) {

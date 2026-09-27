@@ -217,12 +217,25 @@ export default function HeroSlidesManagerPage() {
               setEditing(item);
               setFormOpen(true);
             }}
-            onTogglePublish={(item) =>
+            onTogglePublish={(item) => {
+              const nextPublished = !item.isPublished;
+              if (
+                nextPublished &&
+                !item.mobileImageKey &&
+                !item.mobileImageUrl
+              ) {
+                toast.error(
+                  "برای فعال‌سازی، ابتدا تصویر موبایل (۱۰۸۰×۱۴۴۰) را در ویرایش اسلاید بارگذاری کنید",
+                );
+                setEditing(item);
+                setFormOpen(true);
+                return;
+              }
               publishMut.mutate({
                 id: item.id,
-                isPublished: !item.isPublished,
-              })
-            }
+                isPublished: nextPublished,
+              });
+            }}
             onDelete={setDeleteTarget}
             onMove={move}
             onReorder={reorder}

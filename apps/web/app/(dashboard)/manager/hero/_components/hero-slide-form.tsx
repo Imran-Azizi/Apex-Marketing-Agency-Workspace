@@ -22,7 +22,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -117,6 +116,11 @@ export function HeroSlideForm({
       const title = form.title.trim();
       if (title.length < 2) throw new Error("عنوان اسلاید الزامی است");
       if (!form.imageKey) throw new Error("تصویر دسکتاپ اسلاید الزامی است");
+      if (form.isPublished && !form.mobileImageKey) {
+        throw new Error(
+          "برای فعال بودن در وب‌سایت عمومی، تصویر موبایل (۱۰۸۰×۱۴۴۰ / ۳:۴) الزامی است",
+        );
+      }
       if (form.buttonEnabled) {
         if (!form.buttonText.trim()) {
           throw new Error("متن دکمه الزامی است");
@@ -169,68 +173,79 @@ export function HeroSlideForm({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[92vh] overflow-y-auto text-start sm:max-w-xl"
+        className="max-h-[92vh] overflow-y-auto text-start sm:max-w-3xl"
         dir="rtl"
+        aria-describedby={undefined}
       >
         <DialogHeader className="text-start sm:text-start">
           <DialogTitle>
             {editing ? "ویرایش اسلاید" : "افزودن اسلاید"}
           </DialogTitle>
-          <DialogDescription className="leading-6">
-            تیتر قوی، ارزش واضح و دکمه اقدام بنویسید. عنوان باید در یک نگاه
-            بگوید چرا مشتری باید اقدام کند؛ فقط اسلایدهای فعال در وب‌سایت عمومی
-            نمایش داده می‌شوند.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">
-          <div className="space-y-2">
-            <Label>تصویر دسکتاپ / تبلت بزرگ</Label>
-            <p className="text-xs leading-5 text-muted-foreground">
-              اندازه استاندارد:{" "}
-              <span className="font-medium text-foreground">۱۹۲۰×۱۰۸۰</span>{" "}
-              پیکسل (۱۶:۹). برای مانیتورهای رتینا{" "}
-              <span className="font-medium text-foreground">۲۵۶۰×۱۴۴۰</span>{" "}
-              توصیه می‌شود. این تصویر روی صفحه‌های بزرگ نمایش داده می‌شود.
-            </p>
-            <HeroSlideUploader
-              imageKey={form.imageKey}
-              imageUrl={form.imageUrl}
-              aspectClass="aspect-[16/9]"
-              allowClear={false}
-              emptyHint="JPG، PNG، WEBP — ۱۹۲۰×۱۰۸۰ (۱۶:۹) — حداکثر ۸ مگابایت"
-              disabled={saveMut.isPending}
-              onChange={({ imageKey, imageUrl }) =>
-                setForm((p) => ({ ...p, imageKey, imageUrl }))
-              }
-            />
-          </div>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div className="space-y-2">
+              <Label>
+                تصویر دسکتاپ / تبلت بزرگ{" "}
+                <span className="text-destructive">*</span>
+              </Label>
+              <p className="text-xs leading-5 text-muted-foreground">
+                اندازه استاندارد:{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  1920×1080
+                </span>{" "}
+                پیکسل (16:9). یا{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  2560×1440
+                </span>{" "}
+                توصیه می‌شود.
+              </p>
+              <HeroSlideUploader
+                imageKey={form.imageKey}
+                imageUrl={form.imageUrl}
+                aspectClass="aspect-[16/9]"
+                allowClear={false}
+                emptyHint="JPG، PNG، WEBP — 1920×1080 (16:9) — حداکثر 8 مگابایت"
+                disabled={saveMut.isPending}
+                onChange={({ imageKey, imageUrl }) =>
+                  setForm((p) => ({ ...p, imageKey, imageUrl }))
+                }
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label>تصویر موبایل (پیشنهادی)</Label>
-            <p className="text-xs leading-5 text-muted-foreground">
-              اندازه پیشنهادی:{" "}
-              <span className="font-medium text-foreground">۱۰۸۰×۱۴۴۰</span>{" "}
-              پیکسل (۳:۴) یا{" "}
-              <span className="font-medium text-foreground">۱۰۸۰×۱۳۵۰</span>{" "}
-              (۴:۵). سوژه و فضای متن را برای گوشی طراحی کنید. اگر خالی بماند،
-              همان تصویر دسکتاپ استفاده می‌شود.
-            </p>
-            <HeroSlideUploader
-              imageKey={form.mobileImageKey}
-              imageUrl={form.mobileImageUrl}
-              aspectClass="aspect-[3/4] max-w-[14rem] mx-auto sm:mx-0"
-              allowClear
-              emptyHint="JPG، PNG، WEBP — ۱۰۸۰×۱۴۴۰ (۳:۴) — اختیاری"
-              disabled={saveMut.isPending}
-              onChange={({ imageKey, imageUrl }) =>
-                setForm((p) => ({
-                  ...p,
-                  mobileImageKey: imageKey,
-                  mobileImageUrl: imageUrl,
-                }))
-              }
-            />
+            <div className="space-y-2">
+              <Label>
+                تصویر موبایل <span className="text-destructive">*</span>
+              </Label>
+              <p className="text-xs leading-5 text-muted-foreground">
+                اندازه استاندارد:{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  1080×1440
+                </span>{" "}
+                پیکسل (3:4).
+              </p>
+              <HeroSlideUploader
+                imageKey={form.mobileImageKey}
+                imageUrl={form.mobileImageUrl}
+                aspectClass="aspect-[3/4] max-w-[14rem] mx-auto sm:mx-0"
+                allowClear={!form.isPublished}
+                emptyHint="JPG، PNG، WEBP — 1080×1440 (3:4) — الزامی برای موبایل"
+                disabled={saveMut.isPending}
+                onChange={({ imageKey, imageUrl }) =>
+                  setForm((p) => ({
+                    ...p,
+                    mobileImageKey: imageKey,
+                    mobileImageUrl: imageUrl,
+                  }))
+                }
+              />
+              {form.isPublished && !form.mobileImageKey ? (
+                <p className="text-xs leading-5 text-destructive" role="alert">
+                  تصویر موبایل برای اسلاید فعال الزامی است.
+                </p>
+              ) : null}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -243,10 +258,6 @@ export function HeroSlideForm({
               disabled={saveMut.isPending}
               maxLength={160}
             />
-            <p className="text-xs leading-5 text-muted-foreground">
-              تیتر کوتاه و قدرتمند (ترجیحاً کمتر از ۵۰ نویسه) تا روی موبایل خوانا
-              بماند.
-            </p>
           </div>
 
           <div className="space-y-2">
@@ -262,10 +273,6 @@ export function HeroSlideForm({
               disabled={saveMut.isPending}
               maxLength={600}
             />
-            <p className="text-xs leading-5 text-muted-foreground">
-              یک جمله ارزشمند برای مشتری کافی است؛ فایده را بگویید، نه فقط خدمت
-              را.
-            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -322,10 +329,6 @@ export function HeroSlideForm({
                 >
                   نمایش دکمه روی این اسلاید
                 </Label>
-                <p className="text-xs leading-5 text-muted-foreground">
-                  می‌توانید برای هر اسلاید دکمه جداگانه با متن و مقصد دلخواه
-                  تعریف کنید.
-                </p>
               </div>
             </div>
 
@@ -409,9 +412,6 @@ export function HeroSlideForm({
               <Label htmlFor="hero-published" className="text-sm font-medium">
                 فعال در وب‌سایت عمومی
               </Label>
-              <p className="text-xs leading-5 text-muted-foreground">
-                در صورت غیرفعال بودن، اسلاید فقط در پنل مدیریت دیده می‌شود.
-              </p>
             </div>
           </div>
         </div>
@@ -426,7 +426,11 @@ export function HeroSlideForm({
           </Button>
           <Button
             variant="brand"
-            disabled={saveMut.isPending || !form.imageKey}
+            disabled={
+              saveMut.isPending ||
+              !form.imageKey ||
+              (form.isPublished && !form.mobileImageKey)
+            }
             onClick={() => saveMut.mutate()}
             className="gap-2"
           >

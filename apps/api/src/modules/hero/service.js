@@ -107,7 +107,23 @@ function refineHeroButton(data, ctx) {
   }
 }
 
-export const createHeroSlideSchema = heroSlideObject.superRefine(refineHeroButton);
+/** Published slides must ship a dedicated 3:4 mobile crop for phones. */
+function refinePublishedMobileImage(data, ctx) {
+  if (data.isPublished === false) return;
+  if (!data.mobileImageKey) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["mobileImageKey"],
+      message:
+        "برای نمایش در وب‌سایت عمومی، تصویر موبایل (۱۰۸۰×۱۴۴۰ / ۳:۴) الزامی است",
+    });
+  }
+}
+
+export const createHeroSlideSchema = heroSlideObject.superRefine((data, ctx) => {
+  refineHeroButton(data, ctx);
+  refinePublishedMobileImage(data, ctx);
+});
 
 export const updateHeroSlideSchema = heroSlideObject
   .omit({ imageKey: true, mobileImageKey: true })
@@ -140,6 +156,15 @@ export const updateHeroSlideSchema = heroSlideObject
     );
   });
 
+export const MOBILE_IMAGE_REQUIRED_MESSAGE =
+  "برای فعال‌سازی اسلاید در وب‌سایت عمومی، تصویر موبایل (۱۰۸۰×۱۴۴۰ / ۳:۴) الزامی است";
+
+function assertPublishedHasMobileImage({ isPublished, mobileImageKey }) {
+  if (!isPublished) return;
+  if (!String(mobileImageKey || "").trim()) {
+    throw new AppError(MOBILE_IMAGE_REQUIRED_MESSAGE, 400, "MOBILE_IMAGE_REQUIRED");
+  }
+}
 export const reorderHeroSlidesSchema = z.object({
   orderedIds: z.array(z.string().min(1)).min(1),
 });
@@ -277,6 +302,11 @@ export const heroService = {
     const data = createHeroSlideSchema.parse(body);
     const buttons = normalizeHeroButtonFields(data);
 
+    assertPublishedHasMobileImage({
+      isPublished: data.isPublished ?? true,
+      mobileImageKey: data.mobileImageKey,
+    });
+
     let sortOrder = data.sortOrder;
     if (sortOrder == null) {
       const latest = await prisma.heroSlide.findFirst({
@@ -328,6 +358,17 @@ export const heroService = {
     if (!existing) throw new AppError("اسلاید یافت نشد", 404, "NOT_FOUND");
 
     const data = updateHeroSlideSchema.parse(body);
+
+    const nextPublished =
+      data.isPublished != null ? data.isPublished : existing.isPublished;
+    const nextMobileKey =
+      data.mobileImageKey !== undefined
+        ? data.mobileImageKey
+        : existing.mobileImageKey;
+    assertPublishedHasMobileImage({
+      isPublished: nextPublished,
+      mobileImageKey: nextMobileKey,
+    });
 
     if (data.imageKey && data.imageKey !== existing.imageKey) {
       await tryDeleteMedia(existing.imageKey);

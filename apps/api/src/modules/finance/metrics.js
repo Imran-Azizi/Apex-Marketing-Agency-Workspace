@@ -3,6 +3,24 @@
  * Maps client FA metrics → code fields.
  */
 
+import {
+  afghanMonthBounds,
+  isAfghanYear,
+  localTodayAfghan,
+} from './afghan-calendar.js';
+
+export {
+  AFGHAN_MONTHS,
+  AFGHAN_YEAR_MAX,
+  AFGHAN_YEAR_MIN,
+  afghanMonthBounds,
+  afghanToGregorian,
+  formatAfghanMonthYear,
+  gregorianToAfghan,
+  isAfghanYear,
+  localTodayAfghan,
+} from './afghan-calendar.js';
+
 export function roundMoney(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;
@@ -102,6 +120,28 @@ export function monthBounds(year, month) {
   const from = new Date(y, m - 1, 1, 0, 0, 0, 0);
   const to = new Date(y, m, 0, 23, 59, 59, 999);
   return { from, to };
+}
+
+/**
+ * PnL month window.
+ * Afghan Solar Hijri years (1300–1600) use exact Afghan month day bounds.
+ * Legacy Gregorian years keep the previous calendar-month behaviour.
+ */
+export function pnlMonthBounds(year, month) {
+  if (isAfghanYear(year)) return afghanMonthBounds(year, month);
+  return monthBounds(year, month);
+}
+
+export function isCurrentPnlMonth(year, month, now = new Date()) {
+  if (isAfghanYear(year)) {
+    const today = localTodayAfghan(now);
+    return Boolean(
+      today && Number(year) === today.jy && Number(month) === today.jm,
+    );
+  }
+  return (
+    Number(year) === now.getFullYear() && Number(month) === now.getMonth() + 1
+  );
 }
 
 /** Zeroed monthly actuals — used before a month target is activated. */

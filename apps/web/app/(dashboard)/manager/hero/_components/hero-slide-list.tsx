@@ -11,8 +11,12 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { heroImageSrc, type HeroSlide } from "@/lib/hero";
+import { heroDesktopImageSrc, heroMobileImageSrc, type HeroSlide } from "@/lib/hero";
 import { cn, formatDate } from "@/lib/utils";
+
+function hasMobileImage(slide: HeroSlide) {
+  return Boolean(slide.mobileImageKey || slide.mobileImageUrl);
+}
 
 export function HeroSlideList({
   items,
@@ -42,8 +46,10 @@ export function HeroSlideList({
   return (
     <div className="space-y-3">
       {items.map((slide, index) => {
-        const img = heroImageSrc(slide);
+        const img = heroDesktopImageSrc(slide);
+        const mobileImg = heroMobileImageSrc(slide);
         const published = slide.isPublished === true;
+        const mobileReady = hasMobileImage(slide);
         const busy = pendingId === slide.id;
         return (
           <article
@@ -84,6 +90,17 @@ export function HeroSlideList({
                   بدون تصویر
                 </div>
               )}
+              {mobileReady && mobileImg ? (
+                <div className="absolute bottom-2 start-2 hidden overflow-hidden rounded-lg border border-white/40 shadow-md sm:block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={mobileImg}
+                    alt=""
+                    className="h-16 w-12 object-cover"
+                    aria-hidden
+                  />
+                </div>
+              ) : null}
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
               <div className="flex items-start justify-between gap-3">
@@ -101,6 +118,11 @@ export function HeroSlideList({
                     <Badge variant={published ? "success" : "secondary"}>
                       {published ? "فعال" : "غیرفعال"}
                     </Badge>
+                    {!mobileReady ? (
+                      <Badge variant="destructive">بدون تصویر موبایل</Badge>
+                    ) : (
+                      <Badge variant="outline">موبایل آماده</Badge>
+                    )}
                   </div>
                   <h3 className="truncate text-base font-semibold">
                     {slide.title}

@@ -12,11 +12,13 @@ test("hero schema accepts a valid slide payload", () => {
     title: "تبلیغات ویدیویی حرفه‌ای برای برندهای متمایز",
     description: "از ایده تا تدوین نهایی، با استاندارد سینمایی.",
     imageKey: "images/hero/123-abc.jpg",
+    mobileImageKey: "images/hero/123-abc-mobile.jpg",
     durationSeconds: 5,
     isPublished: true,
   });
   assert.equal(parsed.title.includes("تبلیغات"), true);
   assert.equal(parsed.imageKey, "images/hero/123-abc.jpg");
+  assert.equal(parsed.mobileImageKey, "images/hero/123-abc-mobile.jpg");
   assert.equal(parsed.durationSeconds, 5);
   assert.equal(parsed.buttonEnabled, false);
 });
@@ -25,6 +27,7 @@ test("hero schema accepts per-slide button configuration", () => {
   const parsed = createHeroSlideSchema.parse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     buttonEnabled: true,
     buttonText: "مشاهده نمونه‌کارها",
     buttonDestination: "portfolio",
@@ -36,6 +39,7 @@ test("hero schema accepts per-slide button configuration", () => {
   const external = createHeroSlideSchema.parse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     buttonEnabled: true,
     buttonText: "وب‌سایت",
     buttonDestination: "external",
@@ -49,6 +53,7 @@ test("hero schema rejects enabled button without text or destination", () => {
   const missingText = createHeroSlideSchema.safeParse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     buttonEnabled: true,
     buttonDestination: "services",
   });
@@ -57,6 +62,7 @@ test("hero schema rejects enabled button without text or destination", () => {
   const missingDest = createHeroSlideSchema.safeParse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     buttonEnabled: true,
     buttonText: "خدمات ما",
   });
@@ -65,6 +71,7 @@ test("hero schema rejects enabled button without text or destination", () => {
   const badExternal = createHeroSlideSchema.safeParse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     buttonEnabled: true,
     buttonText: "لینک",
     buttonDestination: "external",
@@ -77,20 +84,29 @@ test("hero schema requires title and image on create", () => {
   const title = createHeroSlideSchema.safeParse({
     title: "ا",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
   });
   assert.equal(title.success, false);
 
   const image = createHeroSlideSchema.safeParse({
     title: "اسلاید نمونه",
     imageKey: "",
+    mobileImageKey: "images/hero/a-mobile.jpg",
   });
   assert.equal(image.success, false);
+
+  const mobile = createHeroSlideSchema.safeParse({
+    title: "اسلاید نمونه",
+    imageKey: "images/hero/a.jpg",
+  });
+  assert.equal(mobile.success, false);
 });
 
 test("hero duration must be an integer from 1 to 10", () => {
   const ok = createHeroSlideSchema.parse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     durationSeconds: 7,
   });
   assert.equal(ok.durationSeconds, 7);
@@ -98,6 +114,7 @@ test("hero duration must be an integer from 1 to 10", () => {
   const tooLow = createHeroSlideSchema.safeParse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     durationSeconds: 0,
   });
   assert.equal(tooLow.success, false);
@@ -105,6 +122,7 @@ test("hero duration must be an integer from 1 to 10", () => {
   const tooHigh = createHeroSlideSchema.safeParse({
     title: "اسلاید نمونه",
     imageKey: "images/hero/a.jpg",
+    mobileImageKey: "images/hero/a-mobile.jpg",
     durationSeconds: 11,
   });
   assert.equal(tooHigh.success, false);
