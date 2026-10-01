@@ -1,8 +1,10 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { cn, formatDate } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { AfghanDateField } from "@/components/shared/afghan-date-field";
+import { cn } from "@/lib/utils";
+import { formatStoredDateAsAfghan } from "@/lib/afghan-calendar";
 import {
   DATE_PRESET_OPTIONS,
   isDateRangeReady,
@@ -36,9 +38,10 @@ function rangeSummary(range: DateRange): string | null {
   }
   const { from, to } = resolveDateRange(range);
   if (!from || !to) return null;
-  const start = formatDate(from);
-  const end = formatDate(to);
-  return start === end ? start : `${start} — ${end}`;
+  const start = formatStoredDateAsAfghan(toLocalDateString(from));
+  const end = formatStoredDateAsAfghan(toLocalDateString(to));
+  if (start === "—" || end === "—") return null;
+  return start === end ? start : `${start} – ${end}`;
 }
 
 export function DateRangePills({
@@ -84,44 +87,48 @@ export function DateRangePills({
 
       {range.preset === "custom" ? (
         <div className="flex flex-wrap items-end gap-3">
-          <label className="space-y-1 text-xs text-muted-foreground">
-            از تاریخ
-            <Input
-              type="date"
-              className="h-9 w-auto min-w-[10.5rem]"
-              dir="ltr"
+          <div className="space-y-1">
+            <Label
+              htmlFor="dashboard-range-from"
+              className="text-xs text-muted-foreground"
+            >
+              از تاریخ
+            </Label>
+            <AfghanDateField
+              id="dashboard-range-from"
+              aria-label="از تاریخ"
               value={fromValue}
-              max={toValue || undefined}
-              onChange={(event) =>
+              onChange={(value) =>
                 onChange(
                   patchCustomDateRange(range, {
-                    from: event.target.value
-                      ? parseLocalDate(event.target.value)
-                      : null,
+                    from: value ? parseLocalDate(value) : null,
                   }),
                 )
               }
+              className="w-[13.5rem] max-w-full"
             />
-          </label>
-          <label className="space-y-1 text-xs text-muted-foreground">
-            تا تاریخ
-            <Input
-              type="date"
-              className="h-9 w-auto min-w-[10.5rem]"
-              dir="ltr"
+          </div>
+          <div className="space-y-1">
+            <Label
+              htmlFor="dashboard-range-to"
+              className="text-xs text-muted-foreground"
+            >
+              تا تاریخ
+            </Label>
+            <AfghanDateField
+              id="dashboard-range-to"
+              aria-label="تا تاریخ"
               value={toValue}
-              min={fromValue || undefined}
-              onChange={(event) =>
+              onChange={(value) =>
                 onChange(
                   patchCustomDateRange(range, {
-                    to: event.target.value
-                      ? parseLocalDate(event.target.value)
-                      : null,
+                    to: value ? parseLocalDate(value) : null,
                   }),
                 )
               }
+              className="w-[13.5rem] max-w-full"
             />
-          </label>
+          </div>
         </div>
       ) : null}
 

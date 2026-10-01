@@ -39,17 +39,38 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { CoverImage } from "@/components/media/cover-image";
+import { ResponsiveCoverImage } from "@/components/landing/responsive-cover-image";
+import { pickResponsiveImageSrc } from "@/lib/landing-responsive-image";
 import { VideoPlayer } from "@/components/media/video-player";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   bool,
+  normalizeElement,
   num,
   str,
   type LandingElement,
-  type LandingElementStyles,
 } from "@/lib/landing-content";
+import {
+  elementBoxStyle,
+  elementVisibilityClass,
+} from "@/lib/landing-styles";
+import {
+  AccordionBlock,
+  BeforeAfterBlock,
+  CountdownBlock,
+  FeatureCardsBlock,
+  GalleryBlock,
+  PricingCardsBlock,
+  SliderBlock,
+  SocialLinksBlock,
+  StatsBlock,
+  TabsBlock,
+  TeamCardsBlock,
+  TestimonialCardsBlock,
+  TimelineBlock,
+  WhatsappCtaBlock,
+} from "@/components/landing/landing-element-blocks";
 
 const ICONS: Record<string, LucideIcon> = {
   Sparkles,
@@ -88,33 +109,25 @@ const ICONS: Record<string, LucideIcon> = {
   ExternalLink,
 };
 
-export function elementVisibilityClass(styles: LandingElementStyles) {
-  return cn(
-    styles.hiddenOnMobile && "hidden md:block",
-    styles.hiddenOnDesktop && "md:hidden",
-  );
-}
+export { elementVisibilityClass, elementBoxStyle };
 
-export function elementBoxStyle(styles: LandingElementStyles): CSSProperties {
-  return {
-    fontSize: styles.fontSize ? `${styles.fontSize}px` : undefined,
-    fontWeight: styles.fontWeight || undefined,
-    fontFamily: styles.fontFamily || undefined,
-    color: styles.color || undefined,
-    textAlign: styles.align,
-    lineHeight: styles.lineHeight || undefined,
-    letterSpacing: styles.letterSpacing ? `${styles.letterSpacing}px` : undefined,
-    marginTop: styles.marginTop ? `${styles.marginTop}px` : undefined,
-    marginBottom: styles.marginBottom ? `${styles.marginBottom}px` : undefined,
-    padding: styles.padding ? `${styles.padding}px` : undefined,
-    width: styles.width || "100%",
-    maxWidth: "100%",
-    backgroundColor: styles.backgroundColor || undefined,
-    borderColor: styles.borderColor || undefined,
-    borderWidth: styles.borderWidth || undefined,
-    borderStyle: styles.borderWidth ? "solid" : undefined,
-    borderRadius: styles.borderRadius ? `${styles.borderRadius}px` : undefined,
-  };
+function ElementWrapper({
+  element,
+  children,
+  style,
+  className,
+}: {
+  element: LandingElement;
+  children: ReactNode;
+  style?: CSSProperties;
+  className?: string;
+}) {
+  if (element.hidden) return null;
+  return (
+    <div className={cn("landing-el w-full min-w-0 max-w-full", className)} style={style}>
+      {children}
+    </div>
+  );
 }
 
 function HeadingTag({
@@ -128,43 +141,145 @@ function HeadingTag({
   style?: CSSProperties;
   children: ReactNode;
 }) {
-  const cls = cn("max-w-full break-words text-balance font-bold tracking-tight", className);
-  if (level <= 1) return <h1 className={cls} style={style}>{children}</h1>;
-  if (level === 3) return <h3 className={cls} style={style}>{children}</h3>;
-  if (level >= 4) return <h4 className={cls} style={style}>{children}</h4>;
-  return <h2 className={cls} style={style}>{children}</h2>;
+  const cls = cn(
+    "max-w-full break-words text-balance font-bold tracking-tight",
+    className,
+  );
+  if (level <= 1)
+    return (
+      <h1 className={cls} style={style}>
+        {children}
+      </h1>
+    );
+  if (level === 3)
+    return (
+      <h3 className={cls} style={style}>
+        {children}
+      </h3>
+    );
+  if (level >= 4)
+    return (
+      <h4 className={cls} style={style}>
+        {children}
+      </h4>
+    );
+  return (
+    <h2 className={cls} style={style}>
+      {children}
+    </h2>
+  );
 }
 
-export function LandingElementView({
-  element,
-}: {
-  element: LandingElement;
-}) {
+export function LandingElementView({ element: raw }: { element: LandingElement }) {
+  const element = normalizeElement(raw);
+  if (element.hidden) return null;
   const { type, content, styles } = element;
   const box = elementBoxStyle(styles);
   const vis = elementVisibilityClass(styles);
 
   if (type === "heading") {
-    return (
+    const heading = (
       <HeadingTag level={num(content.level, 2)} className={vis} style={box}>
         {str(content.text, "عنوان")}
       </HeadingTag>
     );
+    const href = str(content.linkUrl);
+    if (href) {
+      const external = /^https?:/i.test(href);
+      return (
+        <ElementWrapper element={element}>
+          <Link
+            href={href}
+            target={bool(content.linkNewTab) || external ? "_blank" : undefined}
+            rel={external ? "noopener noreferrer" : undefined}
+            className="block max-w-full no-underline"
+          >
+            {heading}
+          </Link>
+        </ElementWrapper>
+      );
+    }
+    return <ElementWrapper element={element}>{heading}</ElementWrapper>;
   }
 
   if (type === "paragraph" || type === "text") {
-    return (
+    const body = (
       <p
-        className={cn("max-w-full whitespace-pre-wrap break-words text-pretty", vis)}
+        className={cn(
+          "max-w-full whitespace-pre-wrap break-words text-pretty",
+          vis,
+        )}
         style={box}
       >
         {str(content.text)}
       </p>
     );
+    const href = str(content.linkUrl);
+    if (href) {
+      const external = /^https?:/i.test(href);
+      return (
+        <ElementWrapper element={element}>
+          <Link
+            href={href}
+            target={bool(content.linkNewTab) || external ? "_blank" : undefined}
+            rel={external ? "noopener noreferrer" : undefined}
+            className="block max-w-full no-underline"
+          >
+            {body}
+          </Link>
+        </ElementWrapper>
+      );
+    }
+    return <ElementWrapper element={element}>{body}</ElementWrapper>;
+  }
+
+  if (type === "quote") {
+    return (
+      <ElementWrapper element={element}>
+        <blockquote
+          className={cn("max-w-full border-s-4 border-brand ps-4 italic", vis)}
+          style={box}
+        >
+          <p>{str(content.text)}</p>
+          {str(content.author) ? (
+            <footer className="mt-2 text-sm not-italic opacity-70">
+              — {str(content.author)}
+            </footer>
+          ) : null}
+        </blockquote>
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "list") {
+    const items = (content.items as string[]) || [];
+    const Tag = bool(content.ordered) ? "ol" : "ul";
+    return (
+      <ElementWrapper element={element}>
+        <Tag
+          className={cn(
+            "max-w-full space-y-1",
+            bool(content.ordered) ? "list-decimal pe-5" : "list-disc pe-5",
+            vis,
+          )}
+          style={box}
+        >
+          {items.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
+        </Tag>
+      </ElementWrapper>
+    );
   }
 
   if (type === "image") {
-    const src = str(content.imageSrc || content.imageUrl);
+    const desktopSrc = str(content.imageSrc || content.imageUrl);
+    const mobileSrc = str(content.mobileImageSrc || content.mobileImageUrl);
+    const objectFitClass = cn(
+      styles.objectFit === "contain" && "object-contain",
+      styles.objectFit === "fill" && "object-fill",
+      styles.objectFit === "none" && "object-none",
+    );
     const inner = (
       <div
         className={cn("relative w-full max-w-full overflow-hidden", vis)}
@@ -174,112 +289,200 @@ export function LandingElementView({
           aspectRatio: num(content.height) > 0 ? undefined : "16 / 9",
         }}
       >
-        {src ? (
-          <CoverImage
-            src={src}
-            alt={str(content.alt, "")}
-            sizes="(max-width: 768px) 100vw, 960px"
-            className={cn(
-              styles.objectFit === "contain" && "object-contain",
-              styles.objectFit === "fill" && "object-fill",
-              styles.objectFit === "none" && "object-none",
-            )}
-          />
-        ) : (
-          <div className="flex h-full min-h-[180px] items-center justify-center bg-muted text-sm text-muted-foreground">
-            تصویر انتخاب نشده
-          </div>
-        )}
+        <ResponsiveCoverImage
+          desktopSrc={desktopSrc || null}
+          mobileSrc={mobileSrc || null}
+          alt={str(content.alt, "")}
+          desktopSizes="(max-width: 1280px) 100vw, 960px"
+          mobileSizes="100vw"
+          className={objectFitClass}
+          fallback={
+            <div className="flex h-full min-h-[180px] items-center justify-center bg-muted text-sm text-muted-foreground">
+              تصویر انتخاب نشده
+            </div>
+          }
+        />
       </div>
     );
     const href = str(content.linkUrl);
     if (href) {
       const external = /^https?:/i.test(href);
       return (
-        <Link
-          href={href}
-          target={bool(content.linkNewTab) || external ? "_blank" : undefined}
-          rel={external ? "noopener noreferrer" : undefined}
-          className="block max-w-full"
-        >
-          {inner}
-        </Link>
+        <ElementWrapper element={element}>
+          <Link
+            href={href}
+            target={bool(content.linkNewTab) || external ? "_blank" : undefined}
+            rel={external ? "noopener noreferrer" : undefined}
+            className="block max-w-full"
+          >
+            {inner}
+          </Link>
+        </ElementWrapper>
       );
     }
-    return inner;
+    return <ElementWrapper element={element}>{inner}</ElementWrapper>;
+  }
+
+  if (type === "gallery") {
+    return (
+      <ElementWrapper element={element}>
+        <GalleryBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "slider") {
+    return (
+      <ElementWrapper element={element}>
+        <SliderBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "before-after") {
+    return (
+      <ElementWrapper element={element}>
+        <BeforeAfterBlock element={element} />
+      </ElementWrapper>
+    );
   }
 
   if (type === "video") {
     const src = str(content.videoSrc || content.videoUrl);
+    const poster = pickResponsiveImageSrc(
+      str(content.posterSrc) || null,
+      str(content.mobilePosterSrc) || null,
+    );
     return (
-      <div className={cn("w-full max-w-full overflow-hidden", vis)} style={box}>
-        {src ? (
-          <VideoPlayer
-            src={src}
-            poster={str(content.posterSrc) || undefined}
-            autoPlay={bool(content.autoplay)}
-            muted={bool(content.muted, bool(content.autoplay))}
-            loop={bool(content.loop)}
-            controls={bool(content.controls, true)}
-          />
-        ) : (
-          <div className="flex aspect-video items-center justify-center rounded-xl bg-muted text-sm text-muted-foreground">
-            ویدیو انتخاب نشده
-          </div>
-        )}
-      </div>
+      <ElementWrapper element={element}>
+        <div className={cn("w-full max-w-full overflow-hidden", vis)} style={box}>
+          {src ? (
+            <VideoPlayer
+              className="w-full"
+              src={src}
+              poster={poster || undefined}
+              autoPlay={bool(content.autoplay)}
+              muted={bool(content.muted, bool(content.autoplay))}
+              loop={bool(content.loop)}
+              controls={bool(content.controls, true)}
+            />
+          ) : (
+            <div className="flex aspect-video w-full items-center justify-center rounded-xl bg-muted text-sm text-muted-foreground">
+              ویدیو انتخاب نشده
+            </div>
+          )}
+        </div>
+      </ElementWrapper>
     );
   }
 
   if (type === "audio") {
     const src = str(content.audioSrc || content.audioUrl);
     return (
-      <figure className={cn("w-full max-w-full", vis)} style={box}>
-        {str(content.title) ? (
-          <figcaption className="mb-2 text-sm font-medium">{str(content.title)}</figcaption>
-        ) : null}
-        {src ? (
-          <audio
-            className="w-full max-w-full"
-            src={src}
-            controls
-            preload="none"
-            autoPlay={bool(content.autoplay)}
-            loop={bool(content.loop)}
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">فایل صوتی انتخاب نشده</p>
-        )}
-      </figure>
+      <ElementWrapper element={element}>
+        <figure className={cn("w-full max-w-full", vis)} style={box}>
+          {str(content.title) ? (
+            <figcaption className="mb-2 text-sm font-medium">
+              {str(content.title)}
+            </figcaption>
+          ) : null}
+          {src ? (
+            <audio
+              className="w-full max-w-full"
+              src={src}
+              controls
+              preload="none"
+              autoPlay={bool(content.autoplay)}
+              loop={bool(content.loop)}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">فایل صوتی انتخاب نشده</p>
+          )}
+        </figure>
+      </ElementWrapper>
     );
   }
 
   if (type === "button" || type === "link") {
     const href = str(content.url, "#contact");
-    const variant = str(content.variant, "brand") as "brand" | "outline" | "secondary";
+    const variant = str(content.variant, "brand") as
+      | "brand"
+      | "outline"
+      | "secondary";
     const external = /^https?:/i.test(href);
     return (
-      <div className={cn("w-full", vis)} style={{ textAlign: styles.align, marginTop: box.marginTop, marginBottom: box.marginBottom }}>
-        <Button
-          asChild
-          variant={variant === "outline" || variant === "secondary" ? variant : "brand"}
-          className="max-w-full rounded-xl"
+      <ElementWrapper element={element}>
+        <div
+          className={cn("w-full", vis)}
           style={{
-            backgroundColor: styles.backgroundColor || undefined,
-            color: styles.color || undefined,
-            borderRadius: styles.borderRadius ? `${styles.borderRadius}px` : undefined,
-            padding: styles.padding ? `${styles.padding}px ${Math.max(styles.padding * 2, 16)}px` : undefined,
+            textAlign: styles.align,
+            marginTop: box.marginTop,
+            marginBottom: box.marginBottom,
           }}
         >
-          <Link
-            href={href}
-            target={bool(content.openInNewTab) || external ? "_blank" : undefined}
-            rel={external ? "noopener noreferrer" : undefined}
+          <Button
+            asChild
+            variant={
+              variant === "outline" || variant === "secondary"
+                ? variant
+                : "brand"
+            }
+            className="max-w-full rounded-xl"
+            style={{
+              backgroundColor: styles.backgroundColor || undefined,
+              color: styles.color || undefined,
+              borderRadius: styles.borderRadius
+                ? `${styles.borderRadius}px`
+                : undefined,
+              padding: styles.padding
+                ? `${styles.padding}px ${Math.max(styles.padding * 2, 16)}px`
+                : undefined,
+            }}
           >
-            {str(content.text, "دکمه")}
-          </Link>
-        </Button>
-      </div>
+            <Link
+              href={href}
+              target={
+                bool(content.openInNewTab) || external ? "_blank" : undefined
+              }
+              rel={external ? "noopener noreferrer" : undefined}
+            >
+              {str(content.text, "دکمه")}
+            </Link>
+          </Button>
+        </div>
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "icon-button") {
+    const Icon = ICONS[str(content.name, "ArrowLeft")] || ArrowLeft;
+    const href = str(content.url, "#contact");
+    const size = num(content.size, 40);
+    const external = /^https?:/i.test(href);
+    return (
+      <ElementWrapper element={element}>
+        <div className={cn("w-full", vis)} style={{ textAlign: styles.align }}>
+          <Button
+            asChild
+            size="icon"
+            variant={
+              str(content.variant, "brand") === "outline" ? "outline" : "brand"
+            }
+            className="rounded-full"
+            style={{ width: size, height: size }}
+          >
+            <Link
+              href={href}
+              target={
+                bool(content.openInNewTab) || external ? "_blank" : undefined
+              }
+              rel={external ? "noopener noreferrer" : undefined}
+            >
+              <Icon style={{ width: size * 0.45, height: size * 0.45 }} />
+            </Link>
+          </Button>
+        </div>
+      </ElementWrapper>
     );
   }
 
@@ -298,63 +501,190 @@ export function LandingElementView({
       </span>
     );
     return (
-      <div style={{ textAlign: styles.align, marginBottom: box.marginBottom }}>
-        {href ? (
-          <Link href={href} className="inline-flex">
-            {node}
-          </Link>
-        ) : (
-          node
-        )}
-      </div>
+      <ElementWrapper element={element}>
+        <div style={{ textAlign: styles.align, marginBottom: box.marginBottom }}>
+          {href ? (
+            <Link href={href} className="inline-flex">
+              {node}
+            </Link>
+          ) : (
+            node
+          )}
+        </div>
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "social-links") {
+    return (
+      <ElementWrapper element={element}>
+        <SocialLinksBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "whatsapp-cta") {
+    return (
+      <ElementWrapper element={element}>
+        <WhatsappCtaBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "accordion" || type === "faq") {
+    return (
+      <ElementWrapper element={element}>
+        <AccordionBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "tabs") {
+    return (
+      <ElementWrapper element={element}>
+        <TabsBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "countdown") {
+    return (
+      <ElementWrapper element={element}>
+        <CountdownBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "feature-cards") {
+    return (
+      <ElementWrapper element={element}>
+        <FeatureCardsBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "pricing-cards") {
+    return (
+      <ElementWrapper element={element}>
+        <PricingCardsBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "testimonial-cards") {
+    return (
+      <ElementWrapper element={element}>
+        <TestimonialCardsBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "team-cards") {
+    return (
+      <ElementWrapper element={element}>
+        <TeamCardsBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "stats") {
+    return (
+      <ElementWrapper element={element}>
+        <StatsBlock element={element} />
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "timeline") {
+    return (
+      <ElementWrapper element={element}>
+        <TimelineBlock element={element} />
+      </ElementWrapper>
     );
   }
 
   if (type === "divider") {
     return (
-      <hr
-        className={cn("max-w-full border-0 bg-border", vis)}
-        style={{
-          height: Math.max(1, num(content.thickness, 1)),
-          marginTop: box.marginTop,
-          marginBottom: box.marginBottom,
-          backgroundColor: styles.color || undefined,
-        }}
-      />
+      <ElementWrapper element={element}>
+        <hr
+          className={cn("max-w-full border-0 bg-border", vis)}
+          style={{
+            height: Math.max(1, num(content.thickness, 1)),
+            marginTop: box.marginTop,
+            marginBottom: box.marginBottom,
+            backgroundColor: styles.color || undefined,
+          }}
+        />
+      </ElementWrapper>
     );
   }
 
   if (type === "spacer") {
-    return <div className={vis} style={{ height: num(content.height, 32) }} aria-hidden />;
+    return (
+      <ElementWrapper element={element}>
+        <div className={vis} style={{ height: num(content.height, 32) }} aria-hidden />
+      </ElementWrapper>
+    );
   }
 
   if (type === "columns") {
-    const count = Math.min(3, Math.max(2, num(content.count, 2)));
+    const count = Math.min(4, Math.max(2, num(content.count, 2)));
     const cols = element.columns || [];
     return (
-      <div
-        className={cn("grid max-w-full gap-4 md:grid-cols-2", count === 3 && "lg:grid-cols-3", vis)}
-        style={box}
-      >
-        {Array.from({ length: count }, (_, i) => (
-          <div key={i} className="min-w-0">
-            {(cols[i] || []).map((child) => (
-              <LandingElementView key={child.id} element={child} />
-            ))}
-          </div>
-        ))}
-      </div>
+      <ElementWrapper element={element}>
+        <div
+          className={cn(
+            "grid max-w-full gap-4",
+            count === 2 && "md:grid-cols-2",
+            count === 3 && "md:grid-cols-2 lg:grid-cols-3",
+            count >= 4 && "sm:grid-cols-2 lg:grid-cols-4",
+            vis,
+          )}
+          style={box}
+        >
+          {Array.from({ length: count }, (_, i) => (
+            <div key={i} className="min-w-0">
+              {(cols[i] || []).map((child) => (
+                <LandingElementView key={child.id} element={child} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </ElementWrapper>
+    );
+  }
+
+  if (type === "grid") {
+    const count = Math.min(4, Math.max(1, num(content.columns, 3)));
+    const cols = element.columns || [];
+    return (
+      <ElementWrapper element={element}>
+        <div
+          className={cn(
+            "grid w-full max-w-full",
+            count === 2 && "grid-cols-1 md:grid-cols-2",
+            count === 3 && "grid-cols-1 md:grid-cols-2 lg:grid-cols-3",
+            count >= 4 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4",
+            vis,
+          )}
+          style={{ gap: `${styles.gap || 16}px`, ...box }}
+        >
+          {Array.from({ length: count }, (_, i) => (
+            <div key={i} className="min-w-0">
+              {(cols[i] || []).map((child) => (
+                <LandingElementView key={child.id} element={child} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </ElementWrapper>
     );
   }
 
   return null;
 }
 
-export function LandingElements({
-  elements,
-}: {
-  elements: LandingElement[];
-}) {
+export function LandingElements({ elements }: { elements: LandingElement[] }) {
   return (
     <>
       {elements.map((element) => (

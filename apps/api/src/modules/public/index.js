@@ -65,6 +65,20 @@ router.get('/services', cachePublic(60), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+router.get('/services/:slug', cachePublic(60), async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await remember(`services-slug:${req.params.slug}`, PUBLIC_TTL_MS, async () => {
+        const { servicesService } = await import('../services/service.js');
+        return servicesService.getPublicBySlug(req.params.slug);
+      }),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/customers', cachePublic(60), async (req, res, next) => {
   try {
     ok(

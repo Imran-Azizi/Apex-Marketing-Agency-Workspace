@@ -19,12 +19,17 @@ export function LandingPageRenderer({
   className?: string;
 }) {
   return (
-    <div className={cn("w-full max-w-full overflow-x-hidden", className)} dir="rtl">
+    <div
+      className={cn("w-full max-w-full overflow-x-hidden", className)}
+      dir="rtl"
+    >
       <LandingHeroView hero={content.hero} />
       {(content.sections || []).map((section) => (
         <LandingSectionView key={section.id} section={section} />
       ))}
-      {showForm ? <PublicContactSection initialContact={contact ?? undefined} /> : null}
+      {showForm ? (
+        <PublicContactSection initialContact={contact ?? undefined} />
+      ) : null}
     </div>
   );
 }

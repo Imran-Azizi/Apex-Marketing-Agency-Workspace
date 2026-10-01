@@ -1,3 +1,10 @@
+import {
+  afghanMonthGregorianBounds,
+  localTodayAfghan,
+  localTodayGregorian,
+  toGregorianInputValue,
+} from "@/lib/afghan-calendar";
+
 export type DatePreset = "all" | "today" | "week" | "month" | "year" | "custom";
 
 export interface DateRange {
@@ -58,19 +65,49 @@ export function endOfDay(d: Date): Date {
   return x;
 }
 
-/** Saturday-start week (Afghanistan / fa-AF). JS getDay(): 0 Sun … 6 Sat. */
-export function startOfWeekSaturday(d: Date): Date {
+/** Civil "today" as a local midnight Date (browser / workstation calendar day). */
+export function todayStart(): Date {
+  const { gy, gm, gd } = localTodayGregorian();
+  return new Date(gy, gm - 1, gd, 0, 0, 0, 0);
+}
+
+/**
+ * Last 7 calendar days including today.
+ * Example: if today is the 9th → from the 3rd through the 9th (7 days).
+ */
+export function startOfLastSevenDays(d: Date = todayStart()): Date {
   const from = startOfDay(d);
-  from.setDate(from.getDate() - ((from.getDay() + 1) % 7));
+  from.setDate(from.getDate() - 6);
   return from;
+}
+
+/** First day of the current Afghan (Solar Hijri) month as a local Date. */
+export function startOfCurrentAfghanMonth(): Date | null {
+  const afghan = localTodayAfghan();
+  if (!afghan) return null;
+  const bounds = afghanMonthGregorianBounds(afghan.jy, afghan.jm);
+  if (!bounds) return null;
+  return parseLocalDate(bounds.fromIso);
+}
+
+/** 1 حمل of the current Afghan year as a local Date. */
+export function startOfCurrentAfghanYear(): Date | null {
+  const afghan = localTodayAfghan();
+  if (!afghan) return null;
+  const iso = toGregorianInputValue(afghan.jy, 1, 1);
+  if (!iso) return null;
+  return parseLocalDate(iso);
 }
 
 export function resolveDateRange(range: DateRange): {
   from: Date | null;
   to: Date | null;
 } {
-  const now = new Date();
+  const now = todayStart();
+  const todayEnd = endOfDay(now);
+
   if (range.preset === "all") return { from: null, to: null };
+
   if (range.preset === "custom") {
     let from = range.from ? startOfDay(range.from) : null;
     let to = range.to ? endOfDay(range.to) : null;
@@ -81,21 +118,28 @@ export function resolveDateRange(range: DateRange): {
     }
     return { from, to };
   }
+
   if (range.preset === "today") {
-    return { from: startOfDay(now), to: endOfDay(now) };
+    return { from: startOfDay(now), to: todayEnd };
   }
+
   if (range.preset === "week") {
-    return { from: startOfWeekSaturday(now), to: endOfDay(now) };
+    return { from: startOfLastSevenDays(now), to: todayEnd };
   }
+
   if (range.preset === "month") {
+    const monthStart = startOfCurrentAfghanMonth();
     return {
-      from: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0),
-      to: endOfDay(now),
+      from: monthStart ? startOfDay(monthStart) : startOfDay(now),
+      to: todayEnd,
     };
   }
+
+  // year — current Afghan year from 1 حمل through today
+  const yearStart = startOfCurrentAfghanYear();
   return {
-    from: new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0),
-    to: endOfDay(now),
+    from: yearStart ? startOfDay(yearStart) : startOfDay(now),
+    to: todayEnd,
   };
 }
 
@@ -132,10 +176,11 @@ export function toCustomDateRange(range: DateRange): DateRange {
       to: startOfDay(resolved.to),
     };
   }
-  const now = new Date();
+  const monthStart = startOfCurrentAfghanMonth();
+  const now = todayStart();
   return {
     preset: "custom",
-    from: new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0),
+    from: monthStart ? startOfDay(monthStart) : startOfDay(now),
     to: startOfDay(now),
   };
 }

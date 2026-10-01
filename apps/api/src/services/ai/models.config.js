@@ -92,6 +92,11 @@ export function getModelConfig() {
         maxTokens: 3072,
         model: env.aiModelBusinessAssistant || null,
       },
+      LANDING_PAGE: {
+        temperature: 0.5,
+        maxTokens: 4096,
+        model: process.env.AI_MODEL_LANDING_PAGE || null,
+      },
     },
   };
 }

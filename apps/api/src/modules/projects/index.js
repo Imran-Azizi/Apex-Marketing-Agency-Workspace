@@ -78,6 +78,48 @@ router.get(
 );
 
 router.post(
+  "/:id/assets",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  async (req, res, next) => {
+    try {
+      created(
+        res,
+        await projectService.addClientAsset(
+          req.params.id,
+          req.body,
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.delete(
+  "/:id/assets/:assetId",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await projectService.removeClientAsset(
+          req.params.id,
+          req.params.assetId,
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
   "/:id/content/generate",
   requireCsrf,
   requirePermission("content.generate"),

@@ -417,7 +417,7 @@ export default function CatalogServicesPage() {
             </DialogDescription>
           </DialogHeader>
           {preview ? (
-            <ServiceCard service={preview} index={0} />
+            <ServiceCard service={preview} index={0} interactive={false} />
           ) : null}
         </DialogContent>
       </Dialog>

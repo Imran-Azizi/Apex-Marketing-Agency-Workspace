@@ -202,6 +202,11 @@ export async function createProjectGraph(tx, {
     customAspectRatio: trimOrNull(brief.customAspectRatio),
   };
 
+  if (source === 'PORTAL') {
+    const customerNotes = trimOrNull(brief.notes);
+    if (customerNotes) briefPayload.notes = customerNotes;
+  }
+
   if (source === 'INTERNAL') {
     briefPayload.managerNotes = trimOrNull(brief.notes);
     briefPayload.createdBy = 'INTERNAL';

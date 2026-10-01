@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { CoverImage } from "@/components/media/cover-image";
+import { ResponsiveCoverImage } from "@/components/landing/responsive-cover-image";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { LandingHero } from "@/lib/landing-content";
+import { pickResponsiveImageSrc } from "@/lib/landing-responsive-image";
 
 export function LandingHeroView({
   hero,
@@ -24,6 +25,17 @@ export function LandingHeroView({
         ? "items-end text-end"
         : "items-center text-center";
 
+  const hasBackgroundImage = Boolean(
+    hero.backgroundImageSrc || hero.mobileBackgroundImageSrc,
+  );
+  const videoPoster =
+    hero.backgroundVideoPosterSrc ||
+    pickResponsiveImageSrc(
+      hero.backgroundImageSrc,
+      hero.mobileBackgroundImageSrc,
+    ) ||
+    undefined;
+
   const inner = (
     <section
       className={cn(
@@ -40,18 +52,20 @@ export function LandingHeroView({
           <video
             className="h-full w-full object-cover"
             src={hero.backgroundVideoSrc}
-            poster={hero.backgroundVideoPosterSrc || hero.backgroundImageSrc || undefined}
+            poster={videoPoster}
             autoPlay
             muted
             loop
             playsInline
             preload="metadata"
           />
-        ) : hero.backgroundImageSrc ? (
-          <CoverImage
-            src={hero.backgroundImageSrc}
+        ) : hasBackgroundImage ? (
+          <ResponsiveCoverImage
+            desktopSrc={hero.backgroundImageSrc}
+            mobileSrc={hero.mobileBackgroundImageSrc}
             alt=""
-            sizes="100vw"
+            desktopSizes="100vw"
+            mobileSizes="100vw"
             priority
             className="object-cover"
           />
@@ -102,5 +116,9 @@ export function LandingHeroView({
     </section>
   );
 
-  return <div className="landing-hero-mobile w-full max-w-full overflow-hidden">{inner}</div>;
+  return (
+    <div className="landing-hero-mobile w-full max-w-full overflow-hidden">
+      {inner}
+    </div>
+  );
 }

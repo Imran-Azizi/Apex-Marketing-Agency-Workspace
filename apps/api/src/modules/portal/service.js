@@ -2003,6 +2003,7 @@ export const briefSchema = z.object({
     )
     .optional(),
   title: z.string().optional(),
+  notes: z.string().trim().max(4000).optional().nullable(),
   serviceId: z.string().optional(),
   idempotencyKey: z.string().trim().min(8).max(80).optional(),
 });

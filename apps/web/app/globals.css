@@ -778,3 +778,25 @@
 [data-phone-country-menu] {
   z-index: 200 !important;
 }
+
+/* Landing page auto-responsive helpers */
+.landing-el {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.landing-el img,
+.landing-el video,
+.landing-el iframe {
+  max-width: 100%;
+}
+
+/* Builder drag affordance */
+[draggable="true"] {
+  cursor: grab;
+}
+
+[draggable="true"]:active {
+  cursor: grabbing;
+}

@@ -43,7 +43,7 @@ test("sanitizeLandingContent strips removed html/container elements safely", () 
         elements: [
           {
             type: "html",
-            content: { html: '<img src=x onerror=alert(1)><p>ok</p>' },
+            content: { html: "<img src=x onerror=alert(1)><p>ok</p>" },
           },
           {
             type: "container",
@@ -60,10 +60,106 @@ test("sanitizeLandingContent strips removed html/container elements safely", () 
   assert.equal(clean.version, 1);
   assert.equal(clean.hero.overlayOpacity <= 0.9, true);
   assert.equal(clean.hero.ctaUrl.startsWith("javascript"), false);
-  assert.equal(clean.sections[0].elements.some((el) => el.type === "html"), false);
-  assert.equal(clean.sections[0].elements.some((el) => el.type === "container"), false);
-  assert.equal(clean.sections[0].elements.some((el) => el.type === "paragraph" && el.content.text === "nested"), true);
-  assert.equal(clean.sections[0].elements.some((el) => el.type === "heading"), true);
+  assert.equal(
+    clean.sections[0].elements.some((el) => el.type === "html"),
+    false,
+  );
+  assert.equal(
+    clean.sections[0].elements.some((el) => el.type === "container"),
+    false,
+  );
+  assert.equal(
+    clean.sections[0].elements.some(
+      (el) => el.type === "paragraph" && el.content.text === "nested",
+    ),
+    true,
+  );
+  assert.equal(
+    clean.sections[0].elements.some((el) => el.type === "heading"),
+    true,
+  );
+});
+
+test("sanitizeLandingContent strips removed rich-text/newsletter/logo-showcase safely", () => {
+  const dirty = {
+    hero: { heading: "Hi" },
+    sections: [
+      {
+        type: "content",
+        elements: [
+          { type: "rich-text", content: { html: "<p>x</p>" } },
+          { type: "newsletter-cta", content: { heading: "N" } },
+          { type: "logo-showcase", content: { items: [] } },
+          { type: "paragraph", content: { text: "keep" } },
+        ],
+      },
+    ],
+  };
+  const clean = sanitizeLandingContent(dirty, { title: "Hi" });
+  assert.equal(
+    clean.sections[0].elements.some((el) => el.type === "rich-text"),
+    false,
+  );
+  assert.equal(
+    clean.sections[0].elements.some((el) => el.type === "newsletter-cta"),
+    false,
+  );
+  assert.equal(
+    clean.sections[0].elements.some((el) => el.type === "logo-showcase"),
+    false,
+  );
+  assert.equal(
+    clean.sections[0].elements.some(
+      (el) => el.type === "paragraph" && el.content.text === "keep",
+    ),
+    true,
+  );
+});
+
+test("sanitizeLandingContent preserves responsive image fields with legacy fallback", () => {
+  const dirty = {
+    hero: { heading: "Hi" },
+    sections: [
+      {
+        type: "content",
+        elements: [
+          {
+            type: "image",
+            content: {
+              imageKey: "images/landing/desktop.jpg",
+              imageUrl: "https://cdn.example.com/desktop.jpg",
+              mobileImageKey: "images/landing/mobile.jpg",
+              mobileImageUrl: "https://cdn.example.com/mobile.jpg",
+              alt: "بنر",
+            },
+          },
+          {
+            type: "image",
+            content: {
+              imageKey: "images/landing/legacy.jpg",
+              imageUrl: "https://cdn.example.com/legacy.jpg",
+              alt: "قدیمی",
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const clean = sanitizeLandingContent(dirty, { title: "Hi" });
+  const [responsive, legacy] = clean.sections[0].elements;
+  assert.equal(responsive.type, "image");
+  assert.equal(responsive.content.imageKey, "images/landing/desktop.jpg");
+  assert.equal(
+    responsive.content.mobileImageKey,
+    "images/landing/mobile.jpg",
+  );
+  assert.equal(
+    responsive.content.mobileImageUrl,
+    "https://cdn.example.com/mobile.jpg",
+  );
+  assert.equal(legacy.content.imageKey, "images/landing/legacy.jpg");
+  assert.equal(legacy.content.mobileImageKey, null);
+  assert.equal(legacy.content.mobileImageUrl, "");
 });
 
 test("contentsEqual detects unpublished changes", () => {

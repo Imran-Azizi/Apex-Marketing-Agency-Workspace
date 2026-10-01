@@ -172,6 +172,10 @@ type ClientAssetsUploaderProps = {
   createPath?: string;
   /** API path builder for deleting an asset. Defaults to portal. */
   deletePath?: (id: string) => string;
+  /** Hide the already-saved library. Used when the parent lists assets itself. */
+  showExistingAssets?: boolean;
+  /** Copy for the in-progress banner. */
+  notice?: "create" | "attach";
 };
 
 function kindIcon(kind: string, mime?: string | null) {
@@ -430,6 +434,8 @@ export function ClientAssetsUploader({
   onUploadStateChange,
   createPath = "/portal/assets",
   deletePath = (id: string) => `/portal/assets/${id}`,
+  showExistingAssets = true,
+  notice = "create",
 }: ClientAssetsUploaderProps) {
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [localPreviews, setLocalPreviews] = useState<Record<string, string>>(
@@ -670,6 +676,7 @@ export function ClientAssetsUploader({
   }
 
   function renderAssetList(list: ClientAssetItem[]) {
+    if (!showExistingAssets) return null;
     if (!list.length) {
       return (
         <p className="text-xs text-muted-foreground">
@@ -762,7 +769,9 @@ export function ClientAssetsUploader({
         >
           {uploadState.isUploading ? (
             <p>
-              در حال آپلود {uploadState.activeCount.toLocaleString("fa-AF", { numberingSystem: "latn" })} فایل — تا پایان آپلود امکان ساخت پروژه وجود ندارد.
+              {notice === "attach"
+                ? `در حال آپلود ${uploadState.activeCount.toLocaleString("fa-AF", { numberingSystem: "latn" })} فایل...`
+                : `در حال آپلود ${uploadState.activeCount.toLocaleString("fa-AF", { numberingSystem: "latn" })} فایل — تا پایان آپلود امکان ساخت پروژه وجود ندارد.`}
             </p>
           ) : (
             <p>
@@ -885,7 +894,7 @@ export function ClientAssetsUploader({
         {renderAssetList(grouped.REFERENCE || [])}
       </div>
 
-      {(grouped.OTHER?.length ?? 0) > 0 && (
+      {showExistingAssets && (grouped.OTHER?.length ?? 0) > 0 && (
         <div className="space-y-2">
           <Label>سایر دارایی‌ها</Label>
           {renderAssetList(grouped.OTHER)}

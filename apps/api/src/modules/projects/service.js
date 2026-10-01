@@ -25,8 +25,13 @@ import {
   normalizeIdempotencyKey,
   withProjectCreateLock,
 } from './projectCreateGuard.js';
-import { canAccessProject } from '../../services/projectAccess.js';
+import { assertProjectAccess, canAccessProject } from '../../services/projectAccess.js';
 import { storage } from '../../services/storage.js';
+import { serializePortalAsset } from '../portal/helpers.js';
+import {
+  assertClientAssetImageFile,
+  isClientAssetImageKind,
+} from '../files/image-formats.js';
 import { z } from 'zod';
 
 const createProjectSchema = z.object({
@@ -70,6 +75,27 @@ const createProjectSchema = z.object({
   ),
   clientAssetIds: z.array(z.string()).optional(),
   idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
+});
+
+const PROJECT_CLIENT_ASSET_KINDS = new Set([
+  'LOGO',
+  'PRODUCT_IMAGE',
+  'VIDEO',
+  'BRANDBOOK',
+  'CATALOG',
+  'REFERENCE',
+  'PRONUNCIATION',
+  'AUDIO',
+  'OTHER',
+]);
+
+const attachProjectAssetSchema = z.object({
+  kind: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(300),
+  storageKey: z.string().trim().min(1).max(500),
+  mimeType: z.string().trim().max(200).optional().nullable(),
+  sizeBytes: z.number().int().nonnegative().optional().nullable(),
+  meta: z.record(z.string(), z.unknown()).optional().nullable(),
 });
 
 function stripFinanceForRole(project, roleCode) {
@@ -1019,5 +1045,100 @@ export const projectService = {
         throw err;
       }
     });
+  },
+
+  async addClientAsset(projectId, body, auth, req) {
+    const project = await assertProjectAccess(projectId, auth);
+    const parsed = attachProjectAssetSchema.parse(body);
+    const kind = parsed.kind.toUpperCase();
+    if (!PROJECT_CLIENT_ASSET_KINDS.has(kind)) {
+      throw new AppError('نوع فایل مجاز نیست', 400, 'VALIDATION');
+    }
+    if (isClientAssetImageKind(kind)) {
+      assertClientAssetImageFile({
+        name: parsed.name,
+        mimeType: parsed.mimeType,
+        sizeBytes: parsed.sizeBytes,
+        kind,
+      });
+    }
+
+    const asset = await prisma.$transaction(async (tx) => {
+      const created = await tx.clientAsset.create({
+        data: {
+          crmCustomerId: project.crmCustomerId,
+          kind,
+          name: parsed.name,
+          storageKey: parsed.storageKey,
+          mimeType: parsed.mimeType || null,
+          sizeBytes: parsed.sizeBytes != null ? Number(parsed.sizeBytes) : null,
+          meta: parsed.meta || undefined,
+        },
+      });
+      await tx.assetReference.create({
+        data: { projectId: project.id, clientAssetId: created.id },
+      });
+      return created;
+    });
+
+    await rebuildProjectContext(project.id);
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_ASSET_CREATE',
+      entityType: 'ClientAsset',
+      entityId: asset.id,
+      after: { projectId: project.id, kind: asset.kind, name: asset.name },
+      req,
+    });
+
+    return serializePortalAsset(asset);
+  },
+
+  async removeClientAsset(projectId, assetId, auth, req) {
+    const project = await assertProjectAccess(projectId, auth);
+    const ref = await prisma.assetReference.findFirst({
+      where: { projectId: project.id, clientAssetId: assetId },
+      include: { clientAsset: true },
+    });
+    const asset = ref?.clientAsset;
+    if (!ref || !asset || asset.deletedAt || asset.crmCustomerId !== project.crmCustomerId) {
+      throw new AppError('فایل یافت نشد', 404, 'NOT_FOUND');
+    }
+
+    const otherRefs = await prisma.assetReference.count({
+      where: {
+        clientAssetId: asset.id,
+        NOT: { id: ref.id },
+      },
+    });
+
+    if (otherRefs === 0) {
+      await storage.deleteStoredObject(asset.storageKey, {
+        required: true,
+        logTag: 'project-client-asset',
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.assetReference.delete({ where: { id: ref.id } });
+      if (otherRefs === 0) {
+        await tx.clientAsset.update({
+          where: { id: asset.id },
+          data: { deletedAt: new Date() },
+        });
+      }
+    });
+
+    await rebuildProjectContext(project.id);
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_ASSET_DELETE',
+      entityType: 'ClientAsset',
+      entityId: asset.id,
+      before: { projectId: project.id, kind: asset.kind, name: asset.name },
+      req,
+    });
+
+    return { deleted: true };
   },
 };

@@ -564,7 +564,7 @@ function buildCustomerOverview(ctx: MaterialsCtx): ProjectCustomerOverviewData {
       city: crm?.city || briefString(brief, "city") || null,
       normalizedWhatsapp: crm?.normalizedWhatsapp || null,
       whatsappRaw: crm?.whatsappRaw || null,
-      notes: crm?.notes || briefString(brief, "notes") || null,
+      notes: briefString(brief, "notes") || null,
     },
     assets,
   };

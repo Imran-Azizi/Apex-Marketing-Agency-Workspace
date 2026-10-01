@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
+  AlertTriangle,
   Download,
   Eye,
   ExternalLink,
@@ -11,8 +12,10 @@ import {
   LayoutGrid,
   LayoutList,
   Link2,
+  Loader2,
   Play,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +24,8 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -271,18 +276,26 @@ export function PortalProjectAssets({
   description = "لوگو، تصاویر، ویدیو و اسناد",
   emptyTitle = "دارایی‌ای ثبت نشده است",
   emptyDescription = "پس از آپلود لوگو، تصویر، ویدیو یا سند، اینجا نمایش داده می‌شود.",
+  headerActions,
+  onDeleteAsset,
 }: {
   assets: PortalProjectAsset[];
   title?: string;
   description?: string;
   emptyTitle?: string;
   emptyDescription?: string;
+  headerActions?: ReactNode;
+  onDeleteAsset?: (asset: PortalProjectAsset) => Promise<void>;
 }) {
   const [preview, setPreview] = useState<PreviewState>(null);
   const [query, setQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [groupMode, setGroupMode] = useState<GroupMode>("kind");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<PortalProjectAsset | null>(
+    null,
+  );
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -329,6 +342,41 @@ export function PortalProjectAssets({
       items: map.get(s.id)!,
     }));
   }, [filtered, groupMode]);
+
+  const confirmDelete = async () => {
+    if (!pendingDelete || !onDeleteAsset) return;
+    setDeletingId(pendingDelete.id);
+    try {
+      await onDeleteAsset(pendingDelete);
+      setPendingDelete(null);
+    } catch {
+      // Caller reports the error.
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const deleteButton = (asset: PortalProjectAsset) => {
+    if (!onDeleteAsset) return null;
+    const busy = deletingId === asset.id;
+    return (
+      <Button
+        type="button"
+        size="icon"
+        variant="outline"
+        className="h-9 w-9 shrink-0 border-destructive/30 bg-background/95 text-destructive shadow-sm hover:bg-destructive/10 hover:text-destructive"
+        disabled={busy}
+        aria-label="حذف دارایی"
+        onClick={() => setPendingDelete(asset)}
+      >
+        {busy ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Trash2 className="h-4 w-4" />
+        )}
+      </Button>
+    );
+  };
 
   const openPreview = (asset: PortalProjectAsset, titleText: string) => {
     const refUrl = getRefUrl(asset);
@@ -430,8 +478,11 @@ export function PortalProjectAssets({
     return (
       <li
         key={asset.id}
-        className="group flex flex-col overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+        className="group relative flex flex-col overflow-hidden rounded-xl border border-border/80 bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
       >
+        {onDeleteAsset ? (
+          <div className="absolute end-2 top-2 z-10">{deleteButton(asset)}</div>
+        ) : null}
         <button
           type="button"
           onClick={() => openPreview(asset, titleText)}
@@ -662,6 +713,7 @@ export function PortalProjectAssets({
               {downloadingId === asset.id ? "…" : "دانلود"}
             </Button>
           ) : null}
+          {deleteButton(asset)}
         </div>
       </li>
     );
@@ -758,6 +810,7 @@ export function PortalProjectAssets({
               {downloadingId === asset.id ? "…" : "دانلود"}
             </Button>
           ) : null}
+          {deleteButton(asset)}
         </div>
       </li>
     );
@@ -775,7 +828,8 @@ export function PortalProjectAssets({
             <p className="text-xs text-muted-foreground sm:text-sm">{description}</p>
           </div>
 
-          <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:items-center lg:w-auto">
+          <div className="flex w-full flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto">
+            {headerActions}
             <div className="relative min-w-0 flex-1 lg:w-64">
               <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -886,6 +940,45 @@ export function PortalProjectAssets({
           )}
         </div>
       </div>
+
+      <Dialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={(open) => {
+          if (!open && !deletingId) setPendingDelete(null);
+        }}
+      >
+        <DialogContent dir="rtl" className="text-start sm:max-w-md">
+          <DialogHeader className="text-start sm:text-start">
+            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+              <AlertTriangle className="h-6 w-6 text-destructive" />
+            </div>
+            <DialogTitle>حذف دارایی</DialogTitle>
+            <DialogDescription>
+              {pendingDelete
+                ? `«${displayAssetName(pendingDelete.name, pendingDelete.kind)}» از این پروژه حذف می‌شود. اگر دارایی فقط به همین پروژه وصل باشد، فایل ذخیره‌شده هم پاک می‌شود.`
+                : "این دارایی از پروژه حذف می‌شود."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPendingDelete(null)}
+              disabled={Boolean(deletingId)}
+            >
+              انصراف
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void confirmDelete()}
+              disabled={Boolean(deletingId) || !pendingDelete}
+            >
+              {deletingId ? "در حال حذف..." : "بله، حذف شود"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={Boolean(preview)}

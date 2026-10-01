@@ -17,6 +17,7 @@ export function invalidatePublicPortfolioCache() {
 /** Drop cached public services list after manager create/edit/publish/delete. */
 export function invalidatePublicServicesCache() {
   publicOriginCache.invalidate('services');
+  publicOriginCache.invalidatePrefix('services-slug:');
 }
 
 /** Drop cached public customers showcase after manager create/edit/reorder/delete. */

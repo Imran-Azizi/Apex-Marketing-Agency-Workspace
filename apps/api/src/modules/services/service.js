@@ -183,6 +183,46 @@ export const servicesService = {
     });
   },
 
+  async getPublicBySlug(slug) {
+    const normalized = String(slug || "").trim();
+    if (!normalized) {
+      throw new AppError("خدمت یافت نشد", 404, "NOT_FOUND");
+    }
+    const row = await prisma.service.findFirst({
+      where: {
+        slug: normalized,
+        isPublished: true,
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        imageKey: true,
+        startingPrice: true,
+        isPublished: true,
+        sortOrder: true,
+        ctaLabel: true,
+        ctaHref: true,
+      },
+    });
+    if (!row) throw new AppError("خدمت یافت نشد", 404, "NOT_FOUND");
+    const item = serializeService(row);
+    return {
+      id: item.id,
+      name: item.name,
+      title: item.title,
+      slug: item.slug,
+      description: item.description,
+      imageUrl: item.imageUrl,
+      startingPrice: item.startingPrice,
+      sortOrder: item.sortOrder,
+      ctaLabel: item.ctaLabel,
+      ctaHref: item.ctaHref,
+    };
+  },
+
   async getById(id) {
     const row = await prisma.service.findFirst({
       where: { id, deletedAt: null },

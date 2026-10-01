@@ -3,20 +3,16 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { Monitor, Smartphone, Tablet } from "lucide-react";
-import { useState } from "react";
 import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/loading/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LandingPageRenderer } from "@/components/landing/landing-page-renderer";
-import { cn } from "@/lib/utils";
 import type { LandingPage } from "@/lib/landing-pages";
 import type { PublicContactInfo } from "@/lib/contact";
 
 export default function LandingPagePreviewPage() {
   const params = useParams<{ id: string }>();
-  const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const query = useQuery({
     queryKey: ["landing-page", params.id],
     queryFn: () => apiGet<LandingPage>(`/landing-pages/${params.id}`),
@@ -42,8 +38,6 @@ export default function LandingPagePreviewPage() {
   }
 
   const page = query.data;
-  const frame =
-    device === "mobile" ? "max-w-[390px]" : device === "tablet" ? "max-w-[768px]" : "max-w-5xl";
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -54,24 +48,13 @@ export default function LandingPagePreviewPage() {
             این پیش‌نمایش صفحه را منتشر نمی‌کند.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border p-0.5">
-            <Button size="icon" variant={device === "desktop" ? "secondary" : "ghost"} className="h-8 w-8" onClick={() => setDevice("desktop")}>
-              <Monitor className="h-4 w-4" />
-            </Button>
-            <Button size="icon" variant={device === "tablet" ? "secondary" : "ghost"} className="h-8 w-8" onClick={() => setDevice("tablet")}>
-              <Tablet className="h-4 w-4" />
-            </Button>
-            <Button size="icon" variant={device === "mobile" ? "secondary" : "ghost"} className="h-8 w-8" onClick={() => setDevice("mobile")}>
-              <Smartphone className="h-4 w-4" />
-            </Button>
-          </div>
-          <Button variant="outline" size="sm" asChild>
-            <Link href={`/manager/landing-pages/${page.id}`}>بازگشت به سازنده</Link>
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" asChild>
+          <Link href={`/manager/landing-pages/${page.id}`}>
+            بازگشت به سازنده
+          </Link>
+        </Button>
       </div>
-      <div className={cn("mx-auto overflow-hidden rounded-2xl border bg-background shadow-sm", frame)}>
+      <div className="mx-auto w-full max-w-[1200px] overflow-hidden rounded-2xl border bg-background shadow-sm">
         <LandingPageRenderer
           content={page.content}
           contact={contactQ.data}

@@ -22,9 +22,28 @@ try {
 
 const UPLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
-const HEAD_TIMEOUT_MS = 30 * 1000;
+const HEAD_TIMEOUT_MS = 45 * 1000;
 const UPLOAD_RETRY_ATTEMPTS = 4;
 const DELETE_RETRY_ATTEMPTS = 4;
+/** Prefer in-memory PUT for typical landing/editor images (more reliable than streams on slow links). */
+const BUFFER_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+const GLOBAL_STORAGE_HOST = "storage.bunnycdn.com";
+
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 8,
+  maxFreeSockets: 4,
+  timeout: UPLOAD_TIMEOUT_MS,
+  family: 4,
+});
+
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxSockets: 8,
+  maxFreeSockets: 4,
+  timeout: UPLOAD_TIMEOUT_MS,
+  family: 4,
+});
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -131,12 +150,14 @@ function encodePath(pathname) {
     .join("/");
 }
 
-export function bunnyStorageOrigin() {
-  const host = String(env.bunnyStorageHostname || "storage.bunnycdn.com")
+export function bunnyStorageOrigin(hostnameOverride) {
+  const host = String(
+    hostnameOverride || env.bunnyStorageHostname || GLOBAL_STORAGE_HOST,
+  )
     .trim()
     .replace(/^https?:\/\//i, "")
     .replace(/\/+$/, "");
-  return `https://${host || "storage.bunnycdn.com"}`;
+  return `https://${host || GLOBAL_STORAGE_HOST}`;
 }
 
 export function bunnyCdnOrigin() {
@@ -208,14 +229,33 @@ export function signBunnyCdnUrl(url, ttlSeconds = env.signedUrlTtl) {
   return applyBunnyCdnToken(url, env.bunnyCdnTokenKey, ttlSeconds);
 }
 
-function storageApiUrl(storageKey) {
+function storageApiUrl(storageKey, hostnameOverride) {
   ensureConfigured();
   const zone = String(env.bunnyStorageZone).replace(/^\/+|\/+$/g, "");
   const objectPath = bunnyObjectPath(storageKey);
-  return `${bunnyStorageOrigin()}/${encodePath(`${zone}/${objectPath}`)}`;
+  return `${bunnyStorageOrigin(hostnameOverride)}/${encodePath(`${zone}/${objectPath}`)}`;
 }
 
-function requestOnce(url, { method = "GET", headers = {}, body = null, timeoutMs = DOWNLOAD_TIMEOUT_MS } = {}) {
+function configuredStorageHost() {
+  return String(env.bunnyStorageHostname || GLOBAL_STORAGE_HOST)
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+/** Regional host first, then global Bunny endpoint as fallback for flaky routes. */
+function uploadHostCandidates() {
+  const primary = configuredStorageHost() || GLOBAL_STORAGE_HOST;
+  const hosts = [primary];
+  if (primary !== GLOBAL_STORAGE_HOST) hosts.push(GLOBAL_STORAGE_HOST);
+  return hosts;
+}
+
+function requestOnce(
+  url,
+  { method = "GET", headers = {}, body = null, timeoutMs = DOWNLOAD_TIMEOUT_MS } = {},
+) {
   return new Promise((resolve, reject) => {
     let parsed;
     try {
@@ -226,6 +266,24 @@ function requestOnce(url, { method = "GET", headers = {}, body = null, timeoutMs
     }
 
     const lib = parsed.protocol === "http:" ? http : https;
+    const agent = parsed.protocol === "http:" ? httpAgent : httpsAgent;
+    let settled = false;
+    let idleTimer = null;
+
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      reject(err instanceof Error ? err : new Error(String(err || "Request failed")));
+    };
+
+    const succeed = (value) => {
+      if (settled) return;
+      settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      resolve(value);
+    };
+
     const req = lib.request(
       {
         protocol: parsed.protocol,
@@ -234,21 +292,43 @@ function requestOnce(url, { method = "GET", headers = {}, body = null, timeoutMs
         path: `${parsed.pathname}${parsed.search}`,
         method,
         headers,
+        agent,
+        family: 4,
         ALPNProtocols: ["http/1.1"],
+        servername: parsed.hostname,
       },
-      (res) => resolve({ req, res }),
+      (res) => {
+        // Activity received — clear idle timer; caller reads the body.
+        if (idleTimer) clearTimeout(idleTimer);
+        succeed({ req, res });
+      },
     );
 
-    req.setTimeout(timeoutMs, () => {
-      req.destroy(new Error("Request Timeout"));
+    const armIdleTimeout = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        const err = new Error("Request Timeout");
+        err.code = "ETIMEDOUT";
+        req.destroy(err);
+        fail(err);
+      }, Math.max(5_000, Number(timeoutMs) || DOWNLOAD_TIMEOUT_MS));
+      if (typeof idleTimer.unref === "function") idleTimer.unref();
+    };
+
+    armIdleTimeout();
+    req.on("socket", (socket) => {
+      socket.setKeepAlive(true, 15_000);
+      socket.on("connect", armIdleTimeout);
+      socket.on("data", armIdleTimeout);
     });
-    req.on("error", reject);
+    req.on("error", fail);
 
     if (body && typeof body.pipe === "function") {
       body.on("error", (err) => {
         req.destroy(err);
-        reject(err);
+        fail(err);
       });
+      body.on("data", armIdleTimeout);
       body.pipe(req);
       return;
     }
@@ -282,9 +362,16 @@ function authHeaders(extra = {}) {
   };
 }
 
-async function putObject({ storageKey, body, contentLength, contentType, timeoutMs }) {
+async function putObject({
+  storageKey,
+  body,
+  contentLength,
+  contentType,
+  timeoutMs,
+  hostname,
+}) {
   ensureConfigured();
-  const url = storageApiUrl(storageKey);
+  const url = storageApiUrl(storageKey, hostname);
   const headers = authHeaders({
     "Content-Type": contentType || "application/octet-stream",
     "Content-Length": String(contentLength),
@@ -299,7 +386,7 @@ async function putObject({ storageKey, body, contentLength, contentType, timeout
 
   const responseBody = await readResponseBuffer(res, { maxBytes: 256 * 1024 });
   if (res.statusCode >= 200 && res.statusCode < 300) {
-    return { statusCode: res.statusCode };
+    return { statusCode: res.statusCode, hostname: hostname || configuredStorageHost() };
   }
 
   const err = new Error(
@@ -311,24 +398,35 @@ async function putObject({ storageKey, body, contentLength, contentType, timeout
 
 async function putObjectWithRetry(opts, { attempts = UPLOAD_RETRY_ATTEMPTS, filename } = {}) {
   let lastErr = null;
-  for (let i = 0; i < attempts; i++) {
+  const hosts = uploadHostCandidates();
+  const totalAttempts = Math.max(attempts, hosts.length);
+
+  for (let i = 0; i < totalAttempts; i++) {
+    const hostname = hosts[Math.min(i, hosts.length - 1)];
     try {
       let body = opts.body;
       if (opts.filePath) {
         body = fs.createReadStream(opts.filePath);
       }
-      return await putObject({ ...opts, body });
+      const result = await putObject({ ...opts, body, hostname });
+      if (i > 0) {
+        console.info(
+          `[bunny] upload succeeded on retry via ${hostname} (key=${opts.storageKey})`,
+        );
+      }
+      return result;
     } catch (err) {
       lastErr = err;
-      const retryable = isTransientNetworkError(err) || Number(err.statusCode) >= 500;
+      const retryable =
+        isTransientNetworkError(err) || Number(err.statusCode) >= 500;
       console.warn(
-        `[bunny] upload attempt ${i + 1}/${attempts} failed:`,
+        `[bunny] upload attempt ${i + 1}/${totalAttempts} failed:`,
         sanitizeErrorText(err?.message || err),
-        `(key=${opts.storageKey}, bytes=${opts.contentLength}, file=${filename || "-"})`,
+        `(host=${hostname}, key=${opts.storageKey}, bytes=${opts.contentLength}, file=${filename || "-"})`,
         retryable ? "(retrying)" : "(not retrying)",
       );
-      if (!retryable || i === attempts - 1) break;
-      await sleep(Math.min(8000, 1000 * 2 ** i));
+      if (!retryable || i === totalAttempts - 1) break;
+      await sleep(Math.min(10_000, 1200 * 2 ** i));
     }
   }
   throw lastErr || new Error("Bunny upload failed");
@@ -485,16 +583,32 @@ export const bunnyDriver = {
     }
 
     try {
-      await putObjectWithRetry(
-        {
-          storageKey: key,
-          filePath,
-          contentLength: length,
-          contentType,
-          timeoutMs: UPLOAD_TIMEOUT_MS,
-        },
-        { filename: safeName || filename },
-      );
+      // Small/medium assets (landing images, posters, etc.): buffer PUT is far
+      // more reliable than streaming on high-latency or unstable routes to Bunny.
+      if (length > 0 && length <= BUFFER_UPLOAD_MAX_BYTES) {
+        const buffer = await fs.promises.readFile(filePath);
+        await putObjectWithRetry(
+          {
+            storageKey: key,
+            body: buffer,
+            contentLength: buffer.length,
+            contentType,
+            timeoutMs: UPLOAD_TIMEOUT_MS,
+          },
+          { filename: safeName || filename },
+        );
+      } else {
+        await putObjectWithRetry(
+          {
+            storageKey: key,
+            filePath,
+            contentLength: length,
+            contentType,
+            timeoutMs: UPLOAD_TIMEOUT_MS,
+          },
+          { filename: safeName || filename },
+        );
+      }
 
       const url = this.publicUrl(key);
       const saved = {
@@ -516,9 +630,9 @@ export const bunnyDriver = {
       return saved;
     } catch (err) {
       console.error(
-        "[bunny] stream upload failed:",
+        "[bunny] upload failed:",
         sanitizeErrorText(err?.message || err),
-        `(key=${key}, bytes=${length})`,
+        `(key=${key}, bytes=${length}, host=${configuredStorageHost()})`,
       );
       throw wrapBunnyError(err, "Bunny upload failed");
     }

@@ -9,6 +9,10 @@ import {
   createLandingPageSchema,
   updateLandingPageSchema,
 } from "./service.js";
+import {
+  generateLandingAiSchema,
+  generateLandingContentFromPrompt,
+} from "./ai-generate.js";
 
 const router = Router();
 router.use(requireAuth, requireInternal);
@@ -28,6 +32,21 @@ router.get("/", requirePermission("landing_pages.view"), async (req, res, next) 
     next(e);
   }
 });
+
+/** AI generate — must be registered before /:id routes. */
+router.post(
+  "/ai/generate",
+  requireCsrf,
+  requirePermission("landing_pages.edit"),
+  validate(generateLandingAiSchema),
+  async (req, res, next) => {
+    try {
+      ok(res, await generateLandingContentFromPrompt(req.body));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
 
 router.get("/:id", requirePermission("landing_pages.view"), async (req, res, next) => {
   try {

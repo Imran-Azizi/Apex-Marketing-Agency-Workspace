@@ -1,5 +1,10 @@
 import type { LandingContent } from "@/lib/landing-content";
-import { defaultLandingContent } from "@/lib/landing-content";
+import {
+  defaultLandingContent,
+  normalizeElement,
+  normalizeSectionSettings,
+  stripRemovedFromContent,
+} from "@/lib/landing-content";
 
 export const RESERVED_LANDING_SLUGS = new Set([
   "api",
@@ -101,13 +106,25 @@ export type PublicLandingPage = {
   publishedAt: string | null;
 };
 
-export function ensureLandingContent(value: unknown, title = ""): LandingContent {
+export function ensureLandingContent(
+  value: unknown,
+  title = "",
+): LandingContent {
   if (value && typeof value === "object" && "hero" in (value as object)) {
     const content = value as LandingContent;
-    return {
+    const stripped = stripRemovedFromContent({
       version: content.version || 1,
       hero: { ...defaultLandingContent(title).hero, ...content.hero },
       sections: Array.isArray(content.sections) ? content.sections : [],
+    });
+    return {
+      ...stripped,
+      sections: stripped.sections.map((section) => ({
+        ...section,
+        settings: normalizeSectionSettings(section.settings),
+        elements: (section.elements || []).map(normalizeElement),
+        columns: section.columns?.map((col) => col.map(normalizeElement)),
+      })),
     };
   }
   return defaultLandingContent(title);

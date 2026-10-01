@@ -382,9 +382,18 @@ async function completeWithFreeOpenRouterModels({
         info.code === 'insufficient_quota' ||
         info.code === 'server_error' ||
         info.code === 'timeout' ||
-        info.code === 'context_length'
+        info.code === 'context_length' ||
+        info.code === 'invalid_response' ||
+        err?.code === 'invalid_response'
       ) {
-        markFreeModelUnavailable(model.id, cooldownMsForError(info.code));
+        markFreeModelUnavailable(
+          model.id,
+          cooldownMsForError(info.code || err?.code || 'server_error'),
+        );
+      }
+      // Brief pause after rate-limit so the next free provider is less likely to 429 immediately.
+      if (info.code === 'rate_limit') {
+        await new Promise((r) => setTimeout(r, 700));
       }
     }
   }

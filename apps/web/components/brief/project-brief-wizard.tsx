@@ -611,6 +611,8 @@ export function ProjectBriefWizard({
 
     if (mode === "portal") {
       payload.opportunityId = opportunityId;
+      const customerNote = notes.trim();
+      if (customerNote) payload.notes = customerNote;
     }
 
     if (mode === "internal") {
@@ -955,6 +957,20 @@ export function ProjectBriefWizard({
                       onChange={(e) => setCta(e.target.value)}
                     />
                   </Field>
+                  {mode === "portal" ? (
+                    <Field className="sm:col-span-2">
+                      <FieldLabel htmlFor="customer-notes">یادداشت</FieldLabel>
+                      <Textarea
+                        id="customer-notes"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className="min-h-[5.5rem] resize-y"
+                        rows={3}
+                        maxLength={4000}
+                        placeholder="توضیحات تکمیلی (اختیاری) — همان متن برای تیم پروژه نمایش داده می‌شود"
+                      />
+                    </Field>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>

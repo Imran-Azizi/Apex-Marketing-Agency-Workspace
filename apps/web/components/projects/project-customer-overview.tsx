@@ -1,13 +1,19 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   Clapperboard,
   ShieldCheck,
+  UploadCloud,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
+import { toast } from "sonner";
+import { ApiError, apiDelete } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { ProjectAssetUploadDialog } from "@/components/projects/project-asset-upload-dialog";
 import {
   Card,
   CardContent,
@@ -118,11 +124,13 @@ function FieldTile({
   value,
   ltr,
   wide,
+  multiline,
 }: {
   label: string;
   value?: string | null;
   ltr?: boolean;
   wide?: boolean;
+  multiline?: boolean;
 }) {
   const trimmed = value?.trim() || "";
   return (
@@ -135,7 +143,12 @@ function FieldTile({
       <p className="text-[10px] font-medium text-muted-foreground sm:text-[11px]">
         {label}
       </p>
-      <p className="mt-1 text-xs font-medium leading-6 sm:mt-1.5 sm:text-sm sm:leading-relaxed">
+      <p
+        className={cn(
+          "mt-1 text-xs font-medium leading-6 sm:mt-1.5 sm:text-sm sm:leading-relaxed",
+          multiline && "whitespace-pre-wrap",
+        )}
+      >
         <MixedValue value={trimmed} ltr={ltr} empty={!trimmed} />
       </p>
     </div>
@@ -236,13 +249,40 @@ function SectionCard({
   );
 }
 
+/** Customer project note only. Profile notes and manager notes are separate fields. */
+function customerBriefNote(brief: Record<string, unknown>): string {
+  const raw = brief.notes;
+  if (typeof raw !== "string") return "";
+  return raw.trim();
+}
+
+function dropProjectAsset(
+  current: unknown,
+  assetId: string,
+): unknown {
+  if (!current || typeof current !== "object") return current;
+  const data = current as {
+    assetRefs?: Array<{ clientAsset?: { id?: string } | null }>;
+  };
+  if (!Array.isArray(data.assetRefs)) return current;
+  return {
+    ...data,
+    assetRefs: data.assetRefs.filter((ref) => ref.clientAsset?.id !== assetId),
+  };
+}
+
 /** Renders only the selected info tab — never mounts sibling sections. */
 export function ProjectInfoTabContent({
   tab,
   project,
+  assetManagement,
 }: {
   tab: ProjectInfoTabId;
   project: ProjectCustomerOverviewData;
+  assetManagement?: {
+    projectId: string;
+    canManage: boolean;
+  };
 }) {
   const brief = project.brief || {};
 
@@ -322,7 +362,7 @@ export function ProjectInfoTabContent({
     const brandClaims = asString(brief.allowedClaims);
     const mandatoryTexts = asString(brief.mandatoryTexts);
     const brandLimits = asString(brief.brandLimits);
-    const briefNotes = asString(brief.notes) || project.crmCustomer.notes || "";
+    const briefNotes = customerBriefNote(brief);
     const hasBrandSection = Boolean(
       brandClaims || mandatoryTexts || brandLimits,
     );
@@ -409,7 +449,7 @@ export function ProjectInfoTabContent({
             title="یادداشت‌های مشتری"
             description="توضیحات تکمیلی ثبت‌شده هنگام ایجاد پروژه"
           >
-            <FieldTile label="یادداشت" value={briefNotes} wide />
+            <FieldTile label="یادداشت" value={briefNotes} wide multiline />
           </SectionCard>
         ) : null}
       </div>
@@ -418,15 +458,84 @@ export function ProjectInfoTabContent({
 
   if (tab === "assets") {
     return (
-      <PortalProjectAssets
+      <ProjectAssetsPanel
         assets={fileAssets}
-        title="فایل‌ها و دارایی‌های مشتری"
-        description="فایل‌ها و رسانه‌های ارسالی توسط مشتری"
-        emptyTitle="دارایی‌ای آپلود نشده است"
-        emptyDescription="مشتری هنوز فایلی ارسال نکرده است. پس از آپلود از پورتال، اینجا نمایش داده می‌شود."
+        projectId={assetManagement?.projectId || project.id}
+        canManage={Boolean(assetManagement?.canManage && assetManagement.projectId)}
       />
     );
   }
 
   return null;
+}
+
+function ProjectAssetsPanel({
+  assets,
+  projectId,
+  canManage,
+}: {
+  assets: PortalProjectAsset[];
+  projectId: string;
+  canManage: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [uploadOpen, setUploadOpen] = useState(false);
+
+  const refreshAssets = () => {
+    void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+  };
+
+  const deleteAsset = async (asset: PortalProjectAsset) => {
+    try {
+      await apiDelete(`/projects/${projectId}/assets/${asset.id}`);
+      queryClient.setQueryData(["project", projectId], (current) =>
+        dropProjectAsset(current, asset.id),
+      );
+      refreshAssets();
+      toast.success("دارایی حذف شد");
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError ? error.message : "حذف دارایی ناموفق بود",
+      );
+      throw error;
+    }
+  };
+
+  return (
+    <>
+      <PortalProjectAssets
+        assets={assets}
+        title="فایل‌ها و دارایی‌های مشتری"
+        description="فایل‌ها و رسانه‌های مرتبط با این پروژه"
+        emptyTitle="دارایی‌ای آپلود نشده است"
+        emptyDescription={
+          canManage
+            ? "هنوز دارایی‌ای برای این پروژه ثبت نشده است. با «آپلود دارایی» فایل را اضافه کنید."
+            : "مشتری هنوز فایلی ارسال نکرده است. پس از آپلود از پورتال، اینجا نمایش داده می‌شود."
+        }
+        headerActions={
+          canManage ? (
+            <Button
+              type="button"
+              variant="brand"
+              className="h-10 w-full gap-2 sm:w-auto"
+              onClick={() => setUploadOpen(true)}
+            >
+              <UploadCloud className="h-4 w-4" />
+              آپلود دارایی
+            </Button>
+          ) : null
+        }
+        onDeleteAsset={canManage ? deleteAsset : undefined}
+      />
+      {canManage ? (
+        <ProjectAssetUploadDialog
+          open={uploadOpen}
+          onOpenChange={setUploadOpen}
+          projectId={projectId}
+          onUploaded={refreshAssets}
+        />
+      ) : null}
+    </>
+  );
 }

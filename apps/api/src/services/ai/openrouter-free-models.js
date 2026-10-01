@@ -47,6 +47,12 @@ const TASK_NEEDS = {
   },
   PORTFOLIO: { needsJson: true, minContext: 8000, minCompletion: 512 },
   SALES_ASSISTANT: { needsJson: true, minContext: 8000, minCompletion: 512 },
+  LANDING_PAGE: {
+    needsJson: true,
+    needsCreative: true,
+    minContext: 8000,
+    minCompletion: 1536,
+  },
   CODE: { needsCode: true, minContext: 8000, minCompletion: 512 },
   TEXT: { needsJson: false, minContext: 4000, minCompletion: 256 },
 };
@@ -275,6 +281,7 @@ export function cooldownMsForError(code) {
   if (code === 'rate_limit') return 2 * 60 * 1000;
   if (code === 'insufficient_quota') return 15 * 60 * 1000;
   if (code === 'model_not_found') return 10 * 60 * 1000;
+  if (code === 'invalid_response') return 45 * 1000;
   if (code === 'timeout' || code === 'server_error' || code === 'context_length') {
     return 60 * 1000;
   }
@@ -461,7 +468,9 @@ export async function resolveFreeModelsForTask(agentType, modelOverride) {
     agentType === 'NARRATION' ||
     agentType === 'STORYBOARD'
       ? CONTENT_FREE_MODEL_ATTEMPTS
-      : MAX_FREE_MODEL_ATTEMPTS;
+      : agentType === 'LANDING_PAGE'
+        ? Math.max(MAX_FREE_MODEL_ATTEMPTS, 8)
+        : MAX_FREE_MODEL_ATTEMPTS;
   return ranked.slice(0, limit);
 }
 

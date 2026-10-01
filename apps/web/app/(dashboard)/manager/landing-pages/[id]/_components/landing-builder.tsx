@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
@@ -9,14 +9,13 @@ import {
   Copy,
   Eye,
   GripVertical,
-  Monitor,
   PanelRight,
+  Redo2,
   Save,
-  Smartphone,
-  Tablet,
   Trash2,
-  Type,
+  Undo2,
   UploadCloud,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiPatch, apiPost, ensureCsrf } from "@/lib/api";
@@ -24,16 +23,24 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { LandingHeroView } from "@/components/landing/landing-hero";
 import { LandingSectionView } from "@/components/landing/landing-section";
-import { LandingElementView } from "@/components/landing/landing-elements";
 import { BuilderSettingsPanel } from "./builder-settings";
+import { BuilderAiPanel } from "./builder-ai-panel";
+import {
+  CanvasElementList,
+  parseBuilderDrag,
+  setBuilderDrag,
+  type BuilderDragPayload,
+} from "./builder-dnd";
 import { cn } from "@/lib/utils";
 import {
-  ELEMENT_PALETTE,
+  ELEMENT_PALETTE_GROUPS,
   SECTION_PALETTE,
+  cloneBlock,
   createElement,
   createSection,
   duplicateElement,
   duplicateSection,
+  findElementInSection,
   type LandingContent,
   type LandingElement,
   type LandingElementType,
@@ -41,6 +48,16 @@ import {
   type LandingSection,
   type LandingSectionType,
 } from "@/lib/landing-content";
+import {
+  appendToSectionEnd,
+  extractElement,
+} from "@/lib/landing-layout";
+import {
+  buildSectionFromTemplate,
+  SECTION_TEMPLATES,
+  type SectionTemplateId,
+} from "@/lib/landing-templates";
+import { useLandingHistory } from "@/lib/use-landing-history";
 import type { LandingPage } from "@/lib/landing-pages";
 
 type Selection =
@@ -48,49 +65,14 @@ type Selection =
   | { kind: "section"; id: string }
   | { kind: "element"; sectionId: string; elementId: string };
 
-type Device = "desktop" | "tablet" | "mobile";
-
-type DragPayload =
-  | { kind: "palette-element"; type: LandingElementType }
-  | { kind: "palette-section"; type: LandingSectionType }
-  | { kind: "section"; id: string }
-  | { kind: "element"; sectionId: string; elementId: string };
+type DragPayload = BuilderDragPayload;
 
 function parseDrag(e: DragEvent): DragPayload | null {
-  try {
-    const raw = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
-    return raw ? (JSON.parse(raw) as DragPayload) : null;
-  } catch {
-    return null;
-  }
+  return parseBuilderDrag(e);
 }
 
 function setDrag(e: DragEvent, payload: DragPayload) {
-  e.dataTransfer.effectAllowed = "copyMove";
-  e.dataTransfer.setData("application/json", JSON.stringify(payload));
-  e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-}
-
-function mapElements(
-  list: LandingElement[] = [],
-  elementId: string,
-  updater: (el: LandingElement) => LandingElement | null,
-): LandingElement[] {
-  const next: LandingElement[] = [];
-  for (const el of list) {
-    if (el.id === elementId) {
-      const updated = updater(el);
-      if (updated) next.push(updated);
-      continue;
-    }
-    next.push({
-      ...el,
-      columns: el.columns
-        ? el.columns.map((col) => mapElements(col, elementId, updater))
-        : el.columns,
-    });
-  }
-  return next;
+  setBuilderDrag(e, payload);
 }
 
 function updateSectionElement(
@@ -98,31 +80,32 @@ function updateSectionElement(
   elementId: string,
   updater: (el: LandingElement) => LandingElement | null,
 ): LandingSection {
+  const mapElements = (
+    list: LandingElement[] = [],
+  ): LandingElement[] => {
+    const next: LandingElement[] = [];
+    for (const el of list) {
+      if (el.id === elementId) {
+        const updated = updater(el);
+        if (updated) next.push(updated);
+        continue;
+      }
+      next.push({
+        ...el,
+        columns: el.columns
+          ? el.columns.map((col) => mapElements(col))
+          : el.columns,
+      });
+    }
+    return next;
+  };
   return {
     ...section,
-    elements: mapElements(section.elements, elementId, updater),
+    elements: mapElements(section.elements),
     columns: section.columns
-      ? section.columns.map((col) => mapElements(col, elementId, updater))
+      ? section.columns.map((col) => mapElements(col))
       : section.columns,
   };
-}
-
-function appendToTarget(
-  section: LandingSection,
-  element: LandingElement,
-  columnIndex?: number,
-): LandingSection {
-  if (typeof columnIndex === "number" && section.columns) {
-    const columns = section.columns.map((col, i) =>
-      i === columnIndex ? [...col, element] : col,
-    );
-    return { ...section, columns };
-  }
-  return { ...section, elements: [...(section.elements || []), element] };
-}
-
-function removeElement(section: LandingSection, elementId: string): LandingSection {
-  return updateSectionElement(section, elementId, () => null);
 }
 
 export function LandingBuilder({
@@ -136,17 +119,94 @@ export function LandingBuilder({
 }) {
   const router = useRouter();
   const [page, setPage] = useState(initial);
-  const [content, setContent] = useState<LandingContent>(initial.content);
+  const {
+    content,
+    setContent: setHistoryContent,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    reset: resetHistory,
+  } = useLandingHistory(initial.content);
   const [selection, setSelection] = useState<Selection>({ kind: "hero" });
-  const [device, setDevice] = useState<Device>("desktop");
   const [dirty, setDirty] = useState(false);
-  const [mobilePanel, setMobilePanel] = useState<"palette" | "canvas" | "settings">("canvas");
+  const [leftTab, setLeftTab] = useState<"ai" | "elements" | "templates">(
+    "elements",
+  );
+  const [mobilePanel, setMobilePanel] = useState<
+    "palette" | "canvas" | "settings"
+  >("canvas");
+  const clipboardRef = useRef<LandingElement | LandingSection | null>(null);
+  const pendingSourceSectionRef = useRef<LandingSection | null>(null);
 
   function mark(nextContent?: LandingContent, nextPage?: LandingPage) {
-    if (nextContent) setContent(nextContent);
+    if (nextContent) setHistoryContent(nextContent);
     if (nextPage) setPage(nextPage);
     setDirty(true);
   }
+
+  const copySelection = useCallback(() => {
+    if (selection.kind === "section") {
+      const section = content.sections.find((s) => s.id === selection.id);
+      if (section) clipboardRef.current = cloneBlock(section);
+    }
+    if (selection.kind === "element") {
+      const section = content.sections.find((s) => s.id === selection.sectionId);
+      const el = findElementInSection(section, selection.elementId);
+      if (el) clipboardRef.current = cloneBlock(el);
+    }
+  }, [content.sections, selection]);
+
+  const pasteClipboard = useCallback(() => {
+    const clip = clipboardRef.current;
+    if (!clip || !canEdit) return;
+    if ("settings" in clip) {
+      const copy = duplicateSection(clip as LandingSection);
+      mark({ ...content, sections: [...content.sections, copy] });
+      setSelection({ kind: "section", id: copy.id });
+      return;
+    }
+    const sectionId =
+      selection.kind === "section"
+        ? selection.id
+        : selection.kind === "element"
+          ? selection.sectionId
+          : content.sections[content.sections.length - 1]?.id;
+    if (!sectionId) return;
+    const copy = duplicateElement(clip as LandingElement);
+    mark({
+      ...content,
+      sections: content.sections.map((section) =>
+        section.id === sectionId
+          ? appendToSectionEnd(section, copy)
+          : section,
+      ),
+    });
+    setSelection({ kind: "element", sectionId, elementId: copy.id });
+  }, [canEdit, content, selection]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        setDirty(true);
+      }
+      if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+        setDirty(true);
+      }
+      if (e.key === "c") copySelection();
+      if (e.key === "v") {
+        e.preventDefault();
+        pasteClipboard();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [copySelection, pasteClipboard, redo, undo]);
 
   function updateHero(hero: LandingHero) {
     mark({ ...content, hero });
@@ -180,42 +240,75 @@ export function LandingBuilder({
     setSelection({ kind: "section", id: section.id });
   }
 
-  function addElement(sectionId: string, type: LandingElementType, columnIndex?: number) {
+  function addElement(
+    sectionId: string,
+    type: LandingElementType,
+    columnIndex?: number,
+  ) {
     const element = createElement(type);
     mark({
       ...content,
       sections: content.sections.map((section) =>
-        section.id === sectionId ? appendToTarget(section, element, columnIndex) : section,
+        section.id === sectionId
+          ? appendToSectionEnd(section, element, columnIndex)
+          : section,
       ),
     });
     setSelection({ kind: "element", sectionId, elementId: element.id });
   }
 
-  function dropOnSection(sectionId: string, payload: DragPayload | null, columnIndex?: number) {
+  function commitSectionUpdate(next: LandingSection) {
+    const pendingSource = pendingSourceSectionRef.current;
+    pendingSourceSectionRef.current = null;
+    mark({
+      ...content,
+      sections: content.sections.map((section) => {
+        if (pendingSource && section.id === pendingSource.id) {
+          return pendingSource.id === next.id ? next : pendingSource;
+        }
+        if (section.id === next.id) return next;
+        return section;
+      }),
+    });
+  }
+
+  function takeMovingFromContent(
+    payload: Extract<BuilderDragPayload, { kind: "element" }>,
+    targetSection: LandingSection,
+  ): { section: LandingSection; element: LandingElement } | null {
+    if (payload.sectionId === targetSection.id) {
+      return extractElement(targetSection, payload.elementId);
+    }
+    const source = content.sections.find((s) => s.id === payload.sectionId);
+    if (!source) return null;
+    const extracted = extractElement(source, payload.elementId);
+    if (!extracted) return null;
+    pendingSourceSectionRef.current = extracted.section;
+    return { section: targetSection, element: extracted.element };
+  }
+
+  function dropOnSection(
+    sectionId: string,
+    payload: DragPayload | null,
+    columnIndex?: number,
+  ) {
     if (!payload || !canEdit) return;
     if (payload.kind === "palette-element") {
       addElement(sectionId, payload.type, columnIndex);
       return;
     }
     if (payload.kind === "element") {
-      const from = content.sections.find((s) => s.id === payload.sectionId);
-      if (!from) return;
-      let moving: LandingElement | null = null;
-      const stripped = updateSectionElement(from, payload.elementId, (el) => {
-        moving = el;
-        return null;
-      });
-      if (!moving) return;
-      mark({
-        ...content,
-        sections: content.sections.map((section) => {
-          if (section.id === payload.sectionId && section.id !== sectionId) return stripped;
-          if (section.id === sectionId) {
-            const base = section.id === payload.sectionId ? stripped : section;
-            return appendToTarget(base, moving as LandingElement, columnIndex);
-          }
-          return section;
-        }),
+      const target = content.sections.find((s) => s.id === sectionId);
+      if (!target) return;
+      const taken = takeMovingFromContent(payload, target);
+      if (!taken) return;
+      commitSectionUpdate(
+        appendToSectionEnd(taken.section, taken.element, columnIndex),
+      );
+      setSelection({
+        kind: "element",
+        sectionId,
+        elementId: taken.element.id,
       });
     }
   }
@@ -223,10 +316,14 @@ export function LandingBuilder({
   function dropOnCanvas(payload: DragPayload | null, beforeSectionId?: string) {
     if (!payload || !canEdit) return;
     if (payload.kind === "palette-section") {
-      addSection(payload.type, beforeSectionId);
+      addSection(payload.type as LandingSectionType, beforeSectionId);
       return;
     }
-    if (payload.kind === "section" && beforeSectionId && payload.id !== beforeSectionId) {
+    if (
+      payload.kind === "section" &&
+      beforeSectionId &&
+      payload.id !== beforeSectionId
+    ) {
       const current = [...content.sections];
       const from = current.findIndex((s) => s.id === payload.id);
       const to = current.findIndex((s) => s.id === beforeSectionId);
@@ -246,11 +343,12 @@ export function LandingBuilder({
     },
     onSuccess: (saved) => {
       setPage(saved);
-      setContent(saved.content);
+      resetHistory(saved.content);
       setDirty(false);
       toast.success("پیش‌نویس ذخیره شد");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "ذخیره ناموفق بود"),
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : "ذخیره ناموفق بود"),
   });
 
   const publishMut = useMutation({
@@ -263,11 +361,12 @@ export function LandingBuilder({
     },
     onSuccess: (saved) => {
       setPage(saved);
-      setContent(saved.content);
+      resetHistory(saved.content);
       setDirty(false);
       toast.success("صفحه منتشر شد");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "انتشار ناموفق بود"),
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : "انتشار ناموفق بود"),
   });
 
   const unpublishMut = useMutation({
@@ -279,15 +378,11 @@ export function LandingBuilder({
       setPage(saved);
       toast.success("صفحه از حالت انتشار خارج شد");
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "لغو انتشار ناموفق بود"),
+    onError: (e) =>
+      toast.error(e instanceof Error ? e.message : "لغو انتشار ناموفق بود"),
   });
 
-  const frameClass =
-    device === "mobile"
-      ? "max-w-[390px]"
-      : device === "tablet"
-        ? "max-w-[768px]"
-        : "max-w-5xl";
+  const frameClass = "w-full max-w-[1200px]";
 
   return (
     <div
@@ -334,38 +429,36 @@ export function LandingBuilder({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          <div className="flex items-center rounded-lg border border-border/70 p-0.5">
-            <Button
-              size="icon"
-              variant={device === "desktop" ? "secondary" : "ghost"}
-              className="h-8 w-8"
-              title="دسکتاپ"
-              aria-label="پیش‌نمایش دسکتاپ"
-              onClick={() => setDevice("desktop")}
-            >
-              <Monitor className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant={device === "tablet" ? "secondary" : "ghost"}
-              className="h-8 w-8"
-              title="تبلت"
-              aria-label="پیش‌نمایش تبلت"
-              onClick={() => setDevice("tablet")}
-            >
-              <Tablet className="h-4 w-4" />
-            </Button>
-            <Button
-              size="icon"
-              variant={device === "mobile" ? "secondary" : "ghost"}
-              className="h-8 w-8"
-              title="موبایل"
-              aria-label="پیش‌نمایش موبایل"
-              onClick={() => setDevice("mobile")}
-            >
-              <Smartphone className="h-4 w-4" />
-            </Button>
-          </div>
+          {canEdit ? (
+            <div className="hidden items-center gap-0.5 sm:flex">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                disabled={!canUndo}
+                onClick={() => {
+                  undo();
+                  setDirty(true);
+                }}
+                title="Undo (Ctrl+Z)"
+              >
+                <Undo2 className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                disabled={!canRedo}
+                onClick={() => {
+                  redo();
+                  setDirty(true);
+                }}
+                title="Redo (Ctrl+Y)"
+              >
+                <Redo2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : null}
 
           <Button
             size="sm"
@@ -431,67 +524,159 @@ export function LandingBuilder({
         ))}
       </div>
 
-      <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)_280px]">
+      <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[240px_minmax(0,1fr)_300px]">
         <aside
           className={cn(
             "flex min-h-0 min-w-0 flex-col overflow-hidden border-e border-border/70 bg-card",
             mobilePanel !== "palette" && "hidden lg:flex",
           )}
         >
+          <div className="flex shrink-0 gap-1 border-b border-border/60 p-2">
+            {(
+              [
+                ["ai", "هوش مصنوعی"],
+                ["elements", "اجزاء"],
+                ["templates", "قالب"],
+              ] as const
+            ).map(([id, label]) => (
+              <Button
+                key={id}
+                size="sm"
+                variant={leftTab === id ? "secondary" : "ghost"}
+                className="h-8 min-w-0 flex-1 gap-1 px-1 text-[10px] font-medium"
+                onClick={() => setLeftTab(id)}
+              >
+                {id === "ai" ? (
+                  <Sparkles className="h-3 w-3 shrink-0 text-brand" />
+                ) : null}
+                <span className="truncate">{label}</span>
+              </Button>
+            ))}
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
-          <p className="mb-2 text-xs font-semibold text-muted-foreground">بخش‌ها</p>
-          <div className="space-y-1.5">
-            {SECTION_PALETTE.map((item) => (
-              <button
-                key={item.type}
-                type="button"
-                draggable={canEdit}
-                onDragStart={(e) => setDrag(e, { kind: "palette-section", type: item.type })}
-                onClick={() => canEdit && addSection(item.type)}
-                className="flex w-full items-center gap-2 rounded-lg border border-border/60 px-2.5 py-2 text-start text-xs hover:border-brand/40 hover:bg-brand/5"
-              >
-                <Columns3 className="h-3.5 w-3.5 text-muted-foreground" />
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <p className="mb-2 mt-4 text-xs font-semibold text-muted-foreground">عناصر</p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {ELEMENT_PALETTE.map((item) => (
-              <button
-                key={item.type}
-                type="button"
-                draggable={canEdit}
-                onDragStart={(e) => setDrag(e, { kind: "palette-element", type: item.type })}
-                onClick={() => {
-                  if (!canEdit) return;
-                  const sectionId =
-                    selection.kind === "section"
-                      ? selection.id
-                      : selection.kind === "element"
-                        ? selection.sectionId
-                        : content.sections[content.sections.length - 1]?.id;
-                  if (sectionId) {
-                    addElement(sectionId, item.type);
-                    return;
+            {leftTab === "ai" ? (
+              <BuilderAiPanel
+                canEdit={canEdit}
+                pageTitle={page.title}
+                content={content}
+                selection={selection}
+                onApply={(next, meta) => {
+                  mark(next);
+                  if (!meta?.keepSelection) {
+                    setSelection({ kind: "hero" });
                   }
-                  const section = createSection("content");
-                  const element = createElement(item.type);
-                  section.elements = [element];
-                  mark({ ...content, sections: [...content.sections, section] });
-                  setSelection({
-                    kind: "element",
-                    sectionId: section.id,
-                    elementId: element.id,
-                  });
                 }}
-                className="rounded-lg border border-border/60 px-2 py-2 text-[11px] hover:border-brand/40 hover:bg-brand/5"
-              >
-                <Type className="mb-1 h-3.5 w-3.5 text-muted-foreground" />
-                {item.label}
-              </button>
-            ))}
-          </div>
+              />
+            ) : null}
+
+            {leftTab === "elements" ? (
+              <>
+                <p className="mb-2 text-xs font-semibold text-muted-foreground">
+                  بخش‌ها
+                </p>
+                <div className="space-y-1.5">
+                  {SECTION_PALETTE.map((item) => (
+                    <button
+                      key={item.type}
+                      type="button"
+                      draggable={canEdit}
+                      onDragStart={(e) =>
+                        setDrag(e, {
+                          kind: "palette-section",
+                          type: item.type,
+                        })
+                      }
+                      onClick={() => canEdit && addSection(item.type)}
+                      className="flex w-full items-center gap-2 rounded-lg border border-border/60 px-2.5 py-2 text-start text-xs hover:border-brand/40 hover:bg-brand/5"
+                    >
+                      <Columns3 className="h-3.5 w-3.5 text-muted-foreground" />
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                {ELEMENT_PALETTE_GROUPS.map((group) => (
+                  <div key={group.label} className="mt-4">
+                    <p className="mb-2 text-xs font-semibold text-muted-foreground">
+                      {group.label}
+                    </p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {group.items.map((item) => (
+                        <button
+                          key={item.type}
+                          type="button"
+                          draggable={canEdit}
+                          onDragStart={(e) =>
+                            setDrag(e, {
+                              kind: "palette-element",
+                              type: item.type,
+                            })
+                          }
+                          onClick={() => {
+                            if (!canEdit) return;
+                            const sectionId =
+                              selection.kind === "section"
+                                ? selection.id
+                                : selection.kind === "element"
+                                  ? selection.sectionId
+                                  : content.sections[
+                                      content.sections.length - 1
+                                    ]?.id;
+                            if (sectionId) {
+                              addElement(sectionId, item.type);
+                              return;
+                            }
+                            const section = createSection("content");
+                            const element = createElement(item.type);
+                            section.elements = [element];
+                            mark({
+                              ...content,
+                              sections: [...content.sections, section],
+                            });
+                            setSelection({
+                              kind: "element",
+                              sectionId: section.id,
+                              elementId: element.id,
+                            });
+                          }}
+                          className="rounded-lg border border-border/60 px-2 py-2 text-[10px] hover:border-brand/40 hover:bg-brand/5"
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : null}
+
+            {leftTab === "templates" ? (
+              <div className="space-y-2">
+                {SECTION_TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    disabled={!canEdit}
+                    onClick={() => {
+                      const section = buildSectionFromTemplate(
+                        template.id as SectionTemplateId,
+                      );
+                      mark({
+                        ...content,
+                        sections: [...content.sections, section],
+                      });
+                      setSelection({ kind: "section", id: section.id });
+                      toast.success(`قالب «${template.label}» اضافه شد`);
+                    }}
+                    className="w-full rounded-lg border border-border/60 px-3 py-2.5 text-start hover:border-brand/40 hover:bg-brand/5 disabled:opacity-50"
+                  >
+                    <p className="text-xs font-medium">{template.label}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {template.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         </aside>
 
@@ -504,7 +689,7 @@ export function LandingBuilder({
           <div
             dir="rtl"
             className={cn(
-              "mx-auto overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm",
+              "mx-auto min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm",
               frameClass,
             )}
           >
@@ -523,11 +708,14 @@ export function LandingBuilder({
               />
             </div>
 
-            {content.sections.map((section) => (
+            {content.sections.map((section) =>
+              section.hidden ? null : (
               <div
                 key={section.id}
-                draggable={canEdit}
-                onDragStart={(e) => setDrag(e, { kind: "section", id: section.id })}
+                draggable={canEdit && !section.locked}
+                onDragStart={(e) =>
+                  setDrag(e, { kind: "section", id: section.id })
+                }
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
@@ -536,7 +724,10 @@ export function LandingBuilder({
                   e.preventDefault();
                   e.stopPropagation();
                   const payload = parseDrag(e);
-                  if (payload?.kind === "palette-section" || payload?.kind === "section") {
+                  if (
+                    payload?.kind === "palette-section" ||
+                    payload?.kind === "section"
+                  ) {
                     dropOnCanvas(payload, section.id);
                   } else {
                     dropOnSection(section.id, payload);
@@ -545,13 +736,18 @@ export function LandingBuilder({
               >
                 <LandingSectionView
                   section={section}
-                  selected={selection.kind === "section" && selection.id === section.id}
-                  onSelect={() => setSelection({ kind: "section", id: section.id })}
+                  selected={
+                    selection.kind === "section" && selection.id === section.id
+                  }
+                  onSelect={() =>
+                    setSelection({ kind: "section", id: section.id })
+                  }
                 >
                   <div className="mb-3 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                       <GripVertical className="h-3.5 w-3.5" />
-                      {SECTION_PALETTE.find((s) => s.type === section.type)?.label || "بخش"}
+                      {SECTION_PALETTE.find((s) => s.type === section.type)
+                        ?.label || "بخش"}
                     </span>
                     {canEdit ? (
                       <span className="flex gap-1">
@@ -580,7 +776,9 @@ export function LandingBuilder({
                             e.stopPropagation();
                             mark({
                               ...content,
-                              sections: content.sections.filter((s) => s.id !== section.id),
+                              sections: content.sections.filter(
+                                (s) => s.id !== section.id,
+                              ),
                             });
                             setSelection({ kind: "hero" });
                           }}
@@ -591,95 +789,56 @@ export function LandingBuilder({
                     ) : null}
                   </div>
                   {section.columns ? (
-                    <div className={cn("grid gap-4 md:grid-cols-2", section.columns.length >= 3 && "lg:grid-cols-3")}>
-                      {section.columns.map((col, colIndex) => (
-                        <div
+                    <div
+                      className={cn(
+                        "grid w-full min-w-0 gap-4 md:grid-cols-2",
+                        section.columns.length >= 3 && "lg:grid-cols-3",
+                      )}
+                    >
+                      {section.columns.map((_, colIndex) => (
+                        <CanvasElementList
                           key={colIndex}
-                          className="min-h-[80px] min-w-0 rounded-xl border border-dashed border-border/70 p-2"
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            dropOnSection(section.id, parseDrag(e), colIndex);
-                          }}
-                        >
-                          {col.map((el) => (
-                            <EditableElement
-                              key={el.id}
-                              element={el}
-                              selected={selection.kind === "element" && selection.elementId === el.id}
-                              onSelect={() =>
-                                setSelection({
-                                  kind: "element",
-                                  sectionId: section.id,
-                                  elementId: el.id,
-                                })
-                              }
-                              onDragStart={(e) =>
-                                setDrag(e, {
-                                  kind: "element",
-                                  sectionId: section.id,
-                                  elementId: el.id,
-                                })
-                              }
-                              onDuplicate={() => {
-                                const copy = duplicateElement(el);
-                                const columns = section.columns!.map((c, i) =>
-                                  i === colIndex
-                                    ? c.flatMap((item) => (item.id === el.id ? [item, copy] : [item]))
-                                    : c,
-                                );
-                                updateSection({ ...section, columns });
-                              }}
-                              onDelete={() => updateSection(removeElement(section, el.id))}
-                            />
-                          ))}
-                          <p className="py-3 text-center text-[10px] text-muted-foreground">
-                            عنصر را اینجا رها کنید
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="min-h-[80px] rounded-xl border border-dashed border-border/70 p-2">
-                      {(section.elements || []).map((el) => (
-                        <EditableElement
-                          key={el.id}
-                          element={el}
-                          selected={selection.kind === "element" && selection.elementId === el.id}
-                          onSelect={() =>
+                          section={section}
+                          columnIndex={colIndex}
+                          selectedElementId={
+                            selection.kind === "element" &&
+                            selection.sectionId === section.id
+                              ? selection.elementId
+                              : null
+                          }
+                          canEdit={canEdit}
+                          onSelectElement={(elementId) =>
                             setSelection({
                               kind: "element",
                               sectionId: section.id,
-                              elementId: el.id,
+                              elementId,
                             })
                           }
-                          onDragStart={(e) =>
-                            setDrag(e, {
-                              kind: "element",
-                              sectionId: section.id,
-                              elementId: el.id,
-                            })
-                          }
-                          onDuplicate={() => {
-                            const copy = duplicateElement(el);
-                            updateSection({
-                              ...section,
-                              elements: section.elements.flatMap((item) =>
-                                item.id === el.id ? [item, copy] : [item],
-                              ),
-                            });
-                          }}
-                          onDelete={() => updateSection(removeElement(section, el.id))}
+                          onUpdateSection={commitSectionUpdate}
+                          takeMovingFromContent={takeMovingFromContent}
                         />
                       ))}
-                      <p className="py-3 text-center text-[10px] text-muted-foreground">
-                        عنصر را اینجا رها کنید
-                      </p>
                     </div>
+                  ) : (
+                    <CanvasElementList
+                      section={section}
+                      selectedElementId={
+                        selection.kind === "element" &&
+                        selection.sectionId === section.id
+                          ? selection.elementId
+                          : null
+                      }
+                      canEdit={canEdit}
+                      onSelectElement={(elementId) =>
+                        setSelection({
+                          kind: "element",
+                          sectionId: section.id,
+                          elementId,
+                        })
+                      }
+                      onUpdateSection={commitSectionUpdate}
+                      takeMovingFromContent={takeMovingFromContent}
+                    />
                   )}
                 </LandingSectionView>
               </div>
@@ -718,49 +877,6 @@ export function LandingBuilder({
             />
           </div>
         </aside>
-      </div>
-    </div>
-  );
-}
-
-function EditableElement({
-  element,
-  selected,
-  onSelect,
-  onDragStart,
-  onDuplicate,
-  onDelete,
-}: {
-  element: LandingElement;
-  selected: boolean;
-  onSelect: () => void;
-  onDragStart: (e: DragEvent) => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect();
-      }}
-      className={cn(
-        "group relative mb-2 cursor-grab rounded-lg p-1",
-        selected && "ring-2 ring-brand",
-      )}
-    >
-      <div className="pointer-events-none">
-        <LandingElementView element={element} />
-      </div>
-      <div className="absolute start-1 top-1 hidden gap-1 group-hover:flex">
-        <Button size="icon" variant="secondary" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); onDuplicate(); }}>
-          <Copy className="h-3 w-3" />
-        </Button>
-        <Button size="icon" variant="secondary" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-          <Trash2 className="h-3 w-3" />
-        </Button>
       </div>
     </div>
   );
