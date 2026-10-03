@@ -4,6 +4,10 @@ import { AppError } from "../../utils/response.js";
 import { writeAudit } from "../../middleware/audit.js";
 import { storage } from "../../services/storage.js";
 import { afterPublicServicesMutation } from "./public-invalidate.js";
+import { sanitizeRichTextHtml } from "../../utils/sanitize-html.js";
+
+/** Large rich-text descriptions (HTML) — DB column is TEXT. */
+const SERVICE_DESCRIPTION_MAX = 200_000;
 
 export const createServiceSchema = z.object({
   name: z.string().trim().min(2, "عنوان خدمت الزامی است").max(200),
@@ -20,9 +24,15 @@ export const createServiceSchema = z.object({
     .optional()
     .transform((v) => (v ? v : null)),
   description: z
-    .union([z.string().trim().max(2000), z.literal(""), z.null()])
+    .union([
+      z.string().trim().max(SERVICE_DESCRIPTION_MAX),
+      z.literal(""),
+      z.null(),
+    ])
     .optional()
-    .transform((v) => (v ? v : null)),
+    .transform((v) =>
+      v === undefined ? undefined : sanitizeRichTextHtml(v),
+    ),
   imageKey: z
     .union([z.string().trim().max(500), z.literal(""), z.null()])
     .optional()

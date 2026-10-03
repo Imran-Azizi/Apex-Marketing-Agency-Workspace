@@ -7,6 +7,7 @@ import {
   serviceTitle,
 } from "@/lib/services";
 import { pageMetadata, SITE_NAME_SHORT } from "@/lib/seo";
+import { stripHtml } from "@/lib/rich-text";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -24,7 +25,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     }
     const title = serviceTitle(service);
     const description =
-      service.description?.trim() ||
+      stripHtml(service.description).slice(0, 160) ||
       `جزئیات خدمت ${title} در شرکت تبلیغاتی اپیکس.`;
     return pageMetadata({
       title: `${title} | خدمات ${SITE_NAME_SHORT}`,

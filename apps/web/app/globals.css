@@ -800,3 +800,171 @@
 [draggable="true"]:active {
   cursor: grabbing;
 }
+
+/*
+ * Landing editor device preview — simulate CSS viewport breakpoints inside the
+ * fixed-width canvas (DnD-safe; no transform:scale).
+ *
+ * Standard bands (CSS px):
+ *   mobile  320–767  → below Tailwind md
+ *   tablet  768–1023 → md on, lg off
+ *   desktop 1024+    → sm/md/lg on
+ *
+ * Matches Tailwind sm(640) / md(768) / lg(1024). The پیش‌نمایش page uses a
+ * real iframe viewport instead; this CSS is for the in-editor canvas only.
+ */
+
+/* —— Mobile (~375px): below sm/md/lg —— */
+[data-device-preview="mobile"] .sm\:grid-cols-2,
+[data-device-preview="mobile"] .md\:grid-cols-2,
+[data-device-preview="mobile"] .lg\:grid-cols-3,
+[data-device-preview="mobile"] .lg\:grid-cols-4 {
+  grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="mobile"] .md\:grid-cols-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="mobile"] .sm\:px-6 {
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+[data-device-preview="mobile"] .sm\:py-24 {
+  padding-top: 4rem !important;
+  padding-bottom: 4rem !important;
+}
+
+[data-device-preview="mobile"] .sm\:text-5xl,
+[data-device-preview="mobile"] .lg\:text-6xl {
+  font-size: 1.875rem !important; /* text-3xl */
+  line-height: 2.25rem !important;
+}
+
+[data-device-preview="mobile"] .sm\:text-lg {
+  font-size: 0.875rem !important;
+  line-height: 1.75rem !important;
+}
+
+[data-device-preview="mobile"] .sm\:leading-8 {
+  line-height: 1.75rem !important;
+}
+
+/* —— Tablet (~768px): sm+md on, lg off —— */
+[data-device-preview="tablet"] .sm\:grid-cols-2,
+[data-device-preview="tablet"] .md\:grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="tablet"] .md\:grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="tablet"] .lg\:grid-cols-3 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="tablet"] .lg\:grid-cols-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="tablet"] .sm\:px-6 {
+  padding-left: 1.5rem !important;
+  padding-right: 1.5rem !important;
+}
+
+[data-device-preview="tablet"] .sm\:py-24 {
+  padding-top: 6rem !important;
+  padding-bottom: 6rem !important;
+}
+
+[data-device-preview="tablet"] .sm\:text-5xl {
+  font-size: 3rem !important;
+  line-height: 1 !important;
+}
+
+[data-device-preview="tablet"] .lg\:text-6xl {
+  font-size: 3rem !important; /* stay at sm:text-5xl */
+  line-height: 1 !important;
+}
+
+[data-device-preview="tablet"] .sm\:text-lg {
+  font-size: 1.125rem !important;
+  line-height: 1.75rem !important;
+}
+
+[data-device-preview="tablet"] .sm\:leading-8 {
+  line-height: 2rem !important;
+}
+
+/* —— Desktop (~1440px): force sm/md/lg even if the browser window is narrower —— */
+[data-device-preview="desktop"] .sm\:grid-cols-2,
+[data-device-preview="desktop"] .md\:grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="desktop"] .md\:grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="desktop"] .lg\:grid-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="desktop"] .lg\:grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+[data-device-preview="desktop"] .sm\:px-6 {
+  padding-left: 1.5rem !important;
+  padding-right: 1.5rem !important;
+}
+
+[data-device-preview="desktop"] .sm\:py-24 {
+  padding-top: 6rem !important;
+  padding-bottom: 6rem !important;
+}
+
+[data-device-preview="desktop"] .sm\:text-5xl {
+  font-size: 3rem !important;
+  line-height: 1 !important;
+}
+
+[data-device-preview="desktop"] .lg\:text-6xl {
+  font-size: 3.75rem !important;
+  line-height: 1 !important;
+}
+
+[data-device-preview="desktop"] .sm\:text-lg {
+  font-size: 1.125rem !important;
+  line-height: 1.75rem !important;
+}
+
+[data-device-preview="desktop"] .sm\:leading-8 {
+  line-height: 2rem !important;
+}
+
+/* TipTap / rich-text editor */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: right;
+  height: 0;
+  pointer-events: none;
+  color: hsl(var(--muted-foreground));
+}
+
+.ProseMirror:focus {
+  outline: none;
+}
+
+.ProseMirror ul {
+  list-style: disc;
+  padding-inline-start: 1.25rem;
+}
+
+.ProseMirror ol {
+  list-style: decimal;
+  padding-inline-start: 1.25rem;
+}
+

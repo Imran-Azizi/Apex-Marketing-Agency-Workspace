@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { ResponsiveCoverImage } from "@/components/landing/responsive-cover-image";
+import { useLandingDevicePreview } from "@/components/landing/landing-device-preview";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { LandingHero } from "@/lib/landing-content";
 import { pickResponsiveImageSrc } from "@/lib/landing-responsive-image";
+import { landingPreviewUsesMobileImage } from "@/lib/landing-device-preview";
 
 export function LandingHeroView({
   hero,
@@ -16,6 +18,7 @@ export function LandingHeroView({
   selected?: boolean;
   onSelect?: () => void;
 }) {
+  const preview = useLandingDevicePreview();
   if (!hero.enabled && !onSelect) return null;
 
   const align =
@@ -33,8 +36,15 @@ export function LandingHeroView({
     pickResponsiveImageSrc(
       hero.backgroundImageSrc,
       hero.mobileBackgroundImageSrc,
+      preview.enabled ? preview.width : undefined,
     ) ||
     undefined;
+
+  const useCompactHeight =
+    preview.enabled && landingPreviewUsesMobileImage(preview.width);
+  const stageMinHeight = useCompactHeight
+    ? hero.mobileMinHeight || "55vh"
+    : hero.minHeight || "70vh";
 
   const inner = (
     <section
@@ -43,8 +53,9 @@ export function LandingHeroView({
         !hero.enabled && "opacity-60",
         selected && "ring-2 ring-brand ring-offset-2 ring-offset-background",
         onSelect && "cursor-pointer",
+        !preview.enabled && "landing-hero-mobile",
       )}
-      style={{ minHeight: hero.minHeight || "70vh" }}
+      style={{ minHeight: stageMinHeight }}
       onClick={onSelect}
     >
       <div className="absolute inset-0">
@@ -86,14 +97,14 @@ export function LandingHeroView({
         )}
         style={{ minHeight: "inherit" }}
       >
-        <style>{`@media (max-width: 767px) { .landing-hero-mobile { min-height: ${hero.mobileMinHeight || "55vh"} !important; } }`}</style>
+        {!preview.enabled ? (
+          <style>{`@media (max-width: 767px) { .landing-hero-mobile { min-height: ${hero.mobileMinHeight || "55vh"} !important; } }`}</style>
+        ) : null}
         {hero.heading ? (
           <h1 className="max-w-4xl text-balance break-words text-3xl font-bold leading-tight text-white sm:text-5xl lg:text-6xl">
             {hero.heading}
           </h1>
-        ) : (
-          <p className="text-lg text-white/70">عنوان بنر را وارد کنید</p>
-        )}
+        ) : null}
         {hero.description ? (
           <p className="max-w-2xl whitespace-pre-wrap break-words text-pretty text-sm leading-7 text-white/85 sm:text-lg sm:leading-8">
             {hero.description}
@@ -116,9 +127,5 @@ export function LandingHeroView({
     </section>
   );
 
-  return (
-    <div className="landing-hero-mobile w-full max-w-full overflow-hidden">
-      {inner}
-    </div>
-  );
+  return <div className="w-full max-w-full overflow-hidden">{inner}</div>;
 }

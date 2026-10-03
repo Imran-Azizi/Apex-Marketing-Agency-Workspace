@@ -21,6 +21,10 @@ import {
   type LandingHero,
   type LandingSection,
 } from "@/lib/landing-content";
+import {
+  heroImageGuide,
+  sectionBackgroundImageGuide,
+} from "@/lib/landing-image-guide";
 import { ElementSettingsForm } from "./builder-element-props";
 
 export { ElementSettingsForm };
@@ -42,6 +46,10 @@ export function HeroSettingsForm({
   onChange: (hero: LandingHero) => void;
 }) {
   const set = (patch: Partial<LandingHero>) => onChange({ ...hero, ...patch });
+  const imageGuide = heroImageGuide({
+    minHeight: hero.minHeight,
+    mobileMinHeight: hero.mobileMinHeight,
+  });
   return (
     <div className="space-y-3">
       <div className="mb-1">
@@ -72,6 +80,7 @@ export function HeroSettingsForm({
       </Field>
       <Field label="تصویر پس‌زمینه">
         <ResponsiveImageFields
+          guide={imageGuide}
           desktopSrc={hero.backgroundImageSrc || null}
           desktopKey={hero.backgroundImageKey}
           mobileSrc={hero.mobileBackgroundImageSrc || null}
@@ -178,6 +187,7 @@ export function SectionSettingsForm({
   const s = section.settings;
   const set = (patch: Partial<typeof s>) =>
     onChange({ ...section, settings: { ...s, ...patch } });
+  const imageGuide = sectionBackgroundImageGuide({ minHeight: s.minHeight });
   return (
     <div className="space-y-3">
       <div className="mb-1">
@@ -195,6 +205,7 @@ export function SectionSettingsForm({
       </Field>
       <Field label="تصویر پس‌زمینه">
         <ResponsiveImageFields
+          guide={imageGuide}
           desktopSrc={s.backgroundImageSrc || null}
           desktopKey={s.backgroundImageKey}
           mobileSrc={s.mobileBackgroundImageSrc || null}
@@ -324,6 +335,32 @@ export function SectionSettingsForm({
           onChange={(e) => onChange({ ...section, label: e.target.value })}
         />
       </Field>
+      <div className="space-y-2 rounded-lg border border-border/60 p-2.5">
+        <p className="text-xs font-medium text-muted-foreground">
+          نمایش در دستگاه‌ها
+        </p>
+        <label className="flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={s.hiddenOnMobile}
+            onCheckedChange={(v) => set({ hiddenOnMobile: v === true })}
+          />
+          مخفی در موبایل
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={s.hiddenOnTablet}
+            onCheckedChange={(v) => set({ hiddenOnTablet: v === true })}
+          />
+          مخفی در تبلت
+        </label>
+        <label className="flex items-center gap-2 text-xs">
+          <Checkbox
+            checked={s.hiddenOnDesktop}
+            onCheckedChange={(v) => set({ hiddenOnDesktop: v === true })}
+          />
+          مخفی در دسکتاپ
+        </label>
+      </div>
     </div>
   );
 }

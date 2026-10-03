@@ -14,7 +14,6 @@ import type { PublicService } from "@/lib/services";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -24,6 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RichTextEditor } from "@/components/editor/rich-text-editor";
+import { isEmptyRichText } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -105,7 +106,9 @@ export function ServiceFormDialog({
       }
       const payload = {
         name,
-        description: form.description.trim() || null,
+        description: isEmptyRichText(form.description)
+          ? null
+          : form.description.trim(),
         startingPrice: form.startingPrice.trim()
           ? Number(form.startingPrice)
           : null,
@@ -167,7 +170,7 @@ export function ServiceFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto text-start sm:max-w-xl" dir="rtl">
+      <DialogContent className="max-h-[92vh] overflow-y-auto text-start sm:max-w-2xl" dir="rtl">
         <DialogHeader className="text-start sm:text-start">
           <DialogTitle>
             {editing ? "ویرایش خدمت" : "ایجاد خدمت جدید"}
@@ -296,16 +299,19 @@ export function ServiceFormDialog({
 
           <div className="space-y-2">
             <Label htmlFor="service-desc">توضیحات</Label>
-            <Textarea
-              id="service-desc"
-              rows={4}
+            <RichTextEditor
               value={form.description}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, description: e.target.value }))
+              onChange={(html) =>
+                setForm((p) => ({ ...p, description: html }))
               }
-              placeholder="توضیح کوتاه و حرفه‌ای درباره این خدمت…"
+              placeholder="توضیحات کامل خدمت را بنویسید…"
               disabled={saveMut.isPending}
+              minHeightClassName="min-h-[240px]"
             />
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              از قالب‌بندی برای عناوین، فهرست و لینک استفاده کنید. متن‌های قبلی
+              بدون قالب‌بندی همچنان پشتیبانی می‌شوند.
+            </p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

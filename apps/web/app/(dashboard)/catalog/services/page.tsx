@@ -27,6 +27,7 @@ import {
   type ServiceListResponse,
 } from "@/lib/services";
 import { formatDate, cn } from "@/lib/utils";
+import { stripHtml } from "@/lib/rich-text";
 import { useHasPermission } from "@/lib/permissions";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -293,7 +294,7 @@ export default function CatalogServicesPage() {
                         </h3>
                         {service.description ? (
                           <p className="line-clamp-2 text-xs leading-6 text-muted-foreground">
-                            {service.description}
+                            {stripHtml(service.description)}
                           </p>
                         ) : null}
                         <p className="text-[11px] text-muted-foreground">

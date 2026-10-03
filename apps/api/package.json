@@ -38,6 +38,7 @@
     "nodemailer": "^9.0.4",
     "pngjs": "^7.0.0",
     "prisma": "^6.5.0",
+    "sanitize-html": "^2.18.0",
     "socket.io": "^4.8.3",
     "zod": "^3.24.2"
   },
@@ -46,5 +47,8 @@
   },
   "prisma": {
     "seed": "node prisma/seed.js"
+  },
+  "devDependencies": {
+    "@types/sanitize-html": "^2.16.2"
   }
 }

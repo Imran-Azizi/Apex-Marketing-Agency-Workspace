@@ -28,17 +28,18 @@ export const BACKUP_TABLES = [
   'Rate',
   'AudioSample',
 
-  // CRM & portal
+  // CRM & portal (Opportunity.projectId → Project, so Opportunity after Project)
   'CrmCustomer',
   'WhatsAppInboundEvent',
   'CrmActivity',
   'PortalAccount',
   'ClientAsset',
-  'Opportunity',
-  'PortalInvite',
 
   // Projects & production
   'Project',
+  // Opportunity / PortalInvite depend on Project + Opportunity respectively
+  'Opportunity',
+  'PortalInvite',
   'ProjectFinance',
   'ProjectAssignment',
   'ProjectFile',

@@ -24,6 +24,11 @@ import {
 } from "./builder-prop-ui";
 import { LandingMediaUploader } from "@/components/landing/landing-media-uploader";
 import { ResponsiveImageFields } from "@/components/landing/responsive-image-fields";
+import {
+  contentImageGuide,
+  galleryImageGuide,
+  widescreenImageGuide,
+} from "@/lib/landing-image-guide";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -245,6 +250,9 @@ export function ElementSettingsForm({
         <>
           <PanelSection title="تصاویر واکنش‌گرا">
             <ResponsiveImageFields
+              guide={contentImageGuide({
+                height: num(element.content.height) || null,
+              })}
               desktopSrc={
                 str(element.content.imageSrc || element.content.imageUrl) ||
                 null
@@ -365,6 +373,15 @@ export function ElementSettingsForm({
                 </div>
                 <ResponsiveImageFields
                   compact
+                  guide={
+                    element.type === "gallery"
+                      ? galleryImageGuide({
+                          columns: num(element.content.columns, 3),
+                        })
+                      : widescreenImageGuide({
+                          label: "Slider slide (16:9 frame).",
+                        })
+                  }
                   desktopSrc={str(item.imageSrc || item.imageUrl) || null}
                   desktopKey={str(item.imageKey) || null}
                   mobileSrc={
@@ -487,6 +504,9 @@ export function ElementSettingsForm({
         <>
           <PanelSection title="تصویر قبل">
             <ResponsiveImageFields
+              guide={widescreenImageGuide({
+                label: "Before/after stage (16:9 frame).",
+              })}
               desktopSrc={str(element.content.beforeSrc) || null}
               desktopKey={str(element.content.beforeKey) || null}
               mobileSrc={str(element.content.mobileBeforeSrc) || null}
@@ -507,6 +527,9 @@ export function ElementSettingsForm({
           </PanelSection>
           <PanelSection title="تصویر بعد">
             <ResponsiveImageFields
+              guide={widescreenImageGuide({
+                label: "Before/after stage (16:9 frame).",
+              })}
               desktopSrc={str(element.content.afterSrc) || null}
               desktopKey={str(element.content.afterKey) || null}
               mobileSrc={str(element.content.mobileAfterSrc) || null}
@@ -567,6 +590,9 @@ export function ElementSettingsForm({
             <Field label="تصویر پوستر">
               <ResponsiveImageFields
                 compact
+                guide={widescreenImageGuide({
+                  label: "Video poster (16:9 frame).",
+                })}
                 desktopSrc={str(element.content.posterSrc) || null}
                 desktopKey={str(element.content.posterKey) || null}
                 mobileSrc={str(element.content.mobilePosterSrc) || null}

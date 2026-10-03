@@ -14,6 +14,11 @@ import {
 } from "@/components/ui/select";
 import type { LandingElement, TextAlign } from "@/lib/landing-content";
 import { ResponsiveImageFields } from "@/components/landing/responsive-image-fields";
+import { useLandingDevicePreview } from "@/components/landing/landing-device-preview";
+import {
+  teamAvatarImageGuide,
+  type LandingImageGuide,
+} from "@/lib/landing-image-guide";
 
 export function Field({
   label,
@@ -367,12 +372,27 @@ export function VisibilityControls({
   element: LandingElement;
   onChange: (el: LandingElement) => void;
 }) {
+  const preview = useLandingDevicePreview();
   const s = element.styles;
   const set = (patch: Partial<LandingElement["styles"]>) =>
     onChange(patchStyles(element, patch));
 
+  const previewLabel =
+    preview.band === "mobile"
+      ? "موبایل"
+      : preview.band === "tablet"
+        ? "تبلت"
+        : "دسکتاپ";
+
   return (
     <PanelSection title="نمایش">
+      {preview.enabled ? (
+        <p className="mb-2 rounded-md bg-muted/60 px-2 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
+          پیش‌نمایش فعلی: {previewLabel} ({preview.viewportLabel}) — مخفی‌سازی
+          بر اساس باند استاندارد (موبایل &lt;۷۶۸ / تبلت ۷۶۸–۱۰۲۳ / دسکتاپ
+          ≥۱۰۲۴).
+        </p>
+      ) : null}
       <ToggleRow
         label="مخفی در موبایل"
         checked={s.hiddenOnMobile}
@@ -471,12 +491,15 @@ export function CardItemsEditor({
   onChange,
   fields,
   withImage = false,
+  imageGuide,
 }: {
   items: Record<string, unknown>[];
   onChange: (items: Record<string, unknown>[]) => void;
   fields: Array<{ key: string; label: string; multiline?: boolean }>;
   withImage?: boolean;
+  imageGuide?: LandingImageGuide | null;
 }) {
+  const guide = imageGuide ?? (withImage ? teamAvatarImageGuide() : null);
   return (
     <div className="space-y-3">
       {items.map((item, i) => (
@@ -497,6 +520,7 @@ export function CardItemsEditor({
           {withImage ? (
             <ResponsiveImageFields
               compact
+              guide={guide}
               desktopSrc={
                 String(item.imageSrc || item.imageUrl || "") || null
               }

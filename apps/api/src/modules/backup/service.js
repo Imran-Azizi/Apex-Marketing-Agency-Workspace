@@ -953,9 +953,15 @@ async function restoreDatabaseTables(tables) {
           return cleaned;
         });
 
+        // Use a savepoint so a failed createMany does not abort the whole
+        // restore transaction (Postgres: 25P02 after any error in a txn).
+        const savepoint = `restore_${name.replace(/[^a-zA-Z0-9_]/g, '_')}`;
+        await tx.$executeRawUnsafe(`SAVEPOINT ${savepoint}`);
         try {
           await tx[key].createMany({ data });
+          await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${savepoint}`);
         } catch (bulkErr) {
+          await tx.$executeRawUnsafe(`ROLLBACK TO SAVEPOINT ${savepoint}`);
           console.warn(
             `[backup] createMany failed for ${name}, falling back to create:`,
             bulkErr?.message || bulkErr,
@@ -972,6 +978,7 @@ async function restoreDatabaseTables(tables) {
               );
             }
           }
+          await tx.$executeRawUnsafe(`RELEASE SAVEPOINT ${savepoint}`);
         }
 
         // Second pass for self-referential FKs

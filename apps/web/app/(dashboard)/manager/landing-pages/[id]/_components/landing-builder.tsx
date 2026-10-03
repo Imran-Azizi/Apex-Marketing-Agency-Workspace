@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
@@ -25,6 +32,11 @@ import { LandingHeroView } from "@/components/landing/landing-hero";
 import { LandingSectionView } from "@/components/landing/landing-section";
 import { BuilderSettingsPanel } from "./builder-settings";
 import { BuilderAiPanel } from "./builder-ai-panel";
+import {
+  LandingDevicePreviewFrame,
+  LandingDevicePreviewProvider,
+  LandingDevicePreviewToolbar,
+} from "@/components/landing/landing-device-preview";
 import {
   CanvasElementList,
   parseBuilderDrag,
@@ -382,13 +394,12 @@ export function LandingBuilder({
       toast.error(e instanceof Error ? e.message : "لغو انتشار ناموفق بود"),
   });
 
-  const frameClass = "w-full max-w-[1200px]";
-
   return (
-    <div
-      className="absolute inset-0 flex flex-col overflow-hidden bg-background"
-      dir="rtl"
-    >
+    <LandingDevicePreviewProvider defaultDevice="desktop">
+      <div
+        className="absolute inset-0 flex flex-col overflow-hidden bg-background"
+        dir="rtl"
+      >
       <header className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b border-border/70 bg-card px-3 sm:gap-3 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Button
@@ -426,6 +437,10 @@ export function LandingBuilder({
               تغییرات ذخیره‌نشده
             </Badge>
           ) : null}
+        </div>
+
+        <div className="hidden shrink-0 md:block">
+          <LandingDevicePreviewToolbar />
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
@@ -680,33 +695,23 @@ export function LandingBuilder({
           </div>
         </aside>
 
-        <div
-          className={cn(
-            "min-h-0 min-w-0 overflow-y-auto overscroll-contain bg-muted/30 p-3 sm:p-4 [direction:ltr]",
-            mobilePanel !== "canvas" && "hidden lg:block",
-          )}
+        <BuilderDeviceCanvas
+          className={cn(mobilePanel !== "canvas" && "hidden lg:block")}
         >
           <div
-            dir="rtl"
-            className={cn(
-              "mx-auto min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-background shadow-sm",
-              frameClass,
-            )}
+            onClick={() => setSelection({ kind: "hero" })}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              dropOnCanvas(parseDrag(e), content.sections[0]?.id);
+            }}
           >
-            <div
-              onClick={() => setSelection({ kind: "hero" })}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                dropOnCanvas(parseDrag(e), content.sections[0]?.id);
-              }}
-            >
-              <LandingHeroView
-                hero={content.hero}
-                selected={selection.kind === "hero"}
-                onSelect={() => setSelection({ kind: "hero" })}
-              />
-            </div>
+            <LandingHeroView
+              hero={content.hero}
+              selected={selection.kind === "hero"}
+              onSelect={() => setSelection({ kind: "hero" })}
+            />
+          </div>
 
             {content.sections.map((section) =>
               section.hidden ? null : (
@@ -854,8 +859,7 @@ export function LandingBuilder({
             >
               بخش جدید را اینجا رها کنید
             </div>
-          </div>
-        </div>
+        </BuilderDeviceCanvas>
 
         <aside
           className={cn(
@@ -878,6 +882,31 @@ export function LandingBuilder({
           </div>
         </aside>
       </div>
+      </div>
+    </LandingDevicePreviewProvider>
+  );
+}
+
+function BuilderDeviceCanvas({
+  className,
+  children,
+}: {
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "min-h-0 min-w-0 overflow-auto overscroll-contain bg-muted/40 [direction:ltr]",
+        className,
+      )}
+    >
+      <div className="sticky top-0 z-20 flex justify-center border-b border-border/50 bg-muted/80 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-muted/70 md:hidden">
+        <LandingDevicePreviewToolbar />
+      </div>
+      <LandingDevicePreviewFrame simulateBreakpoints>
+        {children}
+      </LandingDevicePreviewFrame>
     </div>
   );
 }

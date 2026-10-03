@@ -51,13 +51,31 @@ export async function sendMail(opts) {
     throw new AppError('آدرس ایمیل گیرنده الزامی است', 400, 'EMAIL_TO_REQUIRED');
   }
 
-  const info = await tx.sendMail({
-    from: env.mailFrom,
-    to: opts.to,
-    subject: opts.subject,
-    text: opts.text,
-    html: opts.html,
-    attachments: opts.attachments,
-  });
-  return info;
+  try {
+    const info = await tx.sendMail({
+      from: env.mailFrom,
+      to: opts.to,
+      subject: opts.subject,
+      text: opts.text,
+      html: opts.html,
+      attachments: opts.attachments,
+    });
+    return info;
+  } catch (err) {
+    const raw = String(err?.message || err || '');
+    const isAuth =
+      /535|BadCredentials|Username and Password not accepted|Invalid login/i.test(
+        raw,
+      );
+    if (isAuth) {
+      // Drop cached transporter so the next attempt reloads env after a fix.
+      transporter = null;
+      throw new AppError(
+        'ورود SMTP رد شد (نام کاربری/رمز اشتباه). برای Gmail باید App Password استفاده کنید، نه رمز عادی حساب.',
+        502,
+        'EMAIL_AUTH_FAILED',
+      );
+    }
+    throw err;
+  }
 }

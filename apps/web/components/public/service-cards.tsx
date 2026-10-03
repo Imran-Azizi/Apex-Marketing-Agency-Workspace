@@ -13,6 +13,8 @@ import { formatCurrency, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { CoverImage } from "@/components/media/cover-image";
 import { usePublicReveal } from "@/components/public/public-reveal";
+import { RichTextContent } from "@/components/editor/rich-text-content";
+import { stripHtml } from "@/lib/rich-text";
 
 function orderLabel(index: number) {
   return String(index + 1).padStart(2, "0");
@@ -20,17 +22,7 @@ function orderLabel(index: number) {
 
 /** Collapse noisy whitespace so card previews read cleanly. */
 function normalizeServiceCopy(text: string) {
-  return text.replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-}
-
-/** Keep paragraph breaks for the expanded view; tidy excess spaces. */
-function formatExpandedServiceCopy(text: string) {
-  return text
-    .replace(/\u00a0/g, " ")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ")
-    .trim();
+  return stripHtml(text).replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -52,30 +44,31 @@ function serviceDescriptionExcerpt(text: string, maxChars = 120) {
 function ServiceDescription({ text }: { text: string }) {
   const textId = useId();
   const [expanded, setExpanded] = useState(false);
-  const previewSource = normalizeServiceCopy(text);
-  const fullCopy = formatExpandedServiceCopy(text);
-  const { preview, truncated } = serviceDescriptionExcerpt(previewSource);
+  const { preview, truncated } = serviceDescriptionExcerpt(text);
   const showToggle = truncated || expanded;
 
   return (
     <div className="flex min-h-[5.25rem] min-w-0 flex-1 flex-col sm:min-h-[5.75rem]">
-      <p
-        id={textId}
-        className={cn(
-          "min-w-0 text-start text-[13px] leading-7 text-muted-foreground sm:text-sm sm:leading-7",
-          "transition-[max-height,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
-          expanded
-            ? "whitespace-pre-line break-words"
-            : "overflow-hidden break-words",
-        )}
-      >
-        {expanded ? fullCopy : preview}
-        {!expanded && truncated ? (
-          <span aria-hidden className="text-muted-foreground">
-            …
-          </span>
-        ) : null}
-      </p>
+      {expanded ? (
+        <div id={textId} className="min-w-0 text-start text-[13px] sm:text-sm">
+          <RichTextContent value={text} className="text-[13px] sm:text-sm" />
+        </div>
+      ) : (
+        <p
+          id={textId}
+          className={cn(
+            "min-w-0 text-start text-[13px] leading-7 text-muted-foreground sm:text-sm sm:leading-7",
+            "overflow-hidden break-words",
+          )}
+        >
+          {preview}
+          {truncated ? (
+            <span aria-hidden className="text-muted-foreground">
+              …
+            </span>
+          ) : null}
+        </p>
+      )}
       {showToggle ? (
         <button
           type="button"

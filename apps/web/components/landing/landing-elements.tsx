@@ -178,9 +178,10 @@ export function LandingElementView({ element: raw }: { element: LandingElement }
   const vis = elementVisibilityClass(styles);
 
   if (type === "heading") {
+    const text = str(content.text).trim();
     const heading = (
       <HeadingTag level={num(content.level, 2)} className={vis} style={box}>
-        {str(content.text, "عنوان")}
+        {text}
       </HeadingTag>
     );
     const href = str(content.linkUrl);
@@ -297,9 +298,10 @@ export function LandingElementView({ element: raw }: { element: LandingElement }
           mobileSizes="100vw"
           className={objectFitClass}
           fallback={
-            <div className="flex h-full min-h-[180px] items-center justify-center bg-muted text-sm text-muted-foreground">
-              تصویر انتخاب نشده
-            </div>
+            <div
+              className="h-full min-h-[180px] bg-muted/40"
+              aria-hidden
+            />
           }
         />
       </div>
@@ -367,9 +369,10 @@ export function LandingElementView({ element: raw }: { element: LandingElement }
               controls={bool(content.controls, true)}
             />
           ) : (
-            <div className="flex aspect-video w-full items-center justify-center rounded-xl bg-muted text-sm text-muted-foreground">
-              ویدیو انتخاب نشده
-            </div>
+            <div
+              className="aspect-video w-full rounded-xl bg-muted/40"
+              aria-hidden
+            />
           )}
         </div>
       </ElementWrapper>
@@ -396,7 +399,7 @@ export function LandingElementView({ element: raw }: { element: LandingElement }
               loop={bool(content.loop)}
             />
           ) : (
-            <p className="text-sm text-muted-foreground">فایل صوتی انتخاب نشده</p>
+            <div className="min-h-[48px] rounded-lg bg-muted/40" aria-hidden />
           )}
         </figure>
       </ElementWrapper>
@@ -446,7 +449,7 @@ export function LandingElementView({ element: raw }: { element: LandingElement }
               }
               rel={external ? "noopener noreferrer" : undefined}
             >
-              {str(content.text, "دکمه")}
+              {str(content.text).trim()}
             </Link>
           </Button>
         </div>

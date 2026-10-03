@@ -214,7 +214,7 @@ export function WhatsappCtaBlock({ element }: { element: LandingElement }) {
       <Button asChild variant="brand" className="rounded-xl gap-2">
         <Link href={href} target="_blank" rel="noopener noreferrer">
           <MessageCircle className="h-4 w-4" />
-          {str(element.content.text, "واتساپ")}
+          {str(element.content.text).trim()}
         </Link>
       </Button>
     </div>

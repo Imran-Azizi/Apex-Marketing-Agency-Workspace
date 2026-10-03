@@ -384,16 +384,20 @@ export const env = {
   ffprobePath: trimEnv(process.env.FFPROBE_PATH),
 
   // SMTP — optional; required to email backup archives
-  smtpHost: process.env.SMTP_HOST || "",
+  smtpHost: trimEnv(process.env.SMTP_HOST),
   smtpPort: Number(process.env.SMTP_PORT || 587),
   smtpSecure: bool("SMTP_SECURE", false),
-  smtpUser: process.env.SMTP_USER || "",
-  smtpPass: process.env.SMTP_PASS || "",
-  mailFrom:
-    process.env.MAIL_FROM ||
-    process.env.SMTP_FROM ||
-    process.env.SMTP_USER ||
-    "",
+  // Strip wrapping quotes; Gmail app passwords often include spaces in the UI copy
+  smtpUser: trimEnv(process.env.SMTP_USER).replace(/^["']|["']$/g, ""),
+  smtpPass: trimEnv(process.env.SMTP_PASS)
+    .replace(/^["']|["']$/g, "")
+    .replace(/\s+/g, ""),
+  mailFrom: (() => {
+    const raw = trimEnv(
+      process.env.MAIL_FROM || process.env.SMTP_FROM || process.env.SMTP_USER,
+    );
+    return raw.replace(/^["']|["']$/g, "");
+  })(),
   /** Default recipient for automatic / manual backups when schedule.emailTo is empty */
   backupEmailTo: process.env.BACKUP_EMAIL_TO || "",
   /** Max attachment size for emailing backups (bytes). Larger files stay in object storage only. */

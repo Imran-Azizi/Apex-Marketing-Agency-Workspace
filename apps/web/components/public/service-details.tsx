@@ -9,6 +9,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CoverImage } from "@/components/media/cover-image";
+import { RichTextContent } from "@/components/editor/rich-text-content";
 
 export function ServiceDetails({ service }: { service: PublicService }) {
   const title = serviceTitle(service);
@@ -78,9 +79,10 @@ export function ServiceDetails({ service }: { service: PublicService }) {
                 </p>
               ) : null}
               {service.description ? (
-                <p className="mt-4 max-w-3xl text-pretty text-sm leading-8 text-muted-foreground sm:text-base sm:leading-8">
-                  {service.description}
-                </p>
+                <RichTextContent
+                  value={service.description}
+                  className="mt-4 max-w-3xl text-sm sm:text-base"
+                />
               ) : null}
             </div>
 

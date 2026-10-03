@@ -45,6 +45,15 @@ test('BACKUP_TABLES includes newly added domains', () => {
   }
 });
 
+test('Opportunity restores after Project; PortalInvite after Opportunity', () => {
+  const projectIdx = BACKUP_TABLES.indexOf('Project');
+  const opportunityIdx = BACKUP_TABLES.indexOf('Opportunity');
+  const inviteIdx = BACKUP_TABLES.indexOf('PortalInvite');
+  assert.ok(projectIdx >= 0);
+  assert.ok(opportunityIdx > projectIdx, 'Opportunity.projectId requires Project first');
+  assert.ok(inviteIdx > opportunityIdx, 'PortalInvite.opportunityId requires Opportunity first');
+});
+
 test('collectMediaKeysFromTables gathers scalar and landing JSON keys', () => {
   const keys = collectMediaKeysFromTables({
     ProjectFile: [{ storageKey: 'videos/projects/a.mp4' }],

@@ -487,12 +487,6 @@ export default function BackupPage() {
         subtitle="پشتیبان کامل سیستم — پایگاه داده، فایل‌ها، رسانه، تنظیمات و تمام ماژول‌ها"
       />
 
-      <div className="rounded-xl border border-brand/25 bg-brand/[0.04] px-4 py-3 text-sm text-muted-foreground">
-        هر بک اپ یک <span className="font-medium text-foreground">نسخه کامل از کل سیستم</span> است
-        (نه فقط این صفحه): کاربران، CRM، پروژه‌ها، مالی، پورتفولیو، لندینگ، چت،
-        دستیارها، تنظیمات و تمام فایل‌های رسانه‌ای ذخیره‌شده.
-      </div>
-
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {

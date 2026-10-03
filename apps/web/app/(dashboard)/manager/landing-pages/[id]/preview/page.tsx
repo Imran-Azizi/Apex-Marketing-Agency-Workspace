@@ -40,21 +40,26 @@ export default function LandingPagePreviewPage() {
   const page = query.data;
 
   return (
-    <div className="space-y-4" dir="rtl">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-lg font-bold">پیش‌نمایش: {page.title}</h1>
-          <p className="text-xs text-muted-foreground">
-            این پیش‌نمایش صفحه را منتشر نمی‌کند.
-          </p>
+    <div className="flex min-h-[calc(100vh-6rem)] flex-col" dir="rtl">
+      <header className="sticky top-0 z-20 border-b border-border/70 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-4">
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-bold sm:text-lg">
+              پیش‌نمایش: {page.title}
+            </h1>
+            <p className="text-[11px] text-muted-foreground">
+              این پیش‌نمایش صفحه را منتشر نمی‌کند.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" asChild className="shrink-0">
+            <Link href={`/manager/landing-pages/${page.id}`}>
+              بازگشت به سازنده
+            </Link>
+          </Button>
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link href={`/manager/landing-pages/${page.id}`}>
-            بازگشت به سازنده
-          </Link>
-        </Button>
-      </div>
-      <div className="mx-auto w-full max-w-[1200px] overflow-hidden rounded-2xl border bg-background shadow-sm">
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-auto bg-background">
         <LandingPageRenderer
           content={page.content}
           contact={contactQ.data}

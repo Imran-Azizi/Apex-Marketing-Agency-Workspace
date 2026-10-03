@@ -3,8 +3,17 @@ import type {
   LandingElementStyles,
   LandingSectionSettings,
 } from "@/lib/landing-content";
+import { getActiveLandingPreviewDevice } from "@/lib/landing-device-preview";
 
 export function elementVisibilityClass(styles: LandingElementStyles): string {
+  const preview = getActiveLandingPreviewDevice();
+  if (preview) {
+    if (preview === "mobile" && styles.hiddenOnMobile) return "hidden";
+    if (preview === "tablet" && styles.hiddenOnTablet) return "hidden";
+    if (preview === "desktop" && styles.hiddenOnDesktop) return "hidden";
+    return "";
+  }
+
   const classes: string[] = [];
   if (styles.hiddenOnMobile) classes.push("max-md:hidden");
   if (styles.hiddenOnTablet) classes.push("md:max-lg:hidden");
@@ -48,6 +57,14 @@ export function elementBoxStyle(styles: LandingElementStyles): CSSProperties {
 }
 
 export function sectionVisibilityClass(settings: LandingSectionSettings): string {
+  const preview = getActiveLandingPreviewDevice();
+  if (preview) {
+    if (preview === "mobile" && settings.hiddenOnMobile) return "hidden";
+    if (preview === "tablet" && settings.hiddenOnTablet) return "hidden";
+    if (preview === "desktop" && settings.hiddenOnDesktop) return "hidden";
+    return "";
+  }
+
   const classes: string[] = [];
   if (settings.hiddenOnMobile) classes.push("max-md:hidden");
   if (settings.hiddenOnTablet) classes.push("md:max-lg:hidden");

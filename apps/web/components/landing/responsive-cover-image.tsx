@@ -3,10 +3,12 @@
 import { useState, type ReactNode } from "react";
 import { CoverImage } from "@/components/media/cover-image";
 import { isPublicCdnSrc, publicCdnLoader } from "@/lib/cdn-image";
+import { useLandingDevicePreview } from "@/components/landing/landing-device-preview";
 import {
   LANDING_MOBILE_IMAGE_BREAKPOINT_PX,
   resolveResponsiveImageSrcs,
 } from "@/lib/landing-responsive-image";
+import { landingPreviewUsesMobileImage } from "@/lib/landing-device-preview";
 import { cn } from "@/lib/utils";
 
 function optimizedSrc(src: string, width: number, quality = 82) {
@@ -16,8 +18,8 @@ function optimizedSrc(src: string, width: number, quality = 82) {
 
 /**
  * Renders desktop vs mobile landing images with a real CSS media switch.
- * When both sources exist, `<picture>` ensures only the matching asset is
- * requested. When only one exists, that image is used on every screen.
+ * In the editor device preview, the active device forces the correct asset
+ * so the canvas matches published behavior without relying on window width.
  */
 export function ResponsiveCoverImage({
   desktopSrc,
@@ -40,6 +42,7 @@ export function ResponsiveCoverImage({
   quality?: number;
   fallback?: ReactNode;
 }) {
+  const preview = useLandingDevicePreview();
   const { largeSrc, smallSrc, hasBoth } = resolveResponsiveImageSrcs({
     desktopSrc,
     mobileSrc,
@@ -48,6 +51,23 @@ export function ResponsiveCoverImage({
 
   if (!largeSrc || failed) {
     return fallback ? <>{fallback}</> : null;
+  }
+
+  // Editor device preview: force the asset published media queries would pick
+  // at the active CSS viewport width (< 1024 → small, otherwise large).
+  if (preview.enabled && hasBoth && smallSrc) {
+    const useMobile = landingPreviewUsesMobileImage(preview.width);
+    return (
+      <CoverImage
+        src={useMobile ? smallSrc : largeSrc}
+        alt={alt}
+        sizes={useMobile ? mobileSizes : desktopSizes}
+        className={className}
+        priority={priority}
+        quality={quality}
+        fallback={fallback}
+      />
+    );
   }
 
   // Single asset → keep CoverImage (CDN loader + next/image).
@@ -70,13 +90,11 @@ export function ResponsiveCoverImage({
 
   return (
     <picture className="absolute inset-0 block h-full w-full">
-      {/* Small screens → small/mobile image */}
       <source
         media={mobileQuery}
         srcSet={optimizedSrc(smallSrc, 1080, quality)}
         sizes={mobileSizes}
       />
-      {/* Large screens → large/desktop image */}
       <source
         media={desktopQuery}
         srcSet={optimizedSrc(largeSrc, 1920, quality)}
