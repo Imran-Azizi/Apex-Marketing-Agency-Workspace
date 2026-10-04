@@ -803,26 +803,36 @@
 
 /*
  * Landing editor device preview — simulate CSS viewport breakpoints inside the
- * fixed-width canvas (DnD-safe; no transform:scale).
+ * fitted device frame (DnD-safe; width is clamped to the canvas, no scale).
  *
  * Standard bands (CSS px):
  *   mobile  320–767  → below Tailwind md
  *   tablet  768–1023 → md on, lg off
  *   desktop 1024+    → sm/md/lg on
  *
- * Matches Tailwind sm(640) / md(768) / lg(1024). The پیش‌نمایش page uses a
- * real iframe viewport instead; this CSS is for the in-editor canvas only.
+ * Matches Tailwind sm(640) / md(768) / lg(1024).
  */
 
-/* —— Mobile (~375px): below sm/md/lg —— */
+.landing-device-frame {
+  box-sizing: border-box;
+}
+
+.landing-device-frame img,
+.landing-device-frame video,
+.landing-device-frame iframe {
+  max-width: 100%;
+}
+
+/* —— Mobile (~390px): below sm/md/lg —— */
 [data-device-preview="mobile"] .sm\:grid-cols-2,
 [data-device-preview="mobile"] .md\:grid-cols-2,
+[data-device-preview="mobile"] .md\:grid-cols-3,
 [data-device-preview="mobile"] .lg\:grid-cols-3,
 [data-device-preview="mobile"] .lg\:grid-cols-4 {
   grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
 }
 
-[data-device-preview="mobile"] .md\:grid-cols-4 {
+[data-device-preview="mobile"] .grid-cols-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 
@@ -851,18 +861,15 @@
   line-height: 1.75rem !important;
 }
 
-/* —— Tablet (~768px): sm+md on, lg off —— */
+/* —— Tablet (~820px): sm+md on, lg off —— */
 [data-device-preview="tablet"] .sm\:grid-cols-2,
 [data-device-preview="tablet"] .md\:grid-cols-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 
-[data-device-preview="tablet"] .md\:grid-cols-4 {
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-}
-
+[data-device-preview="tablet"] .md\:grid-cols-3,
 [data-device-preview="tablet"] .lg\:grid-cols-3 {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 
 [data-device-preview="tablet"] .lg\:grid-cols-4 {
@@ -875,18 +882,18 @@
 }
 
 [data-device-preview="tablet"] .sm\:py-24 {
-  padding-top: 6rem !important;
-  padding-bottom: 6rem !important;
+  padding-top: 5rem !important;
+  padding-bottom: 5rem !important;
 }
 
 [data-device-preview="tablet"] .sm\:text-5xl {
-  font-size: 3rem !important;
-  line-height: 1 !important;
+  font-size: 2.75rem !important;
+  line-height: 1.1 !important;
 }
 
 [data-device-preview="tablet"] .lg\:text-6xl {
-  font-size: 3rem !important; /* stay at sm:text-5xl */
-  line-height: 1 !important;
+  font-size: 2.75rem !important; /* stay below desktop lg size */
+  line-height: 1.1 !important;
 }
 
 [data-device-preview="tablet"] .sm\:text-lg {
@@ -898,16 +905,13 @@
   line-height: 2rem !important;
 }
 
-/* —— Desktop (~1440px): force sm/md/lg even if the browser window is narrower —— */
+/* —— Desktop (~1280px): force sm/md/lg even if the browser window is narrower —— */
 [data-device-preview="desktop"] .sm\:grid-cols-2,
 [data-device-preview="desktop"] .md\:grid-cols-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 
-[data-device-preview="desktop"] .md\:grid-cols-4 {
-  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-}
-
+[data-device-preview="desktop"] .md\:grid-cols-3,
 [data-device-preview="desktop"] .lg\:grid-cols-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
@@ -928,12 +932,12 @@
 
 [data-device-preview="desktop"] .sm\:text-5xl {
   font-size: 3rem !important;
-  line-height: 1 !important;
+  line-height: 1.1 !important;
 }
 
 [data-device-preview="desktop"] .lg\:text-6xl {
   font-size: 3.75rem !important;
-  line-height: 1 !important;
+  line-height: 1.1 !important;
 }
 
 [data-device-preview="desktop"] .sm\:text-lg {

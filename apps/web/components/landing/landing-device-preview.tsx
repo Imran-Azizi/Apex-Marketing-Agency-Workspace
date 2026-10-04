@@ -6,6 +6,7 @@ import {
   useContext,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -91,7 +92,7 @@ export function useLandingDevicePreview() {
       setDevice: (_device: LandingPreviewDevice) => undefined,
       width: landingPreviewWidth("desktop"),
       band: "desktop" as LandingPreviewDevice,
-      viewportLabel: formatLandingViewportLabel(1440),
+      viewportLabel: formatLandingViewportLabel(1280),
       enabled: false,
     };
   }
@@ -147,7 +148,13 @@ export function LandingDevicePreviewToolbar({
   );
 }
 
-/** Shared centered device frame used by the editor canvas. */
+/**
+ * Editor canvas device frame.
+ * Fits the logical device width into the available column (no transform:scale,
+ * so HTML5 drag-and-drop stays accurate). Breakpoint styles are forced via
+ * data-device-preview so desktop/tablet layouts stay correct even when the
+ * browser window is narrower than the device band.
+ */
 export function LandingDevicePreviewFrame({
   children,
   className,
@@ -158,29 +165,81 @@ export function LandingDevicePreviewFrame({
   /** Apply data-device-preview CSS simulation (editor). */
   simulateBreakpoints?: boolean;
 }) {
-  const { width, band, device } = useLandingDevicePreview();
+  const { width: deviceWidth, band, device, viewportLabel } =
+    useLandingDevicePreview();
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [availableWidth, setAvailableWidth] = useState(deviceWidth);
+
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+
+    const readAvailable = () => {
+      const style = getComputedStyle(shell);
+      const padX =
+        (parseFloat(style.paddingLeft) || 0) +
+        (parseFloat(style.paddingRight) || 0);
+      return Math.max(280, Math.round(shell.clientWidth - padX));
+    };
+
+    const update = (nextAvailable: number) => {
+      const safe = Math.max(280, Math.round(nextAvailable));
+      setAvailableWidth((prev) => (prev === safe ? prev : safe));
+    };
+
+    update(readAvailable());
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      update(entry.contentRect.width);
+    });
+    ro.observe(shell);
+    return () => ro.disconnect();
+  }, []);
+
+  /** Prefer the true device width; shrink only so the canvas never horizontal-scrolls. */
+  const frameWidth = Math.min(deviceWidth, availableWidth);
+  const fitted = frameWidth < deviceWidth - 1;
 
   return (
     <div
+      ref={shellRef}
       className={cn(
-        "flex min-h-full w-full justify-center p-3 sm:p-5 [direction:ltr]",
+        "flex min-h-full w-full flex-col items-center gap-3 p-3 sm:p-5 [direction:ltr]",
         className,
       )}
     >
       <div
+        className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/90 px-3 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur"
+        dir="ltr"
+      >
+        <span className="font-medium text-foreground">
+          {LANDING_PREVIEW_DEVICES.find((d) => d.id === device)?.label ??
+            "Desktop"}
+        </span>
+        <span aria-hidden className="h-3 w-px bg-border" />
+        <span className="tabular-nums">{viewportLabel}</span>
+        {fitted ? (
+          <>
+            <span aria-hidden className="h-3 w-px bg-border" />
+            <span className="tabular-nums">{frameWidth}px fit</span>
+          </>
+        ) : null}
+      </div>
+
+      <div
         dir="rtl"
         data-device-preview={simulateBreakpoints ? band : undefined}
         className={cn(
-          "landing-device-frame shrink-0 overflow-hidden border border-border/70 bg-background shadow-md transition-[width] duration-300 ease-out",
+          "landing-device-frame w-full max-w-full overflow-x-hidden border border-border/70 bg-background shadow-md transition-[width,max-width] duration-300 ease-out",
           device === "mobile" &&
             "rounded-[1.75rem] shadow-lg ring-1 ring-black/5",
           device === "tablet" && "rounded-2xl",
           device === "desktop" && "rounded-2xl",
         )}
         style={{
-          width,
-          minWidth: width,
-          maxWidth: width,
+          width: frameWidth,
+          maxWidth: frameWidth,
         }}
       >
         {children}

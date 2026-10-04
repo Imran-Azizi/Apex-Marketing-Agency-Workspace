@@ -43,8 +43,8 @@ function ItemsGrid({
       className={cn(
         "grid w-full max-w-full",
         count <= 1 && "grid-cols-1",
-        count === 2 && "grid-cols-1 sm:grid-cols-2",
-        count >= 3 && "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+        count === 2 && "grid-cols-1 md:grid-cols-2",
+        count >= 3 && "grid-cols-1 md:grid-cols-3",
         className,
       )}
       style={{ gap: `${gap}px` }}
@@ -386,7 +386,7 @@ export function StatsBlock({ element }: { element: LandingElement }) {
   return (
     <div
       className={cn(
-        "grid grid-cols-2 gap-6 md:grid-cols-4",
+        "grid grid-cols-2 gap-6 lg:grid-cols-4",
         vis,
       )}
       style={{ gap: `${gap}px`, color: box.color }}
@@ -447,7 +447,9 @@ export function GalleryBlock({ element }: { element: LandingElement }) {
     <div
       className={cn(
         "grid w-full max-w-full",
-        cols <= 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+        cols <= 2
+          ? "grid-cols-1 md:grid-cols-2"
+          : "grid-cols-1 md:grid-cols-3",
         vis,
       )}
       style={{ gap: `${element.styles.gap || 12}px`, ...box }}

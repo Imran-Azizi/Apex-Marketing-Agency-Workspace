@@ -258,8 +258,8 @@ function CanvasElementItem({
           className={cn(
             "grid w-full min-w-0 gap-3 rounded-lg border border-dashed border-border/60 bg-muted/20 p-2",
             element.columns.length <= 2 && "md:grid-cols-2",
-            element.columns.length === 3 && "md:grid-cols-2 lg:grid-cols-3",
-            element.columns.length >= 4 && "sm:grid-cols-2 lg:grid-cols-4",
+            element.columns.length === 3 && "md:grid-cols-3",
+            element.columns.length >= 4 && "grid-cols-2 lg:grid-cols-4",
           )}
         >
           {element.columns.map((col, colIndex) => (

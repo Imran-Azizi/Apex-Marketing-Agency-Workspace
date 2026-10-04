@@ -796,8 +796,10 @@ export function LandingBuilder({
                   {section.columns ? (
                     <div
                       className={cn(
-                        "grid w-full min-w-0 gap-4 md:grid-cols-2",
-                        section.columns.length >= 3 && "lg:grid-cols-3",
+                        "grid w-full min-w-0 gap-4",
+                        section.columns.length >= 3
+                          ? "md:grid-cols-3"
+                          : "md:grid-cols-2",
                       )}
                     >
                       {section.columns.map((_, colIndex) => (
@@ -897,7 +899,7 @@ function BuilderDeviceCanvas({
   return (
     <div
       className={cn(
-        "min-h-0 min-w-0 overflow-auto overscroll-contain bg-muted/40 [direction:ltr]",
+        "min-h-0 min-w-0 overflow-auto overscroll-contain bg-[radial-gradient(circle_at_top,hsl(var(--muted)/0.85),hsl(var(--muted)/0.35)_45%,transparent_75%)] [direction:ltr]",
         className,
       )}
     >

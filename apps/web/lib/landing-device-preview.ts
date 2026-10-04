@@ -30,34 +30,35 @@ export const LANDING_PREVIEW_DEVICES: {
     id: "mobile",
     label: "Mobile",
     labelFa: "موبایل",
-    width: 375,
+    width: 390,
     rangeLabel: "320–767px",
   },
   {
     id: "tablet",
     label: "Tablet",
     labelFa: "تبلت",
-    width: 768,
+    /** iPad portrait mid-band — avoids flaky edge at exactly 768. */
+    width: 820,
     rangeLabel: "768–1023px",
   },
   {
     id: "desktop",
     label: "Desktop",
     labelFa: "دسکتاپ",
-    width: 1440,
+    width: 1280,
     rangeLabel: "1024px+",
   },
 ];
 
 export function landingPreviewWidth(device: LandingPreviewDevice): number {
   return (
-    LANDING_PREVIEW_DEVICES.find((item) => item.id === device)?.width ?? 1440
+    LANDING_PREVIEW_DEVICES.find((item) => item.id === device)?.width ?? 1280
   );
 }
 
 /** Map a CSS viewport width to the active breakpoint band. */
 export function landingDeviceFromWidth(width: number): LandingPreviewDevice {
-  const w = Math.round(Number(width) || 1440);
+  const w = Math.round(Number(width) || 1280);
   if (w < LANDING_BP.md) return "mobile";
   if (w < LANDING_BP.lg) return "tablet";
   return "desktop";

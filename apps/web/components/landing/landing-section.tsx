@@ -87,10 +87,10 @@ export function LandingSectionView({
           VERTICAL_ALIGN_CLASS[settings.verticalAlign || "top"],
         )}
         style={{
-          paddingTop: `clamp(2rem, ${Math.max(settings.paddingY * 0.4, 16)}px + 4vw, ${settings.paddingY}px)`,
-          paddingBottom: `clamp(2rem, ${Math.max(settings.paddingY * 0.4, 16)}px + 4vw, ${settings.paddingY}px)`,
-          paddingLeft: `clamp(1rem, ${Math.max(settings.paddingX * 0.5, 12)}px + 2vw, ${settings.paddingX}px)`,
-          paddingRight: `clamp(1rem, ${Math.max(settings.paddingX * 0.5, 12)}px + 2vw, ${settings.paddingX}px)`,
+          paddingTop: `clamp(2rem, ${Math.max(settings.paddingY * 0.55, 20)}px, ${settings.paddingY}px)`,
+          paddingBottom: `clamp(2rem, ${Math.max(settings.paddingY * 0.55, 20)}px, ${settings.paddingY}px)`,
+          paddingLeft: `clamp(1rem, ${Math.max(settings.paddingX * 0.65, 16)}px, ${settings.paddingX}px)`,
+          paddingRight: `clamp(1rem, ${Math.max(settings.paddingX * 0.65, 16)}px, ${settings.paddingX}px)`,
           textAlign: settings.align,
           gap: settings.gap ? `${settings.gap}px` : undefined,
           minHeight: settings.minHeight || undefined,
@@ -101,8 +101,8 @@ export function LandingSectionView({
         ) : hasColumns ? (
           <div
             className={cn(
-              "grid w-full gap-6 md:grid-cols-2",
-              colCount >= 3 && "lg:grid-cols-3",
+              "grid w-full gap-6",
+              colCount >= 3 ? "md:grid-cols-3" : "md:grid-cols-2",
             )}
             style={{ gap: settings.gap ? `${settings.gap}px` : undefined }}
           >
