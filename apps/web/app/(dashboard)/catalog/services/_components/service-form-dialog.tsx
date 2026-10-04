@@ -170,7 +170,7 @@ export function ServiceFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto text-start sm:max-w-2xl" dir="rtl">
+      <DialogContent className="max-h-[92vh] overflow-y-auto text-start sm:max-w-3xl" dir="rtl">
         <DialogHeader className="text-start sm:text-start">
           <DialogTitle>
             {editing ? "ویرایش خدمت" : "ایجاد خدمت جدید"}
@@ -309,8 +309,9 @@ export function ServiceFormDialog({
               minHeightClassName="min-h-[240px]"
             />
             <p className="text-[11px] leading-5 text-muted-foreground">
-              از قالب‌بندی برای عناوین، فهرست و لینک استفاده کنید. متن‌های قبلی
-              بدون قالب‌بندی همچنان پشتیبانی می‌شوند.
+              از نوار ابزار برای عناوین، فهرست، لینک، تصویر و ویدیو استفاده کنید.
+              رسانه داخل توضیحات در صفحه جزئیات خدمت نمایش داده می‌شود. متن‌های
+              قبلی بدون قالب‌بندی همچنان پشتیبانی می‌شوند.
             </p>
           </div>
 

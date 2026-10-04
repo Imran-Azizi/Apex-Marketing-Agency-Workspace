@@ -12,6 +12,7 @@ export const UPLOAD_PURPOSE = {
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
   SERVICE_IMAGE: "service-image",
+  SERVICE_VIDEO: "service-video",
   HERO_IMAGE: "hero-image",
   CUSTOMER_IMAGE: "customer-image",
   LANDING_IMAGE: "landing-image",

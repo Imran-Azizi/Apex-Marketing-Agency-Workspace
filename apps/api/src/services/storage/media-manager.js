@@ -13,6 +13,7 @@ export const UPLOAD_PURPOSE = Object.freeze({
   EMPLOYEE_PROFILE: "employee-profile",
   EMPLOYEE_CV: "employee-cv",
   SERVICE_IMAGE: "service-image",
+  SERVICE_VIDEO: "service-video",
   HERO_IMAGE: "hero-image",
   CUSTOMER_IMAGE: "customer-image",
   LANDING_IMAGE: "landing-image",
@@ -251,6 +252,14 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
     return {
       folderPath: `${MEDIA_ROOTS.IMAGES}/services`,
       category: MEDIA_ROOTS.IMAGES,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.SERVICE_VIDEO) {
+    return {
+      folderPath: `${MEDIA_ROOTS.VIDEOS}/services`,
+      category: MEDIA_ROOTS.VIDEOS,
       purpose,
     };
   }

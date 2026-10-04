@@ -13,7 +13,6 @@ import { formatCurrency, cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { CoverImage } from "@/components/media/cover-image";
 import { usePublicReveal } from "@/components/public/public-reveal";
-import { RichTextContent } from "@/components/editor/rich-text-content";
 import { stripHtml } from "@/lib/rich-text";
 
 function orderLabel(index: number) {
@@ -49,26 +48,21 @@ function ServiceDescription({ text }: { text: string }) {
 
   return (
     <div className="flex min-h-[5.25rem] min-w-0 flex-1 flex-col sm:min-h-[5.75rem]">
-      {expanded ? (
-        <div id={textId} className="min-w-0 text-start text-[13px] sm:text-sm">
-          <RichTextContent value={text} className="text-[13px] sm:text-sm" />
-        </div>
-      ) : (
-        <p
-          id={textId}
-          className={cn(
-            "min-w-0 text-start text-[13px] leading-7 text-muted-foreground sm:text-sm sm:leading-7",
-            "overflow-hidden break-words",
-          )}
-        >
-          {preview}
-          {truncated ? (
-            <span aria-hidden className="text-muted-foreground">
-              …
-            </span>
-          ) : null}
-        </p>
-      )}
+      <p
+        id={textId}
+        className={cn(
+          "min-w-0 text-start text-[13px] leading-7 text-muted-foreground sm:text-sm sm:leading-7",
+          "overflow-hidden break-words",
+          expanded && "whitespace-pre-wrap",
+        )}
+      >
+        {expanded ? normalizeServiceCopy(text) : preview}
+        {!expanded && truncated ? (
+          <span aria-hidden className="text-muted-foreground">
+            …
+          </span>
+        ) : null}
+      </p>
       {showToggle ? (
         <button
           type="button"

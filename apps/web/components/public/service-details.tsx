@@ -46,7 +46,7 @@ export function ServiceDetails({ service }: { service: PublicService }) {
           </span>
         </nav>
 
-        <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm sm:rounded-3xl">
+        <article className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm sm:rounded-3xl">
           <div className="relative aspect-[16/9] bg-muted sm:aspect-[21/9]">
             {imageSrc ? (
               <CoverImage
@@ -63,50 +63,55 @@ export function ServiceDetails({ service }: { service: PublicService }) {
               </div>
             )}
             <div
-              className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/50 via-transparent to-transparent"
+              className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/55 via-transparent to-transparent"
               aria-hidden
             />
           </div>
 
-          <div className="grid gap-6 p-5 sm:gap-8 sm:p-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:p-10">
-            <div className="min-w-0">
-              <h1 className="text-balance text-2xl font-bold tracking-tight text-foreground sm:text-3xl lg:text-[2rem]">
-                {title}
-              </h1>
-              {service.startingPrice ? (
-                <p className="mt-3 text-base font-medium text-brand sm:text-lg">
-                  از {formatCurrency(Number(service.startingPrice))}
-                </p>
-              ) : null}
-              {service.description ? (
+          <div className="space-y-6 p-5 sm:space-y-8 sm:p-8 lg:p-10">
+            <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+              <div className="min-w-0">
+                <h1 className="text-balance text-2xl font-bold tracking-tight text-foreground sm:text-3xl lg:text-[2rem]">
+                  {title}
+                </h1>
+                {service.startingPrice ? (
+                  <p className="mt-3 text-base font-medium text-brand sm:text-lg">
+                    از {formatCurrency(Number(service.startingPrice))}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end sm:pt-1">
+                <Button variant="outline" className="rounded-full" asChild>
+                  <Link href="/#services" prefetch={false}>
+                    بازگشت به خدمات
+                  </Link>
+                </Button>
+                <Button variant="brand" className="rounded-full gap-1.5" asChild>
+                  <Link
+                    href={ctaHref}
+                    prefetch={false}
+                    {...(external
+                      ? { target: "_blank", rel: "noopener noreferrer" }
+                      : {})}
+                  >
+                    {ctaLabel}
+                    <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
+                  </Link>
+                </Button>
+              </div>
+            </header>
+
+            {service.description ? (
+              <div className="border-t border-border/60 pt-6 sm:pt-8">
                 <RichTextContent
                   value={service.description}
-                  className="mt-4 max-w-3xl text-sm sm:text-base"
+                  className="max-w-3xl text-sm leading-8 sm:max-w-4xl sm:text-base sm:leading-8"
                 />
-              ) : null}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-              <Button variant="outline" className="rounded-full" asChild>
-                <Link href="/#services" prefetch={false}>
-                  بازگشت به خدمات
-                </Link>
-              </Button>
-              <Button variant="brand" className="rounded-full gap-1.5" asChild>
-                <Link
-                  href={ctaHref}
-                  prefetch={false}
-                  {...(external
-                    ? { target: "_blank", rel: "noopener noreferrer" }
-                    : {})}
-                >
-                  {ctaLabel}
-                  <ArrowLeft className="h-4 w-4 shrink-0" aria-hidden />
-                </Link>
-              </Button>
-            </div>
+              </div>
+            ) : null}
           </div>
-        </div>
+        </article>
       </div>
     </div>
   );

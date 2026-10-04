@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
 import Placeholder from "@tiptap/extension-placeholder";
+import Image from "@tiptap/extension-image";
 import {
   AlignCenter,
   AlignJustify,
@@ -15,19 +16,36 @@ import {
   Bold,
   Heading2,
   Heading3,
+  ImagePlus,
   Italic,
   Link2,
   List,
   ListOrdered,
+  Loader2,
   Quote,
   Redo2,
   RemoveFormatting,
+  Trash2,
   Underline as UnderlineIcon,
   Undo2,
+  Video,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { isEmptyRichText, looksLikeHtml } from "@/lib/rich-text";
+import {
+  formatFileSize,
+  uploadFileWithProgress,
+  UPLOAD_PURPOSE,
+} from "@/lib/upload";
+import { RichTextVideo } from "@/components/editor/rich-text-video";
+
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 120 * 1024 * 1024;
+
+const IMAGE_ACCEPT = "image/jpeg,image/png,image/webp,image/gif,image/*";
+const VIDEO_ACCEPT = "video/mp4,video/webm,video/quicktime,video/*";
 
 type RichTextEditorProps = {
   value: string;
@@ -37,6 +55,14 @@ type RichTextEditorProps = {
   className?: string;
   minHeightClassName?: string;
   dir?: "rtl" | "ltr";
+  /** Enable image/video upload toolbar actions (default true). */
+  enableMedia?: boolean;
+};
+
+type MediaUploadState = {
+  kind: "image" | "video";
+  progress: number;
+  fileName: string;
 };
 
 function ToolbarButton({
@@ -82,7 +108,12 @@ export function RichTextEditor({
   className,
   minHeightClassName = "min-h-[220px]",
   dir = "rtl",
+  enableMedia = true,
 }: RichTextEditorProps) {
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const [mediaUpload, setMediaUpload] = useState<MediaUploadState | null>(null);
+
   const editor = useEditor({
     immediatelyRender: false,
     editable: !disabled,
@@ -109,6 +140,14 @@ export function RichTextEditor({
         alignments: ["left", "center", "right", "justify"],
       }),
       Placeholder.configure({ placeholder }),
+      Image.configure({
+        inline: false,
+        allowBase64: false,
+        HTMLAttributes: {
+          class: "rich-text-image",
+        },
+      }),
+      RichTextVideo,
     ],
     content: valueToEditorContent(value),
     editorProps: {
@@ -130,8 +169,8 @@ export function RichTextEditor({
 
   useEffect(() => {
     if (!editor) return;
-    editor.setEditable(!disabled);
-  }, [editor, disabled]);
+    editor.setEditable(!disabled && !mediaUpload);
+  }, [editor, disabled, mediaUpload]);
 
   // Sync external value (e.g. dialog open / load existing service).
   useEffect(() => {
@@ -172,6 +211,103 @@ export function RichTextEditor({
       .run();
   }
 
+  async function uploadMedia(kind: "image" | "video", file: File | null) {
+    if (!file || !editor || disabled || mediaUpload) return;
+
+    if (kind === "image") {
+      if (!file.type.startsWith("image/")) {
+        toast.error("فقط فایل تصویری مجاز است");
+        return;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        toast.error(
+          `حجم تصویر نباید بیشتر از ${formatFileSize(MAX_IMAGE_BYTES)} باشد`,
+        );
+        return;
+      }
+    } else {
+      if (!file.type.startsWith("video/")) {
+        toast.error("فقط فایل ویدیویی مجاز است");
+        return;
+      }
+      if (file.size > MAX_VIDEO_BYTES) {
+        toast.error(
+          `حجم ویدیو نباید بیشتر از ${formatFileSize(MAX_VIDEO_BYTES)} باشد`,
+        );
+        return;
+      }
+    }
+
+    setMediaUpload({ kind, progress: 0, fileName: file.name });
+    try {
+      const uploaded = await uploadFileWithProgress(
+        file,
+        {
+          purpose:
+            kind === "image"
+              ? UPLOAD_PURPOSE.SERVICE_IMAGE
+              : UPLOAD_PURPOSE.SERVICE_VIDEO,
+        },
+        (pct) =>
+          setMediaUpload((prev) =>
+            prev ? { ...prev, progress: pct } : prev,
+          ),
+      );
+
+      const src = uploaded.url;
+      if (!src) {
+        throw new Error("آدرس فایل پس از آپلود در دسترس نیست");
+      }
+
+      if (kind === "image") {
+        const alt = file.name.replace(/\.[^.]+$/, "") || "تصویر خدمت";
+        if (editor.isActive("image")) {
+          editor
+            .chain()
+            .focus()
+            .updateAttributes("image", { src, alt })
+            .run();
+        } else {
+          editor.chain().focus().setImage({ src, alt }).run();
+        }
+      } else if (editor.isActive("richTextVideo")) {
+        editor
+          .chain()
+          .focus()
+          .updateAttributes("richTextVideo", { src })
+          .run();
+      } else {
+        editor.chain().focus().setVideo({ src }).run();
+      }
+      toast.success(kind === "image" ? "تصویر اضافه شد" : "ویدیو اضافه شد");
+    } catch (e) {
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : kind === "image"
+            ? "آپلود تصویر ناموفق بود"
+            : "آپلود ویدیو ناموفق بود",
+      );
+    } finally {
+      setMediaUpload(null);
+      if (imageInputRef.current) imageInputRef.current.value = "";
+      if (videoInputRef.current) videoInputRef.current.value = "";
+    }
+  }
+
+  function removeSelectedMedia() {
+    if (!editor) return;
+    if (editor.isActive("image") || editor.isActive("richTextVideo")) {
+      editor.chain().focus().deleteSelection().run();
+      return;
+    }
+    toast.message("ابتدا تصویر یا ویدیو را در متن انتخاب کنید");
+  }
+
+  const busy = disabled || Boolean(mediaUpload);
+  const mediaSelected =
+    editor.isActive("image") || editor.isActive("richTextVideo");
+
   return (
     <div
       className={cn(
@@ -185,7 +321,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="پررنگ"
           active={editor.isActive("bold")}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().toggleBold().run()}
         >
           <Bold className="h-3.5 w-3.5" />
@@ -193,7 +329,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="ایتالیک"
           active={editor.isActive("italic")}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().toggleItalic().run()}
         >
           <Italic className="h-3.5 w-3.5" />
@@ -201,7 +337,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="زیرخط"
           active={editor.isActive("underline")}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().toggleUnderline().run()}
         >
           <UnderlineIcon className="h-3.5 w-3.5" />
@@ -212,7 +348,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="عنوان ۲"
           active={editor.isActive("heading", { level: 2 })}
-          disabled={disabled}
+          disabled={busy}
           onClick={() =>
             editor.chain().focus().toggleHeading({ level: 2 }).run()
           }
@@ -222,7 +358,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="عنوان ۳"
           active={editor.isActive("heading", { level: 3 })}
-          disabled={disabled}
+          disabled={busy}
           onClick={() =>
             editor.chain().focus().toggleHeading({ level: 3 }).run()
           }
@@ -235,7 +371,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="لیست نقطه‌ای"
           active={editor.isActive("bulletList")}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().toggleBulletList().run()}
         >
           <List className="h-3.5 w-3.5" />
@@ -243,7 +379,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="لیست شماره‌دار"
           active={editor.isActive("orderedList")}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
         >
           <ListOrdered className="h-3.5 w-3.5" />
@@ -251,7 +387,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="نقل‌قول"
           active={editor.isActive("blockquote")}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().toggleBlockquote().run()}
         >
           <Quote className="h-3.5 w-3.5" />
@@ -262,7 +398,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="تراز راست"
           active={editor.isActive({ textAlign: "right" })}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().setTextAlign("right").run()}
         >
           <AlignRight className="h-3.5 w-3.5" />
@@ -270,7 +406,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="تراز وسط"
           active={editor.isActive({ textAlign: "center" })}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().setTextAlign("center").run()}
         >
           <AlignCenter className="h-3.5 w-3.5" />
@@ -278,7 +414,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="تراز چپ"
           active={editor.isActive({ textAlign: "left" })}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().setTextAlign("left").run()}
         >
           <AlignLeft className="h-3.5 w-3.5" />
@@ -286,7 +422,7 @@ export function RichTextEditor({
         <ToolbarButton
           title="تراز دوطرفه"
           active={editor.isActive({ textAlign: "justify" })}
-          disabled={disabled}
+          disabled={busy}
           onClick={() => editor.chain().focus().setTextAlign("justify").run()}
         >
           <AlignJustify className="h-3.5 w-3.5" />
@@ -297,14 +433,41 @@ export function RichTextEditor({
         <ToolbarButton
           title="لینک"
           active={editor.isActive("link")}
-          disabled={disabled}
+          disabled={busy}
           onClick={setLink}
         >
           <Link2 className="h-3.5 w-3.5" />
         </ToolbarButton>
+
+        {enableMedia ? (
+          <>
+            <ToolbarButton
+              title="افزودن تصویر"
+              disabled={busy}
+              onClick={() => imageInputRef.current?.click()}
+            >
+              <ImagePlus className="h-3.5 w-3.5" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="افزودن ویدیو"
+              disabled={busy}
+              onClick={() => videoInputRef.current?.click()}
+            >
+              <Video className="h-3.5 w-3.5" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="حذف رسانه انتخاب‌شده"
+              disabled={busy || !mediaSelected}
+              onClick={removeSelectedMedia}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </ToolbarButton>
+          </>
+        ) : null}
+
         <ToolbarButton
           title="پاک کردن قالب‌بندی"
-          disabled={disabled}
+          disabled={busy}
           onClick={() =>
             editor.chain().focus().unsetAllMarks().clearNodes().run()
           }
@@ -316,21 +479,79 @@ export function RichTextEditor({
 
         <ToolbarButton
           title="بازگردانی"
-          disabled={disabled || !editor.can().undo()}
+          disabled={busy || !editor.can().undo()}
           onClick={() => editor.chain().focus().undo().run()}
         >
           <Undo2 className="h-3.5 w-3.5" />
         </ToolbarButton>
         <ToolbarButton
           title="از نو"
-          disabled={disabled || !editor.can().redo()}
+          disabled={busy || !editor.can().redo()}
           onClick={() => editor.chain().focus().redo().run()}
         >
           <Redo2 className="h-3.5 w-3.5" />
         </ToolbarButton>
       </div>
 
+      {enableMedia ? (
+        <>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept={IMAGE_ACCEPT}
+            className="hidden"
+            onChange={(e) =>
+              uploadMedia("image", e.target.files?.[0] || null)
+            }
+          />
+          <input
+            ref={videoInputRef}
+            type="file"
+            accept={VIDEO_ACCEPT}
+            className="hidden"
+            onChange={(e) =>
+              uploadMedia("video", e.target.files?.[0] || null)
+            }
+          />
+        </>
+      ) : null}
+
+      {mediaUpload ? (
+        <div
+          className="flex items-center gap-3 border-b border-border/60 bg-brand/5 px-3 py-2 text-xs"
+          dir="rtl"
+        >
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-brand" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-medium text-foreground">
+              در حال آپلود{" "}
+              {mediaUpload.kind === "image" ? "تصویر" : "ویدیو"}…
+            </p>
+            <p className="truncate text-muted-foreground">
+              {mediaUpload.fileName}
+            </p>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-brand transition-[width] duration-200"
+                style={{ width: `${mediaUpload.progress}%` }}
+              />
+            </div>
+          </div>
+          <span className="tabular-nums text-muted-foreground">
+            {mediaUpload.progress}%
+          </span>
+        </div>
+      ) : null}
+
       <EditorContent editor={editor} className="max-h-[420px] overflow-y-auto" />
+
+      {enableMedia ? (
+        <p className="border-t border-border/50 bg-muted/20 px-3 py-1.5 text-[10px] leading-5 text-muted-foreground">
+          تصویر تا {formatFileSize(MAX_IMAGE_BYTES)} و ویدیو تا{" "}
+          {formatFileSize(MAX_VIDEO_BYTES)} — برای حذف، رسانه را انتخاب کرده و
+          دکمه سطل زباله را بزنید یا Delete را فشار دهید.
+        </p>
+      ) : null}
     </div>
   );
 }

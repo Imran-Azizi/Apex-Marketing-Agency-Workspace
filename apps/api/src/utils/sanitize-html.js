@@ -19,7 +19,14 @@ const ALLOWED_TAGS = [
   "blockquote",
   "a",
   "span",
+  "img",
+  "video",
+  "source",
+  "figure",
+  "figcaption",
 ];
+
+const MEDIA_TAG_RE = /<(img|video|source)\b/i;
 
 /**
  * Sanitize service (and similar) rich-text HTML.
@@ -47,6 +54,22 @@ export function sanitizeRichTextHtml(value) {
       h4: ["style", "class"],
       li: ["style", "class"],
       blockquote: ["style", "class"],
+      img: ["src", "alt", "title", "width", "height", "class", "loading", "decoding"],
+      video: [
+        "src",
+        "poster",
+        "controls",
+        "playsinline",
+        "preload",
+        "muted",
+        "loop",
+        "width",
+        "height",
+        "class",
+      ],
+      source: ["src", "type"],
+      figure: ["class"],
+      figcaption: ["class"],
     },
     allowedStyles: {
       "*": {
@@ -57,10 +80,37 @@ export function sanitizeRichTextHtml(value) {
       a: sanitizeHtml.simpleTransform("a", {
         rel: "noopener noreferrer",
       }),
+      img: (tagName, attribs) => ({
+        tagName,
+        attribs: {
+          ...attribs,
+          loading: attribs.loading || "lazy",
+          decoding: attribs.decoding || "async",
+          class: attribs.class || "rich-text-image",
+        },
+      }),
+      video: (tagName, attribs) => ({
+        tagName,
+        attribs: {
+          ...attribs,
+          controls: "controls",
+          playsinline: "playsinline",
+          preload: attribs.preload || "metadata",
+          class: attribs.class || "rich-text-video",
+        },
+      }),
     },
     allowedSchemes: ["http", "https", "mailto", "tel"],
+    allowedSchemesByTag: {
+      img: ["http", "https"],
+      video: ["http", "https"],
+      source: ["http", "https"],
+    },
   }).trim();
 
-  if (!clean || !clean.replace(/<[^>]+>/g, "").trim()) return null;
+  if (!clean) return null;
+  const hasText = clean.replace(/<[^>]+>/g, "").trim().length > 0;
+  const hasMedia = MEDIA_TAG_RE.test(clean);
+  if (!hasText && !hasMedia) return null;
   return clean.length > 200_000 ? clean.slice(0, 200_000) : clean;
 }
