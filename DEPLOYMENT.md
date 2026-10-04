@@ -573,19 +573,57 @@ git commit -m "your message"
 git push origin main
 ```
 
-**On VPS (pull + rebuild):**
+Note the commit hash locally (`git rev-parse --short HEAD`) — the VPS must land on the same hash.
+
+**On VPS (pull + clean rebuild + recreate PM2):**
+
+Run as the same user that owns PM2 (`apex`). Do **not** pull/build as `root` while PM2 runs as `apex`.
+
+```bash
+sudo -u apex -H bash -lc '
+  set -e
+  cd /var/www/apex
+
+  # 1) Sync code (discard local drift that blocks pull)
+  git fetch origin
+  git checkout main
+  git reset --hard origin/main
+  echo "VPS HEAD: $(git rev-parse --short HEAD) — $(git log -1 --oneline)"
+
+  # 2) Install + DB
+  npm install
+  cd apps/api
+  npx prisma generate
+  npx prisma migrate deploy
+  npx prisma migrate status
+  cd ../..
+
+  # 3) Clean Next cache then rebuild (restart alone keeps old .next)
+  rm -rf apps/web/.next
+  npm run build -w @apex/api
+  npm run build -w @apex/web
+
+  # 4) Recreate processes (restart is not enough for Next.js)
+  pm2 delete apex-api apex-web || true
+  pm2 start apps/api/deploy/ecosystem.config.cjs
+  pm2 save
+  pm2 status
+'
+```
+
+**Quick check after redeploy:**
 
 ```bash
 sudo -u apex -H bash -lc '
   cd /var/www/apex
-  git pull origin main
-  npm install
-  cd apps/api && npx prisma generate && npx prisma migrate deploy && cd ../..
-  npm run build -w @apex/api
-  npm run build -w @apex/web
-  pm2 restart apex-api apex-web
+  git rev-parse --short HEAD
+  ls -la apps/web/.next/BUILD_ID
+  cat apps/web/.next/BUILD_ID
+  pm2 show apex-web | grep -E "cwd|status|exec cwd|script path"
 '
 ```
+
+`cwd` for `apex-web` must be `/var/www/apex/apps/web`. Hard-refresh the browser (`Ctrl+Shift+R`) after a successful rebuild.
 
 ---
 
@@ -593,6 +631,9 @@ sudo -u apex -H bash -lc '
 
 | Symptom | Fix |
 | ------- | --- |
+| Site looks unchanged after redeploy | Confirm VPS `git rev-parse HEAD` matches GitHub; `rm -rf apps/web/.next` + rebuild; `pm2 delete` then `pm2 start` ecosystem (not only `restart`); hard-refresh browser |
+| Pull/build as root, PM2 as apex | Always use `sudo -u apex -H bash -lc '...'` so code and PM2 share one tree |
+| `pm2 restart` but old UI | Next serves `apps/web/.next`; recreate PM2 after a clean build |
 | 502 Bad Gateway | `pm2 status`; API/web not running; check logs in `/var/log/apex/` |
 | Login fails / cookies | Same-origin: `COOKIE_SAME_SITE=lax`, `COOKIE_SECURE=true`, `WEB_URL` exact match |
 | CORS errors | Prefer same domain; else add origin to `CORS_ORIGINS` |
