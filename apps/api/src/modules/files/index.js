@@ -223,15 +223,29 @@ async function assertMediaAccess(file, auth) {
   // Internal roles
   if (auth.roleCode === "MANAGER" || auth.roleCode === "ADMIN") return;
 
-  if (auth.roleCode === "PROJECT_MANAGER") {
-    const perms = auth.permissions || [];
-    if (!perms.includes("projects.view")) {
+  // Any employee elevated as PROJECT_LEAD on this project gets manager-style file access.
+  if (auth.projectLeadElevated || auth.roleCode === "PROJECT_MANAGER") {
+    const leadAssigned = await prisma.projectAssignment.findFirst({
+      where: {
+        projectId: file.projectId,
+        role: "PROJECT_LEAD",
+        isActive: true,
+        OR: [{ userId: auth.userId }, { teamProfile: { userId: auth.userId } }],
+      },
+    });
+    if (leadAssigned) {
+      const perms = auth.permissions || [];
+      if (!perms.includes("projects.view")) {
+        throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+      }
+      if (file.kind === "CLEAN_FINAL" && !perms.includes("delivery.allow")) {
+        throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+      }
+      return;
+    }
+    if (auth.roleCode === "PROJECT_MANAGER") {
       throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
     }
-    if (file.kind === "CLEAN_FINAL" && !perms.includes("delivery.allow")) {
-      throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
-    }
-    return;
   }
 
   if (auth.roleCode === "EDITOR") {

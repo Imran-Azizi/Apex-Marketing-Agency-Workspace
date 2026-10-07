@@ -4,7 +4,13 @@ import { AppError } from "../../utils/response.js";
 import { hasAnyPermission } from "../../services/permissions/effective.js";
 import { storage } from "../../services/storage.js";
 import { APPROVED_PAYMENT_VERIFICATIONS } from "../crm/paymentFinance.js";
-import { formatPaymentMethod } from "../crm/paymentMethods.js";
+import {
+  assertPaymentMethodMeta,
+  CUSTOMER_PAYMENT_METHODS,
+  formatPaymentMethod,
+  formatPaymentMethodMetaRows,
+  sanitizePaymentMethodMeta,
+} from "../crm/paymentMethods.js";
 import {
   allocateSalaryPayment,
   derivePnlPerformance,
@@ -50,16 +56,37 @@ function dateFilter(field, from, to) {
   return { [field]: range };
 }
 
+const expensePaymentMethodMetaSchema = z
+  .object({
+    hesabPayAccount: z.string().trim().max(200).optional(),
+    officeAddress: z.string().trim().max(400).optional(),
+    responsibleName: z.string().trim().max(120).optional(),
+    responsiblePhone: z.string().trim().max(40).optional(),
+    bankInfo: z.string().trim().max(800).optional(),
+    bankCardNumber: z.string().trim().max(80).optional(),
+  })
+  .optional();
+
 function serializeExpense(row) {
   if (!row) return null;
   const creatorName = row.paidBy?.fullName || row.accountLabel || null;
+  const paymentMethod = row.paymentMethod || null;
+  const paymentMethodMeta =
+    paymentMethod && row.paymentMethodMeta
+      ? sanitizePaymentMethodMeta(paymentMethod, row.paymentMethodMeta)
+      : null;
   return {
     id: row.id,
     projectId: row.projectId,
     category: row.category,
     amount: dec(row.amount),
     expenseDate: row.expenseDate,
-    paymentMethod: row.paymentMethod,
+    paymentMethod,
+    paymentMethodLabel: formatPaymentMethod(paymentMethod),
+    paymentMethodMeta,
+    paymentMethodMetaRows: paymentMethod
+      ? formatPaymentMethodMetaRows(paymentMethod, paymentMethodMeta || {})
+      : [],
     description: row.description,
     recipient: row.recipient,
     accountLabel: creatorName,
@@ -78,7 +105,8 @@ export const createExpenseSchema = z.object({
   amount: z.coerce.number().positive("مبلغ باید بزرگ‌تر از صفر باشد"),
   recipient: z.string().trim().min(1, "به کی الزامی است"),
   expenseDate: z.coerce.date().optional(),
-  paymentMethod: z.enum(PAYMENT_METHODS).optional().nullable(),
+  paymentMethod: z.enum(CUSTOMER_PAYMENT_METHODS),
+  paymentMethodMeta: expensePaymentMethodMetaSchema,
   receiptKey: z.string().trim().optional().nullable(),
 });
 
@@ -185,6 +213,7 @@ async function computeMonthlyPnlActuals(year, month) {
     directProjectCosts: kpis.directProjectCosts,
     projectProfit: kpis.projectProfit,
     companyExpenses: kpis.companyExpenses,
+    fixedSalaries: kpis.fixedSalaries,
     netCompanyProfit: kpis.netCompanyProfit,
   };
 }
@@ -344,6 +373,44 @@ function projectListMetrics(project, projectPayments) {
     reservedPaid,
     availableToRecord,
   };
+}
+
+/**
+ * Active (non-deleted, non-INACTIVE) team profile IDs — same cohort as the
+ * payroll / employee breakdown table so dashboard paid totals match the UI.
+ */
+async function loadActiveTeamProfileIds() {
+  const profiles = await prisma.teamProfile.findMany({
+    where: { deletedAt: null, status: { not: "INACTIVE" } },
+    select: { id: true },
+  });
+  return profiles.map((p) => p.id);
+}
+
+/**
+ * Total cash paid to employees (salary payments + advances), optionally
+ * scoped by paidAt. Only active employees — deleted/inactive history is
+ * excluded so the KPI matches the employee summary table.
+ * Same source for FIXED and PROJECT_SHARE.
+ */
+async function sumEmployeeMoneyPaid({ from = null, to = null } = {}) {
+  const activeIds = await loadActiveTeamProfileIds();
+  if (!activeIds.length) return 0;
+  const dateWhere = dateFilter("paidAt", from, to) || {};
+  const where = { teamProfileId: { in: activeIds }, ...dateWhere };
+  const [payments, advances] = await Promise.all([
+    prisma.salaryPayment.aggregate({
+      where,
+      _sum: { amount: true },
+    }),
+    prisma.salaryAdvance.aggregate({
+      where,
+      _sum: { amount: true },
+    }),
+  ]);
+  return roundMoney(
+    dec(payments._sum.amount || 0) + dec(advances._sum.amount || 0),
+  );
 }
 
 async function buildEmployeeSalaryRows({ lean = false } = {}) {
@@ -553,16 +620,14 @@ export const financeService = {
     const from = parseDateBound(fromRaw, false);
     const to = parseDateBound(toRaw, true);
 
-    const [kpis, salaryRows] = await Promise.all([
+    const [kpis, salaryRows, salariesPaid] = await Promise.all([
       computeFinanceKpis({ from, to }),
       buildEmployeeSalaryRows({ lean: true }),
+      sumEmployeeMoneyPaid({ from, to }),
     ]);
 
     const salariesPayable = roundMoney(
       salaryRows.reduce((s, r) => s + Number(r.netPayable || 0), 0),
-    );
-    const salariesPaid = roundMoney(
-      salaryRows.reduce((s, r) => s + Number(r.paidTotal || 0), 0),
     );
 
     return {
@@ -579,6 +644,7 @@ export const financeService = {
         totalFinalPrice: kpis.totalFinalPrice,
         projectProfit: kpis.projectProfit,
         companyExpenses: kpis.companyExpenses,
+        fixedSalaries: kpis.fixedSalaries,
         netCompanyProfit: kpis.netCompanyProfit,
         scopedProjectCount: kpis.scopedProjectCount ?? 0,
         employeeSalaries: {
@@ -591,15 +657,37 @@ export const financeService = {
         projectFinanceReceivedCache: kpis.received,
         projectFinalPriceTotal: kpis.totalFinalPrice,
       },
-      employeeBreakdown: salaryRows.map((r) => ({
-        teamProfileId: r.teamProfileId,
-        displayName: r.displayName,
-        kind: r.kind,
-        compensationType: r.compensation.type,
-        payable: r.netPayable,
-        paid: r.paidTotal,
-        openAdvances: r.openAdvances,
-      })),
+      employeeBreakdown: salaryRows.map((r) => {
+        const paidInRange = roundMoney(
+          (r.payments || [])
+            .filter((p) => {
+              const t = p.paidAt ? new Date(p.paidAt).getTime() : NaN;
+              if (!Number.isFinite(t)) return !from && !to;
+              if (from && t < from.getTime()) return false;
+              if (to && t > to.getTime()) return false;
+              return true;
+            })
+            .reduce((s, p) => s + Number(p.amount || 0), 0) +
+            (r.advances || [])
+              .filter((a) => {
+                const t = a.paidAt ? new Date(a.paidAt).getTime() : NaN;
+                if (!Number.isFinite(t)) return !from && !to;
+                if (from && t < from.getTime()) return false;
+                if (to && t > to.getTime()) return false;
+                return true;
+              })
+              .reduce((s, a) => s + Number(a.amount || 0), 0),
+        );
+        return {
+          teamProfileId: r.teamProfileId,
+          displayName: r.displayName,
+          kind: r.kind,
+          compensationType: r.compensation.type,
+          payable: r.netPayable,
+          paid: paidInRange,
+          openAdvances: r.openAdvances,
+        };
+      }),
     };
   },
 
@@ -684,6 +772,11 @@ export const financeService = {
 
   async createExpense(body, auth) {
     const creator = await resolveExpenseCreator(auth);
+    const paymentMethod = body.paymentMethod;
+    const paymentMethodMeta = assertPaymentMethodMeta(
+      paymentMethod,
+      body.paymentMethodMeta || {},
+    );
 
     const row = await prisma.expense.create({
       data: {
@@ -693,7 +786,8 @@ export const financeService = {
         recipient: body.recipient,
         accountLabel: creator.fullName,
         expenseDate: body.expenseDate || new Date(),
-        paymentMethod: body.paymentMethod || null,
+        paymentMethod,
+        paymentMethodMeta,
         receiptKey: body.receiptKey || null,
         paidByUserId: creator.id,
       },
@@ -707,6 +801,22 @@ export const financeService = {
     if (!existing || existing.category !== "COMPANY_GENERAL") {
       throw new AppError("مصرف یافت نشد", 404, "NOT_FOUND");
     }
+
+    const nextMethod =
+      body.paymentMethod !== undefined
+        ? body.paymentMethod
+        : existing.paymentMethod;
+    const shouldUpdateMeta =
+      body.paymentMethod !== undefined || body.paymentMethodMeta !== undefined;
+    const paymentMethodMeta = shouldUpdateMeta
+      ? assertPaymentMethodMeta(
+          nextMethod,
+          body.paymentMethodMeta !== undefined
+            ? body.paymentMethodMeta || {}
+            : existing.paymentMethodMeta || {},
+        )
+      : undefined;
+
     const row = await prisma.expense.update({
       where: { id },
       data: {
@@ -721,6 +831,7 @@ export const financeService = {
         ...(body.paymentMethod !== undefined
           ? { paymentMethod: body.paymentMethod }
           : {}),
+        ...(paymentMethodMeta !== undefined ? { paymentMethodMeta } : {}),
         ...(body.receiptKey !== undefined
           ? { receiptKey: body.receiptKey }
           : {}),
@@ -839,7 +950,11 @@ export const financeService = {
         },
       });
 
-      const type = profile.compensationProfile?.type || "PROJECT_SHARE";
+      const type =
+        profile.compensationProfile?.type ||
+        (profile.kind === "EDITOR" || profile.kind === "NARRATOR"
+          ? "PROJECT_SHARE"
+          : "FIXED");
       if (type === "PROJECT_SHARE" && profile.employeePayables.length) {
         const { updates } = allocateSalaryPayment(
           profile.employeePayables.map((p) => ({

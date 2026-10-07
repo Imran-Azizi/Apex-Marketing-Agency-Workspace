@@ -25,6 +25,10 @@ import {
 } from "@/components/ui/select";
 import { CompleteProjectDialog } from "@/components/projects/complete-project-dialog";
 import {
+  AssignProjectLeadCard,
+  type ProjectLeadInfo,
+} from "@/components/projects/assign-project-lead-card";
+import {
   ProjectInfoTabContent,
   type ProjectInfoTabId,
 } from "@/components/projects/project-customer-overview";
@@ -134,6 +138,7 @@ interface ProjectDetail {
     role: string;
     teamProfile?: { displayName: string } | null;
   }>;
+  projectLead?: ProjectLeadInfo;
   assetRefs?: Array<{
     clientAsset: (PortalProjectAsset & { deletedAt?: string | null }) | null;
   }>;
@@ -619,6 +624,12 @@ export default function ProjectDetailPage({
             status={data.status}
             variant="full"
             className="pt-0.5"
+          />
+
+          <AssignProjectLeadCard
+            projectId={data.id}
+            projectLead={data.projectLead}
+            className="mt-1"
           />
         </div>
       </section>

@@ -6,7 +6,7 @@ import {
 import { prisma } from '../db/prisma.js';
 import { AppError } from '../utils/response.js';
 import { verifyAccessToken } from '../utils/tokens.js';
-import { effectiveFromUser } from '../services/permissions/effective.js';
+import { resolveAuthCapabilities } from '../services/permissions/effective.js';
 
 function assertPanelMatchesRole(panel, roleCode, audience) {
   if (!panel) return;
@@ -74,12 +74,14 @@ export async function requireAuth(req, res, next) {
 
       assertPanelMatchesRole(panel, user.role.code, 'INTERNAL');
 
+      const capabilities = await resolveAuthCapabilities(user);
       req.auth = {
         audience: 'INTERNAL',
         userId: user.id,
         roleCode: user.role.code,
         panel: panel || roleToPanel(user.role.code),
-        permissions: effectiveFromUser(user),
+        permissions: capabilities.permissions,
+        projectLeadElevated: capabilities.projectLeadElevated,
         user,
       };
     } else if (payload.aud === 'PORTAL') {

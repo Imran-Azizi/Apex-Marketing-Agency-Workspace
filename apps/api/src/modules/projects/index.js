@@ -274,6 +274,55 @@ router.post(
   },
 );
 
+router.get(
+  "/:id/lead-candidates",
+  requirePermission("projects.assign"),
+  async (req, res, next) => {
+    try {
+      ok(res, await projectService.listProjectLeadCandidates(req.params.id, req.auth));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  "/:id/assign-lead",
+  requireCsrf,
+  requirePermission("projects.assign"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await projectService.assignProjectLead(
+          req.params.id,
+          req.body,
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.post(
+  "/:id/unassign-lead",
+  requireCsrf,
+  requirePermission("projects.assign"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await projectService.unassignProjectLead(req.params.id, req.auth, req),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.delete(
   "/:id",
   requireCsrf,

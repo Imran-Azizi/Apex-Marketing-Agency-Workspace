@@ -36,12 +36,14 @@ test('direct project costs = narrator + editor + other', () => {
   assert.equal(directProjectCosts({ narratorCost: 1000, editorCost: 2000, otherDirectCosts: 500 }), 3500);
 });
 
-test('project profit = price − direct costs', () => {
+test('project profit = revenue − direct costs', () => {
   assert.equal(projectProfit(10000, 3500), 6500);
+  assert.equal(projectProfit(0, 400), -400);
 });
 
-test('net company profit = project profit − company expenses', () => {
+test('net company profit = project profit − company expenses − fixed salaries', () => {
   assert.equal(netCompanyProfit(6500, 1500), 5000);
+  assert.equal(netCompanyProfit(6500, 1500, 800), 4200);
 });
 
 test('receivable / remaining balance floors at zero', () => {
@@ -99,6 +101,7 @@ test('empty monthly actuals are all zero', () => {
     directProjectCosts: 0,
     projectProfit: 0,
     companyExpenses: 0,
+    fixedSalaries: 0,
     netCompanyProfit: 0,
   });
 });

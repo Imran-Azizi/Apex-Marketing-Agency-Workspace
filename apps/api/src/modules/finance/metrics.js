@@ -38,14 +38,36 @@ export function directProjectCosts({ narratorCost = 0, editorCost = 0, otherDire
   );
 }
 
-/** Project profit = project price − direct costs */
-export function projectProfit(finalProjectPrice, costs) {
-  return roundMoney(Number(finalProjectPrice || 0) - Number(costs || 0));
+/**
+ * Project profit = revenue − direct costs.
+ * Dashboard / company P&L pass verified `received` as revenue (cash-basis).
+ * Per-project views may still pass contract price.
+ */
+export function projectProfit(revenue, costs) {
+  return roundMoney(Number(revenue || 0) - Number(costs || 0));
 }
 
-/** Net company profit = project profit − company expenses */
-export function netCompanyProfit(projectProfitTotal, companyExpenses) {
-  return roundMoney(Number(projectProfitTotal || 0) - Number(companyExpenses || 0));
+/** Net company profit = project profit − company expenses − fixed salaries */
+export function netCompanyProfit(
+  projectProfitTotal,
+  companyExpenses,
+  fixedSalaries = 0,
+) {
+  return roundMoney(
+    Number(projectProfitTotal || 0) -
+      Number(companyExpenses || 0) -
+      Number(fixedSalaries || 0),
+  );
+}
+
+/** Resolve payroll compensation type (matches finance payroll list). */
+export function resolveCompensationType(profile) {
+  return (
+    profile?.compensationProfile?.type ||
+    (profile?.kind === 'EDITOR' || profile?.kind === 'NARRATOR'
+      ? 'PROJECT_SHARE'
+      : 'FIXED')
+  );
 }
 
 /** Outstanding / receivable for one contract */
@@ -152,6 +174,7 @@ export function emptyMonthlyActuals() {
     directProjectCosts: 0,
     projectProfit: 0,
     companyExpenses: 0,
+    fixedSalaries: 0,
     netCompanyProfit: 0,
   };
 }

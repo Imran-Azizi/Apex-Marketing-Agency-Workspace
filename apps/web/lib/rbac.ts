@@ -195,13 +195,14 @@ export function hasPermission(
 
 /**
  * Reassigning the project editor is a manager action.
- * The EDITOR role must never see or invoke this, even if projects.assign was granted.
+ * EDITOR is blocked unless elevated as a project lead on assigned projects.
  */
 export function canAssignProjectEditor(
   permissions: string[] | null | undefined,
   role?: string | null,
+  projectLeadElevated?: boolean,
 ): boolean {
-  if (role === "EDITOR") return false;
+  if (role === "EDITOR" && !projectLeadElevated) return false;
   return hasPermission(permissions, "projects.assign", role);
 }
 
@@ -392,15 +393,18 @@ function filterNavItem(
   item: NavItem,
   role: InternalRole,
   permissions?: string[] | null,
+  projectLeadElevated?: boolean,
 ): NavItem | null {
   if (isNavGroup(item)) {
     const children = item.children.filter((child) =>
-      canAccessPath(role, child.href, permissions),
+      canAccessPath(role, child.href, permissions, projectLeadElevated),
     );
     if (!children.length) return null;
     return { ...item, children };
   }
-  return canAccessPath(role, item.href, permissions) ? item : null;
+  return canAccessPath(role, item.href, permissions, projectLeadElevated)
+    ? item
+    : null;
 }
 
 const FINANCE_EXTRA_NAV_BLOCKLIST = new Set([
@@ -491,25 +495,57 @@ export function contactMessagesPath(role: string | null | undefined): string {
   return role === "SALES" ? "/sales/messages" : "/manager/messages";
 }
 
+function allowBlockedProjectsNav(
+  role: string | null | undefined,
+  href: string,
+  permissions?: string[] | null,
+  projectLeadElevated?: boolean,
+): boolean {
+  return (
+    href === "/projects" &&
+    Boolean(projectLeadElevated) &&
+    hasPermission(permissions, "projects.view", role)
+  );
+}
+
 export function getNavItems(
   role: string | null | undefined,
   permissions?: string[] | null,
+  projectLeadElevated?: boolean,
 ): NavItem[] {
   if (!isInternalRole(role)) return [];
   const base = ROLE_NAV[role] || [];
   const filtered: NavItem[] = [];
   for (const item of base) {
-    const next = filterNavItem(item, role, permissions);
+    const next = filterNavItem(item, role, permissions, projectLeadElevated);
     if (next) filtered.push(next);
   }
   const seen = new Set(flattenNavLinks(filtered).map((item) => item.href));
   for (const extra of EXTRA_NAV) {
     if (seen.has(extra.href)) continue;
     if (role === "FINANCE" && FINANCE_EXTRA_NAV_BLOCKLIST.has(extra.href)) {
-      continue;
+      if (
+        !allowBlockedProjectsNav(
+          role,
+          extra.href,
+          permissions,
+          projectLeadElevated,
+        )
+      ) {
+        continue;
+      }
     }
     if (role === "SALES" && SALES_EXTRA_NAV_BLOCKLIST.has(extra.href)) {
-      continue;
+      if (
+        !allowBlockedProjectsNav(
+          role,
+          extra.href,
+          permissions,
+          projectLeadElevated,
+        )
+      ) {
+        continue;
+      }
     }
     if (!hasPermission(permissions, extra.permission, role)) continue;
     filtered.push({
@@ -532,12 +568,24 @@ export function canAccessPath(
   role: string | null | undefined,
   pathname: string,
   permissions?: string[] | null,
+  projectLeadElevated?: boolean,
 ): boolean {
   if (!isInternalRole(role)) return false;
 
   if (role === "FINANCE") {
     for (const blocked of FINANCE_EXTRA_NAV_BLOCKLIST) {
       if (pathname === blocked || pathname.startsWith(`${blocked}/`)) {
+        if (
+          allowBlockedProjectsNav(
+            role,
+            "/projects",
+            permissions,
+            projectLeadElevated,
+          ) &&
+          (pathname === "/projects" || pathname.startsWith("/projects/"))
+        ) {
+          continue;
+        }
         return false;
       }
     }
@@ -546,6 +594,17 @@ export function canAccessPath(
   if (role === "SALES") {
     for (const blocked of SALES_EXTRA_NAV_BLOCKLIST) {
       if (pathname === blocked || pathname.startsWith(`${blocked}/`)) {
+        if (
+          allowBlockedProjectsNav(
+            role,
+            "/projects",
+            permissions,
+            projectLeadElevated,
+          ) &&
+          (pathname === "/projects" || pathname.startsWith("/projects/"))
+        ) {
+          continue;
+        }
         return false;
       }
     }

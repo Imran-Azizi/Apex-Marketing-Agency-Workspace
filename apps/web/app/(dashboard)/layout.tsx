@@ -55,7 +55,14 @@ export default function DashboardLayout({
       return;
     }
 
-    if (!canAccessPath(me.role, pathname, me.permissions)) {
+    if (
+      !canAccessPath(
+        me.role,
+        pathname,
+        me.permissions,
+        me.projectLeadElevated,
+      )
+    ) {
       router.replace(getHomePath(me.role));
     }
   }, [isLoading, isFetching, isError, me, pathname, router]);
@@ -87,7 +94,16 @@ export default function DashboardLayout({
     return null;
   }
 
-  if (pathname !== "/dashboard" && pathname !== "/dashboard/" && !canAccessPath(me.role, pathname, me.permissions)) {
+  if (
+    pathname !== "/dashboard" &&
+    pathname !== "/dashboard/" &&
+    !canAccessPath(
+      me.role,
+      pathname,
+      me.permissions,
+      me.projectLeadElevated,
+    )
+  ) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
         <EmptyState
@@ -110,7 +126,11 @@ export default function DashboardLayout({
     <div className="flex h-dvh max-h-dvh overflow-hidden">
       <AppBootLoader />
       <SessionKeepAlive />
-      <DashboardSidebar role={me.role} permissions={me.permissions} />
+      <DashboardSidebar
+        role={me.role}
+        permissions={me.permissions}
+        projectLeadElevated={me.projectLeadElevated}
+      />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <DashboardTopbar
           userName={getDisplayName(me)}
@@ -118,6 +138,7 @@ export default function DashboardLayout({
           profileImage={me.profileImage}
           profileImageUrl={me.profileImageUrl}
           permissions={me.permissions}
+          projectLeadElevated={me.projectLeadElevated}
         />
         <main
           className={

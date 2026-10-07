@@ -14,13 +14,18 @@ import { DashboardNav } from "@/components/layout/dashboard-nav";
 interface DashboardSidebarProps {
   role?: string | null;
   permissions?: string[] | null;
+  projectLeadElevated?: boolean;
 }
 
-export function DashboardSidebar({ role, permissions }: DashboardSidebarProps) {
+export function DashboardSidebar({
+  role,
+  permissions,
+  projectLeadElevated,
+}: DashboardSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const navItems = getNavItems(role, permissions);
+  const navItems = getNavItems(role, permissions, projectLeadElevated);
 
   async function handleLogout() {
     try {

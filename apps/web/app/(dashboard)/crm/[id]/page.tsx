@@ -10,7 +10,10 @@ import {
   canManagePortalInvite,
   canViewPortalCredentials,
 } from "@/lib/rbac";
-import { buildWhatsAppChatUrl, toWhatsAppDigits } from "@/lib/utils";
+import {
+  openWhatsAppChat,
+  resolveWhatsAppContactSource,
+} from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -233,17 +236,13 @@ export default function CrmDetailPage({
   }
 
   const displayPhone = data.phone || data.whatsappRaw;
-  const whatsappSource = data.whatsappRaw || data.phone;
-  const whatsappDigits = toWhatsAppDigits(whatsappSource);
-  const whatsappUrl = buildWhatsAppChatUrl(whatsappSource);
-  const hasValidWhatsapp = Boolean(whatsappUrl && whatsappDigits);
+  const whatsappSource = resolveWhatsAppContactSource(data);
+  const hasValidWhatsapp = Boolean(whatsappSource);
 
-  const openWhatsAppChat = () => {
-    if (!whatsappUrl) {
+  const handleWhatsAppClick = () => {
+    if (!openWhatsAppChat(data)) {
       toast.error("شماره تماس معتبر برای این مشتری موجود نیست.");
-      return;
     }
-    window.open(whatsappUrl, "_blank", "noopener,noreferrer");
   };
 
   const handleTabChange = (value: string) => {
@@ -271,7 +270,7 @@ export default function CrmDetailPage({
         source={data.source}
         salesOwnerName={data.salesOwner?.fullName ?? null}
         hasValidWhatsapp={hasValidWhatsapp}
-        onWhatsAppClick={openWhatsAppChat}
+        onWhatsAppClick={handleWhatsAppClick}
       />
 
       <CustomerSalesAssistantCard customerId={id} />

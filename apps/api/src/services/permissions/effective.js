@@ -1,6 +1,8 @@
+import { prisma } from "../../db/prisma.js";
 import {
   ALL_PERMISSION_CODES,
   LEGACY_CODE_MAP,
+  PROJECT_LEAD_PERMISSION_PACK,
   getRoleDefaultPermissions,
   isFullAccessRole,
 } from "./catalog.js";
@@ -101,9 +103,53 @@ export function hasAnyPermission(effectiveCodes, requiredCodes, roleCode) {
   );
 }
 
-/** Reassigning the project editor is never allowed for the EDITOR role. */
-export function canAssignProjectEditor(permissions, roleCode) {
-  if (roleCode === "EDITOR") return false;
+/** True when the user is active PROJECT_LEAD on at least one live project. */
+export async function userHasActiveProjectLead(userId) {
+  if (!userId) return false;
+  const hit = await prisma.projectAssignment.findFirst({
+    where: {
+      role: "PROJECT_LEAD",
+      isActive: true,
+      project: { deletedAt: null },
+      OR: [{ userId }, { teamProfile: { userId } }],
+    },
+    select: { id: true },
+  });
+  return Boolean(hit);
+}
+
+/** Merge project-lead capability pack into base effective permissions. */
+export function mergeProjectLeadPermissions(basePermissions = []) {
+  const next = new Set(basePermissions || []);
+  for (const code of PROJECT_LEAD_PERMISSION_PACK) next.add(code);
+  return [...next];
+}
+
+/**
+ * Resolve permissions + elevation flag for an authenticated internal user.
+ * Project-lead pack is added only while they hold an active PROJECT_LEAD assignment.
+ */
+export async function resolveAuthCapabilities(user) {
+  const base = effectiveFromUser(user);
+  const projectLeadElevated = await userHasActiveProjectLead(user?.id);
+  return {
+    permissions: projectLeadElevated
+      ? mergeProjectLeadPermissions(base)
+      : base,
+    projectLeadElevated,
+  };
+}
+
+/**
+ * Reassigning the project editor is never allowed for the EDITOR role —
+ * unless they are elevated as a project lead (full control on assigned projects).
+ */
+export function canAssignProjectEditor(
+  permissions,
+  roleCode,
+  { projectLeadElevated = false } = {},
+) {
+  if (roleCode === "EDITOR" && !projectLeadElevated) return false;
   return hasAnyPermission(permissions, ["projects.assign"], roleCode);
 }
 

@@ -36,8 +36,10 @@ export type FinanceDashboard = {
     totalFinalPrice: number;
     projectProfit: number;
     companyExpenses: number;
+    fixedSalaries: number;
     netCompanyProfit: number;
     scopedProjectCount?: number;
+    /** payable = current outstanding; paid = salary payments + advances in range */
     employeeSalaries: { payable: number; paid: number };
   };
   /** Last 6 months contract revenue + verified receipts (from finance KPI engine). */
@@ -109,6 +111,12 @@ export type FinanceProject = {
   payments: FinanceProjectPayment[];
 };
 
+export type FinanceExpensePaymentMetaRow = {
+  label: string;
+  value: string;
+  ltr?: boolean;
+};
+
 export type FinanceExpense = {
   id: string;
   amount: number;
@@ -117,6 +125,16 @@ export type FinanceExpense = {
   recipient: string | null;
   accountLabel: string | null;
   paymentMethod: string | null;
+  paymentMethodLabel?: string | null;
+  paymentMethodMeta?: {
+    hesabPayAccount?: string;
+    officeAddress?: string;
+    responsibleName?: string;
+    responsiblePhone?: string;
+    bankInfo?: string;
+    bankCardNumber?: string;
+  } | null;
+  paymentMethodMetaRows?: FinanceExpensePaymentMetaRow[];
   paidBy: { id: string; fullName: string } | null;
 };
 
@@ -199,6 +217,7 @@ export type PnlMonth = {
     directProjectCosts: number;
     projectProfit: number;
     companyExpenses: number;
+    fixedSalaries: number;
     netCompanyProfit: number;
   };
   target: {

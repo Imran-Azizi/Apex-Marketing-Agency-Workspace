@@ -25,14 +25,26 @@ import {
   normalizeIdempotencyKey,
   withProjectCreateLock,
 } from './projectCreateGuard.js';
-import { assertProjectAccess, canAccessProject } from '../../services/projectAccess.js';
+import {
+  assertProjectAccess,
+  canAccessProject,
+  PROJECT_LEAD_CANDIDATE_ROLES,
+  projectLeadScopeWhere,
+  resolveProjectLead,
+} from '../../services/projectAccess.js';
+import { createNotificationOnce } from '../../services/notifications.js';
+import { z } from 'zod';
 import { storage } from '../../services/storage.js';
 import { serializePortalAsset } from '../portal/helpers.js';
 import {
   assertClientAssetImageFile,
   isClientAssetImageKind,
 } from '../files/image-formats.js';
-import { z } from 'zod';
+
+const assignProjectLeadSchema = z.object({
+  userId: z.string().trim().min(1, 'انتخاب کارمند الزامی است'),
+  notes: z.string().trim().max(1000).optional().nullable(),
+});
 
 const createProjectSchema = z.object({
   crmCustomerId: z.string().min(1),
@@ -108,6 +120,7 @@ function stripFinanceForRole(project, roleCode) {
 
 function assertCanListProjects(auth) {
   if (auth.roleCode === 'NARRATOR' || auth.roleCode === 'EDITOR') {
+    if (auth.projectLeadElevated) return;
     throw new AppError(
       auth.roleCode === 'EDITOR'
         ? 'دسترسی به فهرست پروژه‌ها برای ادیتور مجاز نیست — از میز کار ادیت استفاده کنید'
@@ -116,6 +129,21 @@ function assertCanListProjects(auth) {
       'FORBIDDEN',
     );
   }
+}
+
+function shouldScopeToProjectLead(auth) {
+  if (!auth?.userId) return false;
+  if (auth.roleCode === 'PROJECT_MANAGER') return true;
+  if (
+    auth.projectLeadElevated &&
+    (auth.roleCode === 'EDITOR' ||
+      auth.roleCode === 'NARRATOR' ||
+      auth.roleCode === 'SALES' ||
+      auth.roleCode === 'FINANCE')
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function startOfLocalDay(d = new Date()) {
@@ -208,7 +236,9 @@ function buildListWhere(auth, query = {}) {
     });
   }
 
-  if (auth.roleCode === 'EDITOR' || auth.roleCode === 'NARRATOR') {
+  if (shouldScopeToProjectLead(auth)) {
+    and.push(projectLeadScopeWhere(auth.userId));
+  } else if (auth.roleCode === 'EDITOR' || auth.roleCode === 'NARRATOR') {
     and.push({
       assignments: {
         some: {
@@ -221,6 +251,14 @@ function buildListWhere(auth, query = {}) {
 
   if (and.length) where.AND = and;
   return where;
+}
+
+function withProjectLead(project) {
+  if (!project) return project;
+  return {
+    ...project,
+    projectLead: resolveProjectLead(project.assignments || []),
+  };
 }
 
 export const projectService = {
@@ -256,7 +294,7 @@ export const projectService = {
     ]);
 
     const items = await attachProjectProgressMany(
-      rows.map((p) => stripFinanceForRole(p, auth.roleCode)),
+      rows.map((p) => withProjectLead(stripFinanceForRole(p, auth.roleCode))),
       'internal',
     );
 
@@ -339,7 +377,10 @@ export const projectService = {
   },
 
   async get(id, auth) {
-    if (auth.roleCode === 'NARRATOR' || auth.roleCode === 'EDITOR') {
+    if (
+      (auth.roleCode === 'NARRATOR' || auth.roleCode === 'EDITOR') &&
+      !auth.projectLeadElevated
+    ) {
       throw new AppError(
         auth.roleCode === 'EDITOR'
           ? 'دسترسی به جزئیات پروژه برای ادیتور مجاز نیست — از فضای ادیت استفاده کنید'
@@ -392,7 +433,7 @@ export const projectService = {
       };
     }
 
-    let result = stripFinanceForRole(project, auth.roleCode);
+    let result = withProjectLead(stripFinanceForRole(project, auth.roleCode));
     if (result.finance && ['MANAGER', 'ADMIN', 'FINANCE'].includes(auth.roleCode)) {
       const calc = computeFinanceFields(result.finance);
       result = { ...result, finance: { ...result.finance, ...calc } };
@@ -741,10 +782,13 @@ export const projectService = {
 
     const now = new Date();
     const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    const projectScope = shouldScopeToProjectLead(auth)
+      ? { deletedAt: null, ...projectLeadScopeWhere(auth.userId) }
+      : { deletedAt: null };
     const [counts, leadsToday, followUps, createdRows] = await Promise.all([
       prisma.project.groupBy({
         by: ['status'],
-        where: { deletedAt: null },
+        where: projectScope,
         _count: true,
       }),
       prisma.crmCustomer.count({
@@ -756,7 +800,23 @@ export const projectService = {
       prisma.crmCustomer.count({
         where: { nextFollowUpAt: { lte: new Date() }, deletedAt: null },
       }),
-      prisma.$queryRaw`
+      shouldScopeToProjectLead(auth)
+        ? prisma.project.findMany({
+            where: {
+              ...projectScope,
+              createdAt: { gte: sixMonthsAgo },
+            },
+            select: { createdAt: true },
+          }).then((rows) => {
+            const map = new Map();
+            for (const row of rows) {
+              const d = new Date(row.createdAt);
+              const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+              map.set(key, (map.get(key) || 0) + 1);
+            }
+            return [...map.entries()].map(([key, count]) => ({ key, count }));
+          })
+        : prisma.$queryRaw`
         SELECT to_char(date_trunc('month', "createdAt"), 'YYYY-MM') AS key,
                COUNT(*)::int AS count
         FROM projects
@@ -1031,6 +1091,29 @@ export const projectService = {
             },
             req,
           });
+
+          // Creator with PROJECT_MANAGER role becomes the project lead automatically
+          if (auth.roleCode === 'PROJECT_MANAGER') {
+            const creatorProfile = await prisma.teamProfile.findFirst({
+              where: {
+                userId: auth.userId,
+                deletedAt: null,
+                status: { not: 'INACTIVE' },
+              },
+              select: { id: true },
+            });
+            await prisma.projectAssignment.create({
+              data: {
+                projectId: result.project.id,
+                role: 'PROJECT_LEAD',
+                userId: auth.userId,
+                teamProfileId: creatorProfile?.id || null,
+                assignedById: auth.userId,
+                notes: 'اختصاص خودکار هنگام ایجاد پروژه',
+                isActive: true,
+              },
+            });
+          }
         }
 
         return this.get(result.project.id, auth);
@@ -1140,5 +1223,163 @@ export const projectService = {
     });
 
     return { deleted: true };
+  },
+
+  /**
+   * Active staff who can be assigned as full project lead (any employee role).
+   */
+  async listProjectLeadCandidates(projectId, auth) {
+    await assertProjectAccess(projectId, auth);
+    if (!['MANAGER', 'ADMIN'].includes(auth.roleCode)) {
+      throw new AppError('فقط مدیر می‌تواند مسئول پروژه را تعیین کند', 403, 'FORBIDDEN');
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        deletedAt: null,
+        isActive: true,
+        role: { code: { in: [...PROJECT_LEAD_CANDIDATE_ROLES] } },
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        profileImage: true,
+        role: { select: { code: true } },
+        teamProfile: {
+          select: { id: true, displayName: true, status: true, deletedAt: true },
+        },
+      },
+      orderBy: { fullName: 'asc' },
+      take: 300,
+    });
+
+    return {
+      items: users.map((u) => ({
+        userId: u.id,
+        fullName: u.fullName,
+        email: u.email,
+        profileImage: u.profileImage,
+        roleCode: u.role?.code || null,
+        teamProfileId:
+          u.teamProfile && !u.teamProfile.deletedAt && u.teamProfile.status !== 'INACTIVE'
+            ? u.teamProfile.id
+            : null,
+        displayName: u.teamProfile?.displayName || u.fullName,
+      })),
+    };
+  },
+
+  async assignProjectLead(projectId, body, auth, req) {
+    if (!['MANAGER', 'ADMIN'].includes(auth.roleCode)) {
+      throw new AppError('فقط مدیر می‌تواند مسئول پروژه را تعیین کند', 403, 'FORBIDDEN');
+    }
+    const project = await assertProjectAccess(projectId, auth);
+    const parsed = assignProjectLeadSchema.safeParse(body || {});
+    if (!parsed.success) {
+      throw new AppError(
+        parsed.error.issues?.[0]?.message || 'اطلاعات نامعتبر است',
+        400,
+        'VALIDATION',
+      );
+    }
+    const { userId, notes } = parsed.data;
+
+    const employee = await prisma.user.findFirst({
+      where: {
+        id: userId,
+        deletedAt: null,
+        isActive: true,
+        role: { code: { in: [...PROJECT_LEAD_CANDIDATE_ROLES] } },
+      },
+      include: {
+        role: { select: { code: true } },
+        teamProfile: {
+          select: { id: true, displayName: true, status: true, deletedAt: true },
+        },
+      },
+    });
+    if (!employee) {
+      throw new AppError(
+        'کارمند یافت نشد یا برای اختصاص پروژه مجاز نیست',
+        404,
+        'NOT_FOUND',
+      );
+    }
+
+    const teamProfileId =
+      employee.teamProfile &&
+      !employee.teamProfile.deletedAt &&
+      employee.teamProfile.status !== 'INACTIVE'
+        ? employee.teamProfile.id
+        : null;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.projectAssignment.updateMany({
+        where: { projectId: project.id, role: 'PROJECT_LEAD', isActive: true },
+        data: { isActive: false },
+      });
+      await tx.projectAssignment.create({
+        data: {
+          projectId: project.id,
+          role: 'PROJECT_LEAD',
+          userId: employee.id,
+          teamProfileId,
+          assignedById: auth.userId,
+          notes: notes?.trim() || null,
+          isActive: true,
+        },
+      });
+    });
+
+    await createNotificationOnce({
+      userId: employee.id,
+      title: 'اختصاص مدیریت پروژه',
+      body: `شما به‌عنوان مسئول مدیریت پروژه «${project.title || project.code}» تعیین شدید.`,
+      link: `/projects/${project.id}`,
+      eventKey: `project-lead:${project.id}:${employee.id}`,
+      meta: { projectId: project.id, kind: 'PROJECT_LEAD_ASSIGNED' },
+    }).catch(() => {});
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_LEAD_ASSIGN',
+      entityType: 'Project',
+      entityId: project.id,
+      after: { leadUserId: employee.id, teamProfileId },
+      req,
+    });
+
+    return this.get(project.id, auth);
+  },
+
+  async unassignProjectLead(projectId, auth, req) {
+    if (!['MANAGER', 'ADMIN'].includes(auth.roleCode)) {
+      throw new AppError('فقط مدیر می‌تواند مسئول پروژه را حذف کند', 403, 'FORBIDDEN');
+    }
+    const project = await assertProjectAccess(projectId, auth);
+
+    const active = await prisma.projectAssignment.findFirst({
+      where: { projectId: project.id, role: 'PROJECT_LEAD', isActive: true },
+    });
+    if (!active) {
+      return this.get(project.id, auth);
+    }
+
+    await prisma.projectAssignment.updateMany({
+      where: { projectId: project.id, role: 'PROJECT_LEAD', isActive: true },
+      data: { isActive: false },
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_LEAD_UNASSIGN',
+      entityType: 'Project',
+      entityId: project.id,
+      before: { leadUserId: active.userId },
+      req,
+    });
+
+    return this.get(project.id, auth);
   },
 };

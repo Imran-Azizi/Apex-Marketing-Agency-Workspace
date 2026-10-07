@@ -786,6 +786,35 @@ export const ROLE_DEFAULT_PERMISSIONS = {
   AI_SERVICE: ["projects.view", "content.view", "content.generate"],
 };
 
+/**
+ * Capability pack granted while an employee has ≥1 active PROJECT_LEAD assignment.
+ * Scoped to assigned projects by projectAccess / list filters — not org-wide.
+ */
+export const PROJECT_LEAD_PERMISSION_PACK = Object.freeze([
+  "dashboard.view",
+  "projects.view",
+  "projects.edit",
+  "projects.create",
+  "projects.assign",
+  "projects.complete",
+  "content.view",
+  "content.edit",
+  "content.generate",
+  "content.approve",
+  "narration.view",
+  "narration.edit",
+  "narration.approve",
+  "narration.revise",
+  "video.view",
+  "video.edit",
+  "video.upload",
+  "poster.view",
+  "poster.upload",
+  "chat.view",
+  "chat.send",
+  "chat.upload",
+]);
+
 /** Legacy codes kept on roles so any leftover route checks still pass. */
 export const ROLE_LEGACY_PERMISSIONS = {
   MANAGER: Object.keys(LEGACY_CODE_MAP),

@@ -36,6 +36,10 @@ export function denyRoles(...roles) {
   const blocked = new Set(roles);
   return (req, res, next) => {
     if (!req.auth) return next(new AppError('Authentication required', 401, 'UNAUTHENTICATED'));
+    // Project leads may perform manager-style project ops on their assigned projects.
+    if (req.auth.projectLeadElevated && blocked.has(req.auth.roleCode)) {
+      return next();
+    }
     if (blocked.has(req.auth.roleCode)) {
       return next(new AppError('دسترسی به این منبع برای نقش شما مجاز نیست', 403, 'FORBIDDEN'));
     }

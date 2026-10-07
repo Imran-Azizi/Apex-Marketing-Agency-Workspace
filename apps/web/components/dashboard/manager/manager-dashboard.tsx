@@ -84,6 +84,8 @@ const FINANCE_ICONS: LucideIcon[] = [
   Clapperboard,
   TrendingUp,
   PiggyBank,
+  Users,
+  Wallet,
 ];
 
 const PROJECT_KPI_ICONS: LucideIcon[] = [
@@ -348,7 +350,7 @@ export function ManagerDashboard() {
       {/* Finance KPIs — always from /finance/dashboard */}
       <SectionShell
         title="نمای مالی"
-        description="خلاصه اجرایی درآمد قرارداد، دریافتی تأییدشده و سود — هم‌راستا با بخش مالی"
+        description="خلاصه اجرایی درآمد، سود، پول قابل پرداخت و پول پرداخت‌شده برای کارمندان — هم‌راستا با بخش مالی"
         action={
           <Button asChild variant="outline" size="sm" className="rounded-full">
             <Link href="/finance">
@@ -360,7 +362,7 @@ export function ManagerDashboard() {
         className="border-brand/15 bg-gradient-to-bl from-brand/[0.05] via-card to-card"
       >
         {financeLoading ? (
-          <KpiSkeletonGrid count={9} cols="finance" />
+          <KpiSkeletonGrid count={11} cols="finance" />
         ) : financeQuery.isError && !financeCards ? (
           <SectionError
             message="بارگذاری شاخص‌های مالی ناموفق بود."

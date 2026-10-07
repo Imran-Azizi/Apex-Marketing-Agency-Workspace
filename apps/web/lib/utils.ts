@@ -176,3 +176,46 @@ export function buildWhatsAppChatUrl(
   }
   return url.toString();
 }
+
+/** Common CRM / customer phone fields used to open a WhatsApp chat. */
+export type WhatsAppContactFields = {
+  normalizedWhatsapp?: string | null;
+  whatsappRaw?: string | null;
+  phone?: string | null;
+};
+
+/**
+ * Pick the first usable WhatsApp/phone value from a customer-like record.
+ * Prefers normalized identity, then raw WhatsApp, then phone.
+ */
+export function resolveWhatsAppContactSource(
+  contact: WhatsAppContactFields | null | undefined,
+): string | null {
+  if (!contact) return null;
+  for (const candidate of [
+    contact.normalizedWhatsapp,
+    contact.whatsappRaw,
+    contact.phone,
+  ]) {
+    if (toWhatsAppDigits(candidate)) return String(candidate).trim();
+  }
+  return null;
+}
+
+/**
+ * Open WhatsApp for a phone value or customer contact fields.
+ * Uses wa.me so Desktop/app opens when installed; otherwise WhatsApp Web.
+ */
+export function openWhatsAppChat(
+  valueOrContact: string | WhatsAppContactFields | null | undefined,
+  message?: string,
+): boolean {
+  const source =
+    typeof valueOrContact === "string" || valueOrContact == null
+      ? valueOrContact
+      : resolveWhatsAppContactSource(valueOrContact);
+  const url = buildWhatsAppChatUrl(source, message);
+  if (!url) return false;
+  window.open(url, "_blank", "noopener,noreferrer");
+  return true;
+}

@@ -36,7 +36,7 @@ export function managerFinanceCardsFromKpis(
       key: "received",
       label: "پرداخت‌های دریافت‌شده",
       value: Number(kpis.received) || 0,
-      description: "فقط پرداخت‌های تأییدشده (Verified)",
+      description: "پایه محاسبه سود — فقط پرداخت‌های تأییدشده",
       format: "currency",
       tone: "info",
       href: "/finance",
@@ -45,19 +45,10 @@ export function managerFinanceCardsFromKpis(
       key: "outstanding",
       label: "مانده قابل وصول",
       value: Number(kpis.receivable) || 0,
-      description: "قرارداد منهای دریافتی تأییدشده",
+      description: "یادآوری مانده مشتریان — در محاسبه سود استفاده نمی‌شود",
       format: "currency",
       tone: "warning",
       href: "/finance/projects",
-    }),
-    kpi({
-      key: "expenses",
-      label: "هزینه‌های مستقیم",
-      value: Number(kpis.directProjectCosts) || 0,
-      description: "نریتور + ادیتور + هزینه‌های جانبی",
-      format: "currency",
-      tone: "danger",
-      href: "/finance/expenses",
     }),
     kpi({
       key: "company_expenses",
@@ -67,6 +58,15 @@ export function managerFinanceCardsFromKpis(
       format: "currency",
       tone: "danger",
       href: "/finance/expenses",
+    }),
+    kpi({
+      key: "fixed_salaries",
+      label: "معاش ثابت کارمندان",
+      value: Number(kpis.fixedSalaries) || 0,
+      description: "پرداخت معاش و پیش‌پرداخت کارمندان معاش ثابت",
+      format: "currency",
+      tone: "danger",
+      href: "/finance/salaries",
     }),
     kpi({
       key: "narrator_cost",
@@ -88,7 +88,7 @@ export function managerFinanceCardsFromKpis(
       key: "project_profit",
       label: "سود پروژه",
       value: Number(kpis.projectProfit) || 0,
-      description: "درآمد قرارداد منهای هزینه‌های مستقیم",
+      description: "دریافت‌شده منهای هزینه‌های مستقیم",
       format: "currency",
       tone: kpis.projectProfit >= 0 ? "success" : "danger",
       href: "/finance/pnl",
@@ -97,10 +97,28 @@ export function managerFinanceCardsFromKpis(
       key: "net_company_profit",
       label: "سود خالص شرکت",
       value: Number(kpis.netCompanyProfit) || 0,
-      description: "سود پروژه منهای مصارف شرکت",
+      description: "سود پروژه منهای مصارف شرکت و معاش ثابت",
       format: "currency",
       tone: kpis.netCompanyProfit >= 0 ? "success" : "danger",
       href: "/finance/pnl",
+    }),
+    kpi({
+      key: "employee_payable",
+      label: "پول قابل پرداخت برای کارمندان",
+      value: Number(kpis.employeeSalaries?.payable) || 0,
+      description: "مانده معاش ثابت و سهم پروژه",
+      format: "currency",
+      tone: "warning",
+      href: "/finance/salaries",
+    }),
+    kpi({
+      key: "employee_paid",
+      label: "پول پرداخت شده برای کارمندان",
+      value: Number(kpis.employeeSalaries?.paid) || 0,
+      description: "جمع پرداخت کارمندان فعال در بازه",
+      format: "currency",
+      tone: "info",
+      href: "/finance/salaries",
     }),
   ];
 }
@@ -119,7 +137,9 @@ export function financeHasActivity(kpis: FinanceDashboard["kpis"]): boolean {
     kpis.received > 0 ||
     kpis.directProjectCosts > 0 ||
     kpis.companyExpenses > 0 ||
-    (kpis.scopedProjectCount ?? 0) > 0
+    (kpis.scopedProjectCount ?? 0) > 0 ||
+    Number(kpis.employeeSalaries?.payable || 0) > 0 ||
+    Number(kpis.employeeSalaries?.paid || 0) > 0
   );
 }
 

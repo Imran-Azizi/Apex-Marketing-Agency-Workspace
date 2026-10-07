@@ -317,7 +317,11 @@ function assertCanAssignProjectEditor(auth) {
       "FORBIDDEN",
     );
   }
-  if (!canAssignProjectEditor(auth?.permissions, auth?.roleCode)) {
+  if (
+    !canAssignProjectEditor(auth?.permissions, auth?.roleCode, {
+      projectLeadElevated: Boolean(auth?.projectLeadElevated),
+    })
+  ) {
     throw new AppError("شما اجازه دسترسی به این منبع را ندارید", 403, "FORBIDDEN");
   }
 }

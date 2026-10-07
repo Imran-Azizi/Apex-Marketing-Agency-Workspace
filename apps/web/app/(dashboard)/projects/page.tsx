@@ -129,7 +129,10 @@ type ActiveChip = {
   onClear: () => void;
 };
 
-function getAssignedPerson(project: Project, role: "EDITOR" | "NARRATOR") {
+function getAssignedPerson(
+  project: Project,
+  role: "EDITOR" | "NARRATOR" | "PROJECT_LEAD",
+) {
   const assignment = project.assignments?.find((item) => item.role === role);
   if (!assignment) return null;
   const name =
@@ -883,6 +886,9 @@ export default function ProjectsPage() {
                       مشتری
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      مسئول پروژه
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       ادیتور
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] min-w-[10rem] bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
@@ -941,6 +947,30 @@ export default function ProjectsPage() {
                           </span>
                         )}
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const lead = getAssignedPerson(project, "PROJECT_LEAD");
+                        return lead ? (
+                          <div
+                            className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
+                            title={lead.name}
+                          >
+                            <UserAvatar
+                              name={lead.name}
+                              profileImage={lead.profileImage}
+                              className="h-8 w-8"
+                            />
+                            <span className="truncate text-sm font-medium">
+                              {lead.name}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
+                            تعیین نشده
+                          </span>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell>
                       {(() => {

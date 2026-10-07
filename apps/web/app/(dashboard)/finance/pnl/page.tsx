@@ -295,6 +295,11 @@ export default function FinancePnlPage() {
               inactive={!data.trackingActive}
             />
             <Metric
+              label="معاش ثابت کارمندان"
+              value={data.actuals.fixedSalaries}
+              inactive={!data.trackingActive}
+            />
+            <Metric
               label="سود خالص"
               value={data.actuals.netCompanyProfit}
               emphasize

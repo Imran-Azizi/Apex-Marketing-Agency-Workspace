@@ -47,12 +47,12 @@ const KPI_DEFS: Array<{
   {
     key: "received",
     label: "دریافت شده",
-    hint: "جمع Paymentهای Verified",
+    hint: "پایه محاسبه سود — فقط پرداخت‌های تأییدشده مشتری",
   },
   {
     key: "receivable",
     label: "قابل دریافت",
-    hint: "جمع مانده مشتریان",
+    hint: "یادآوری مانده مشتریان — در محاسبه سود استفاده نمی‌شود",
   },
   {
     key: "directProjectCosts",
@@ -60,9 +60,19 @@ const KPI_DEFS: Array<{
     hint: "نریتور + ادیتور + جانبی",
   },
   {
+    key: "narratorCost",
+    label: "هزینه نریتور",
+    hint: "جمع هزینه نریشن پروژه‌ها",
+  },
+  {
+    key: "editorCost",
+    label: "هزینه ادیتور",
+    hint: "جمع هزینه ادیت پروژه‌ها",
+  },
+  {
     key: "projectProfit",
     label: "سود پروژه",
-    hint: "قیمت پروژه − هزینه‌های مستقیم",
+    hint: "دریافت‌شده − هزینه‌های مستقیم",
   },
   {
     key: "companyExpenses",
@@ -70,14 +80,24 @@ const KPI_DEFS: Array<{
     hint: "هزینه‌های عمومی",
   },
   {
+    key: "fixedSalaries",
+    label: "معاش ثابت کارمندان",
+    hint: "پرداخت معاش و پیش‌پرداخت کارمندان معاش ثابت در بازه",
+  },
+  {
     key: "netCompanyProfit",
     label: "سود خالص شرکت",
-    hint: "سود پروژه − مصارف شرکت",
+    hint: "سود پروژه − مصارف شرکت − معاش ثابت",
   },
   {
     key: "employeePayable",
-    label: "معاش قابل پرداخت",
-    hint: "به تفکیک هر کارمند در جدول زیر",
+    label: "پول قابل پرداخت برای کارمندان",
+    hint: "مانده معاش ثابت و سهم پروژه — به تفکیک در جدول زیر",
+  },
+  {
+    key: "employeePaid",
+    label: "پول پرداخت شده برای کارمندان",
+    hint: "جمع پرداخت‌های کارمندان فعال (ثابت و پروژه‌ای) در بازه",
   },
 ];
 
@@ -125,7 +145,7 @@ export default function FinanceDashboardPage() {
 
       {query.isLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => (
+          {Array.from({ length: 12 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-xl" />
           ))}
         </div>
@@ -173,7 +193,7 @@ export default function FinanceDashboardPage() {
                     <TableHead>کارمند</TableHead>
                     <TableHead>نوع</TableHead>
                     <TableHead>قابل پرداخت</TableHead>
-                    <TableHead>پرداخت شده</TableHead>
+                    <TableHead>پول پرداخت‌شده (بازه)</TableHead>
                     <TableHead>پیش‌پرداخت باز</TableHead>
                   </TableRow>
                 </TableHeader>

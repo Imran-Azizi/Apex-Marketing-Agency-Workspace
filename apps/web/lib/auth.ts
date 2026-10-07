@@ -12,6 +12,8 @@ export interface AuthUser {
   fullName: string;
   role: string;
   permissions?: string[];
+  /** True while user has ≥1 active PROJECT_LEAD assignment (elevated project ops). */
+  projectLeadElevated?: boolean;
   profileImage?: string | null;
   profileImageUrl?: string | null;
 }
@@ -33,6 +35,7 @@ export interface MeResponse {
   fullName?: string;
   role?: string;
   permissions?: string[];
+  projectLeadElevated?: boolean;
   whatsapp?: string;
   customerId?: string;
   personName?: string;

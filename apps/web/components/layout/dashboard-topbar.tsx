@@ -26,6 +26,7 @@ interface DashboardTopbarProps {
   profileImage?: string | null;
   profileImageUrl?: string | null;
   permissions?: string[] | null;
+  projectLeadElevated?: boolean;
 }
 
 export function DashboardTopbar({
@@ -34,9 +35,10 @@ export function DashboardTopbar({
   profileImage,
   profileImageUrl,
   permissions,
+  projectLeadElevated,
 }: DashboardTopbarProps) {
   const pathname = usePathname();
-  const navItems = getNavItems(role, permissions);
+  const navItems = getNavItems(role, permissions, projectLeadElevated);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   // Close the mobile drawer after route changes (covers nested/dynamic links).

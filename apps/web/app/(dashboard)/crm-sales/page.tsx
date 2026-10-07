@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-query";
 import { apiGet, apiPost, ApiError } from "@/lib/api";
 import { formatDate, formatPhoneDisplay } from "@/lib/utils";
+import { WhatsAppContactButton } from "@/components/shared/whatsapp-contact-button";
 import { PageHeader } from "@/components/shared/page-header";
 import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
@@ -807,23 +808,30 @@ export default function CrmPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="min-w-[9rem] space-y-0.5">
-                          <span
-                            dir="ltr"
-                            className="block text-right text-sm font-medium tabular-nums tracking-wide text-foreground"
-                            title={customer.whatsappRaw}
-                          >
-                            {formatPhoneDisplay(customer.whatsappRaw)}
-                          </span>
-                          {customer.email && (
+                        <div className="flex min-w-[10rem] items-start gap-2">
+                          <div className="min-w-0 flex-1 space-y-0.5">
                             <span
                               dir="ltr"
-                              className="block max-w-[200px] truncate text-right text-xs text-muted-foreground"
-                              title={customer.email}
+                              className="block text-right text-sm font-medium tabular-nums tracking-wide text-foreground"
+                              title={customer.whatsappRaw}
                             >
-                              {customer.email}
+                              {formatPhoneDisplay(customer.whatsappRaw)}
                             </span>
-                          )}
+                            {customer.email && (
+                              <span
+                                dir="ltr"
+                                className="block max-w-[200px] truncate text-right text-xs text-muted-foreground"
+                                title={customer.email}
+                              >
+                                {customer.email}
+                              </span>
+                            )}
+                          </div>
+                          <WhatsAppContactButton
+                            contact={customer}
+                            stopPropagation
+                            className="mt-0.5"
+                          />
                         </div>
                       </TableCell>
                       <TableCell className="whitespace-nowrap">

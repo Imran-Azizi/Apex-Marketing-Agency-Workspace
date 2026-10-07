@@ -12,7 +12,7 @@ import {
 } from '../../middleware/loginGuard.js';
 import { getWhatsappLookupKeys, parseInternationalPhone, WHATSAPP_VALIDATION_MESSAGE } from '../../utils/whatsappNormalize.js';
 import { roleToPanel } from '../../config/cookies.js';
-import { effectiveFromUser } from '../../services/permissions/effective.js';
+import { resolveAuthCapabilities } from '../../services/permissions/effective.js';
 import { SECURITY } from '../../config/security.js';
 import { profileImageUrlFor } from '../../utils/profileImageUrl.js';
 
@@ -104,6 +104,7 @@ export const authService = {
       req,
     });
 
+    const capabilities = await resolveAuthCapabilities(user);
     return {
       tokens,
       user: {
@@ -113,7 +114,8 @@ export const authService = {
         role: user.role.code,
         profileImage: user.profileImage || null,
         profileImageUrl: profileImageUrlFor(user.profileImage),
-        permissions: effectiveFromUser(user),
+        permissions: capabilities.permissions,
+        projectLeadElevated: capabilities.projectLeadElevated,
       },
     };
   },
@@ -288,6 +290,7 @@ export const authService = {
         profileImage: auth.user.profileImage || null,
         profileImageUrl: profileImageUrlFor(auth.user.profileImage),
         permissions: auth.permissions,
+        projectLeadElevated: Boolean(auth.projectLeadElevated),
       };
     }
     return {

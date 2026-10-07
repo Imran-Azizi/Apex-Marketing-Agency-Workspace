@@ -5,12 +5,13 @@
  * Rules (aligned with CRM paymentFinance + ProjectFinance):
  * - received = sum of VERIFIED *financial* payments in range
  *   (CRM و فروش sample invoices are excluded; they never post Payment rows)
- * - totalProjectReceipts = totalFinalPrice (sum of project contract values — NOT cash received)
+ * - totalProjectReceipts = totalFinalPrice (sum of project contract values — informational)
  * - directProjectCosts = narrator + editor + otherDirectCosts from ProjectFinance
- * - projectProfit = totalFinalPrice − directProjectCosts (for scoped projects)
+ * - projectProfit = received − directProjectCosts (cash-basis; NOT contract / receivable)
  * - companyExpenses = COMPANY_GENERAL expenses with expenseDate in range
- * - netCompanyProfit = projectProfit − companyExpenses
- * - receivable = sum of project balances for scoped projects
+ * - fixedSalaries = salary payments + advances for active FIXED employees (paidAt in range)
+ * - netCompanyProfit = projectProfit − companyExpenses − fixedSalaries
+ * - receivable = sum of project balances (display / reminder only — never used in profit math)
  * - totalFinalPrice = sum of contract prices (finalProjectPrice → agreedPrice → opportunity)
  *
  * Project scope when a date range is set:
@@ -29,6 +30,7 @@ import {
   netCompanyProfit,
   parseDateBound,
   projectProfit,
+  resolveCompensationType,
   roundMoney,
 } from './metrics.js';
 import { createTtlCache } from '../../utils/ttlCache.js';
@@ -280,6 +282,44 @@ export function projectFinanceMetrics(project, projectPayments) {
   };
 }
 
+async function loadFixedTeamProfileIds() {
+  const profiles = await prisma.teamProfile.findMany({
+    where: { deletedAt: null, status: { not: 'INACTIVE' } },
+    select: {
+      id: true,
+      kind: true,
+      compensationProfile: { select: { type: true, isActive: true } },
+    },
+  });
+  return profiles
+    .filter((p) => {
+      const active = p.compensationProfile?.isActive ?? true;
+      return active && resolveCompensationType(p) === 'FIXED';
+    })
+    .map((p) => p.id);
+}
+
+/** Salary payments + advances for FIXED employees, scoped by paidAt. */
+async function sumFixedEmployeeMoneyPaid({ from = null, to = null } = {}) {
+  const fixedIds = await loadFixedTeamProfileIds();
+  if (!fixedIds.length) return 0;
+  const dateWhere = dateFilter('paidAt', from, to) || {};
+  const where = { teamProfileId: { in: fixedIds }, ...dateWhere };
+  const [payments, advances] = await Promise.all([
+    prisma.salaryPayment.aggregate({
+      where,
+      _sum: { amount: true },
+    }),
+    prisma.salaryAdvance.aggregate({
+      where,
+      _sum: { amount: true },
+    }),
+  ]);
+  return roundMoney(
+    dec(payments._sum.amount || 0) + dec(advances._sum.amount || 0),
+  );
+}
+
 /**
  * @param {{ from?: Date|string|null, to?: Date|string|null }} range
  */
@@ -292,8 +332,9 @@ export async function computeFinanceKpis(range = {}) {
     range.to instanceof Date ? range.to : parseDateBound(range.to, true);
   const hasRange = Boolean(from || to);
 
-  const [companyExpenses, source, received] = await Promise.all([
+  const [companyExpenses, fixedSalaries, source, received] = await Promise.all([
     sumCompanyExpenses({ from, to }),
+    sumFixedEmployeeMoneyPaid({ from, to }),
     loadCachedFinanceSource(),
     sumVerifiedPayments({ from, to }),
   ]);
@@ -359,8 +400,13 @@ export async function computeFinanceKpis(range = {}) {
     otherDirectCosts = roundMoney(otherDirectCosts + m.otherDirectCosts);
   }
 
-  const projectProfitVal = projectProfit(totalFinalPrice, directProjectCosts);
-  const netCompanyProfitVal = netCompanyProfit(projectProfitVal, companyExpenses);
+  // Profit uses verified cash received — never receivable / unpaid contract balance.
+  const projectProfitVal = projectProfit(received, directProjectCosts);
+  const netCompanyProfitVal = netCompanyProfit(
+    projectProfitVal,
+    companyExpenses,
+    fixedSalaries,
+  );
 
   const monthly = monthKeys.map((k) => {
     const [y, m] = k.split('-').map(Number);
@@ -387,6 +433,7 @@ export async function computeFinanceKpis(range = {}) {
     totalFinalPrice,
     projectProfit: projectProfitVal,
     companyExpenses,
+    fixedSalaries,
     netCompanyProfit: netCompanyProfitVal,
     scopedProjectCount,
     monthly,

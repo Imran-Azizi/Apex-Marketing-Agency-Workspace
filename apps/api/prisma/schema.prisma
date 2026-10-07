@@ -89,6 +89,8 @@ enum AssignmentRole {
   EDITOR
   NARRATOR
   PROPOSED_NARRATOR
+  /// Employee assigned to fully manage this project (scoped PROJECT_MANAGER access)
+  PROJECT_LEAD
 }
 
 enum ContentKind {
@@ -278,6 +280,7 @@ enum TeamKind {
   MANAGER
   SALES
   FINANCE
+  PROJECT_MANAGER
 }
 
 enum AvailabilityStatus {
@@ -1450,6 +1453,8 @@ model Expense {
   amount        Decimal         @db.Decimal(14, 2)
   expenseDate   DateTime        @default(now())
   paymentMethod PaymentMethod?
+  /// Method-specific details (hesab account, office address, bank card, hawala…)
+  paymentMethodMeta Json?
   /// What the expense was for
   description   String?
   /// Who received the payment

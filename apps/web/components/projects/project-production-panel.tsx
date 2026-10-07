@@ -174,7 +174,11 @@ export function ProjectProductionPanel({
   const qc = useQueryClient();
   const { data: me } = useMeQuery();
   const resolvedRole = roleCode ?? me?.role ?? null;
-  const canAssignEditor = canAssignProjectEditor(me?.permissions, resolvedRole);
+  const canAssignEditor = canAssignProjectEditor(
+    me?.permissions,
+    resolvedRole,
+    me?.projectLeadElevated,
+  );
   const isEditor = resolvedRole === "EDITOR";
 
   const [assignOpen, setAssignOpen] = useState(false);
