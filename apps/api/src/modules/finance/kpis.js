@@ -9,7 +9,8 @@
  * - directProjectCosts = narrator + editor + otherDirectCosts from ProjectFinance
  * - projectProfit = received − directProjectCosts (cash-basis; NOT contract / receivable)
  * - companyExpenses = COMPANY_GENERAL expenses with expenseDate in range
- * - fixedSalaries = salary payments + advances for active FIXED employees (paidAt in range)
+ * - fixedSalaries = sum of fixedMonthlyAmount for active FIXED employees
+ *   (configured salary total — not cash paid; payments live under employee paid KPIs)
  * - netCompanyProfit = projectProfit − companyExpenses − fixedSalaries
  * - receivable = sum of project balances (display / reminder only — never used in profit math)
  * - totalFinalPrice = sum of contract prices (finalProjectPrice → agreedPrice → opportunity)
@@ -282,42 +283,29 @@ export function projectFinanceMetrics(project, projectPayments) {
   };
 }
 
-async function loadFixedTeamProfileIds() {
+/**
+ * Sum of configured monthly salaries for active FIXED employees.
+ * Not cash paid — only the salary amounts set on their compensation profiles.
+ */
+async function sumFixedMonthlySalaries() {
   const profiles = await prisma.teamProfile.findMany({
     where: { deletedAt: null, status: { not: 'INACTIVE' } },
     select: {
-      id: true,
       kind: true,
-      compensationProfile: { select: { type: true, isActive: true } },
+      compensationProfile: {
+        select: { type: true, isActive: true, fixedMonthlyAmount: true },
+      },
     },
   });
-  return profiles
-    .filter((p) => {
-      const active = p.compensationProfile?.isActive ?? true;
-      return active && resolveCompensationType(p) === 'FIXED';
-    })
-    .map((p) => p.id);
-}
-
-/** Salary payments + advances for FIXED employees, scoped by paidAt. */
-async function sumFixedEmployeeMoneyPaid({ from = null, to = null } = {}) {
-  const fixedIds = await loadFixedTeamProfileIds();
-  if (!fixedIds.length) return 0;
-  const dateWhere = dateFilter('paidAt', from, to) || {};
-  const where = { teamProfileId: { in: fixedIds }, ...dateWhere };
-  const [payments, advances] = await Promise.all([
-    prisma.salaryPayment.aggregate({
-      where,
-      _sum: { amount: true },
-    }),
-    prisma.salaryAdvance.aggregate({
-      where,
-      _sum: { amount: true },
-    }),
-  ]);
-  return roundMoney(
-    dec(payments._sum.amount || 0) + dec(advances._sum.amount || 0),
-  );
+  let total = 0;
+  for (const p of profiles) {
+    const active = p.compensationProfile?.isActive ?? true;
+    if (!active || resolveCompensationType(p) !== 'FIXED') continue;
+    total = roundMoney(
+      total + dec(p.compensationProfile?.fixedMonthlyAmount || 0),
+    );
+  }
+  return total;
 }
 
 /**
@@ -334,7 +322,7 @@ export async function computeFinanceKpis(range = {}) {
 
   const [companyExpenses, fixedSalaries, source, received] = await Promise.all([
     sumCompanyExpenses({ from, to }),
-    sumFixedEmployeeMoneyPaid({ from, to }),
+    sumFixedMonthlySalaries(),
     loadCachedFinanceSource(),
     sumVerifiedPayments({ from, to }),
   ]);

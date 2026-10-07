@@ -47,7 +47,7 @@ export function projectProfit(revenue, costs) {
   return roundMoney(Number(revenue || 0) - Number(costs || 0));
 }
 
-/** Net company profit = project profit − company expenses − fixed salaries */
+/** Net company profit = project profit − company expenses − fixed monthly salaries */
 export function netCompanyProfit(
   projectProfitTotal,
   companyExpenses,

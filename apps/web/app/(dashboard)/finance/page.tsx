@@ -82,7 +82,7 @@ const KPI_DEFS: Array<{
   {
     key: "fixedSalaries",
     label: "معاش ثابت کارمندان",
-    hint: "پرداخت معاش و پیش‌پرداخت کارمندان معاش ثابت در بازه",
+    hint: "جمع معاش ماهانه کارمندان معاش ثابت (نه مبلغ پرداخت‌شده)",
   },
   {
     key: "netCompanyProfit",
