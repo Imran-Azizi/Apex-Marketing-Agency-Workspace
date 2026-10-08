@@ -38,10 +38,7 @@ import {
 } from '../../services/projectAccess.js';
 import { createNotificationOnce, notifyManagersOnce } from '../../services/notifications.js';
 import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
-import {
-  isActiveManagementCustomer,
-  customerSearchCondition,
-} from '../crm/visibility.js';
+import { customerSearchCondition } from '../crm/visibility.js';
 import {
   contractProgressPayload,
   summarizeContractVideos,
@@ -1116,7 +1113,7 @@ export const projectService = {
       ? { deletedAt: null, AND: [searchCondition] }
       : { deletedAt: null };
 
-    const [customerRows, customerTotal, services, formats] = await Promise.all([
+    const [customers, customerTotal, services, formats] = await Promise.all([
       prisma.crmCustomer.findMany({
         where: customerWhere,
         orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
@@ -1135,7 +1132,6 @@ export const projectService = {
           city: true,
           address: true,
           pipelineStage: true,
-          convertedAt: true,
         },
       }),
       prisma.crmCustomer.count({ where: customerWhere }),
@@ -1149,13 +1145,6 @@ export const projectService = {
         select: { id: true, name: true, ratio: true },
       }),
     ]);
-
-    const customers = customerRows.map(({ convertedAt, ...customer }) => ({
-      ...customer,
-      listSection: isActiveManagementCustomer({ convertedAt, pipelineStage: customer.pipelineStage })
-        ? 'management'
-        : 'sales',
-    }));
 
     return {
       customers,

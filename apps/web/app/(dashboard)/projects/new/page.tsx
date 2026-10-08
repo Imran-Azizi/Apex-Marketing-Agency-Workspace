@@ -49,19 +49,7 @@ type CreateCustomerOption = {
   email?: string | null;
   city?: string | null;
   address?: string | null;
-  listSection?: "management" | "sales";
 };
-
-const LIST_SECTION_BADGE = {
-  management: {
-    label: "مدیریت مشتریان",
-    className: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  },
-  sales: {
-    label: "CRM و فروش",
-    className: "border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300",
-  },
-} as const;
 
 type CreateOptionsResponse = {
   customers: CreateCustomerOption[];
@@ -432,21 +420,9 @@ export default function NewProjectPage() {
                             <Building2 className="h-4 w-4" />
                           </div>
                           <div className="min-w-0 flex-1 space-y-0.5">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <p className="min-w-0 truncate text-sm font-semibold">
-                                {customerLabel(c)}
-                              </p>
-                              {c.listSection ? (
-                                <span
-                                  className={cn(
-                                    "shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none",
-                                    LIST_SECTION_BADGE[c.listSection].className,
-                                  )}
-                                >
-                                  {LIST_SECTION_BADGE[c.listSection].label}
-                                </span>
-                              ) : null}
-                            </div>
+                            <p className="truncate text-sm font-semibold">
+                              {customerLabel(c)}
+                            </p>
                             <p className="truncate text-xs text-muted-foreground">
                               {[
                                 c.customerCode,
