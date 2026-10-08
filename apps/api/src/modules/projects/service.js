@@ -39,7 +39,7 @@ import {
 import { createNotificationOnce, notifyManagersOnce } from '../../services/notifications.js';
 import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
 import {
-  customerListScopeCondition,
+  isActiveManagementCustomer,
   customerSearchCondition,
 } from '../crm/visibility.js';
 import {
@@ -1110,13 +1110,13 @@ export const projectService = {
     assertCanListProjects(auth);
     const page = Math.max(1, Number(query.page) || 1);
     const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 50));
-    // Same list as مدیریت مشتری: transferred from CRM و فروش and not yet delivered.
-    const and = [customerListScopeCondition('management')];
+    // Every live customer: CRM و فروش lists all of them and مدیریت مشتری is a subset.
     const searchCondition = customerSearchCondition(query.q);
-    if (searchCondition) and.push(searchCondition);
-    const customerWhere = { deletedAt: null, AND: and };
+    const customerWhere = searchCondition
+      ? { deletedAt: null, AND: [searchCondition] }
+      : { deletedAt: null };
 
-    const [customers, customerTotal, services, formats] = await Promise.all([
+    const [customerRows, customerTotal, services, formats] = await Promise.all([
       prisma.crmCustomer.findMany({
         where: customerWhere,
         orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
@@ -1135,6 +1135,7 @@ export const projectService = {
           city: true,
           address: true,
           pipelineStage: true,
+          convertedAt: true,
         },
       }),
       prisma.crmCustomer.count({ where: customerWhere }),
@@ -1148,6 +1149,13 @@ export const projectService = {
         select: { id: true, name: true, ratio: true },
       }),
     ]);
+
+    const customers = customerRows.map(({ convertedAt, ...customer }) => ({
+      ...customer,
+      listSection: isActiveManagementCustomer({ convertedAt, pipelineStage: customer.pipelineStage })
+        ? 'management'
+        : 'sales',
+    }));
 
     return {
       customers,
