@@ -1,13 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   keepPreviousData,
+  useInfiniteQuery,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Building2, Search, UserRound, X } from "lucide-react";
+import {
+  Building2,
+  CalendarRange,
+  ChevronLeft,
+  Clapperboard,
+  Loader2,
+  Search,
+  UserRound,
+  X,
+} from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
 import { hasPermission } from "@/lib/rbac";
 import { useMeQuery } from "@/lib/permissions";
@@ -24,6 +34,8 @@ import {
   type ProjectBriefWizardProfile,
 } from "@/components/brief/project-brief-wizard";
 import type { ClientAssetItem } from "@/components/brief/client-assets-uploader";
+import { CreateChildProject } from "@/components/projects/create-child-project";
+import { CreateContractForm } from "@/components/projects/create-contract-form";
 
 type CreateCustomerOption = {
   id: string;
@@ -41,8 +53,13 @@ type CreateCustomerOption = {
 
 type CreateOptionsResponse = {
   customers: CreateCustomerOption[];
+  customerTotal: number;
+  page: number;
+  hasMore: boolean;
   formats: Array<{ id: string; name: string; ratio: string }>;
 };
+
+const CUSTOMER_PAGE_SIZE = 50;
 
 type CrmCustomerDetail = {
   id: string;
@@ -94,8 +111,13 @@ function pickAttachableOpportunity(customer?: CrmCustomerDetail | null) {
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const parentId = searchParams.get("parent");
   const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
+  const [projectType, setProjectType] = useState<"single" | "contract" | null>(
+    null,
+  );
 
   const [customerQuery, setCustomerQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -126,29 +148,36 @@ export default function NewProjectPage() {
     }
   }, [meLoading, canCreate, router]);
 
-  const optionsQuery = useQuery({
-    queryKey: ["projects", "create-options", debouncedQuery],
-    queryFn: () => {
+  // Keyed under "crm-customers" so CRM transfers/edits that invalidate customer lists refresh this picker too.
+  const optionsQuery = useInfiniteQuery({
+    queryKey: ["crm-customers", "project-picker", debouncedQuery],
+    queryFn: ({ pageParam }) => {
       const params = new URLSearchParams();
+      params.set("page", String(pageParam));
+      params.set("pageSize", String(CUSTOMER_PAGE_SIZE));
       if (debouncedQuery) params.set("q", debouncedQuery);
-      const qs = params.toString();
-      return apiGet<CreateOptionsResponse>(
-        qs ? `/projects/create-options?${qs}` : "/projects/create-options",
-      );
+      return apiGet<CreateOptionsResponse>(`/projects/create-options?${params}`);
     },
-    enabled: canCreate,
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
+    enabled: canCreate && !parentId,
     placeholderData: keepPreviousData,
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
-  const customers = optionsQuery.data?.customers || [];
-  const formatsFromOptions = optionsQuery.data?.formats;
+  const customers = useMemo(
+    () => optionsQuery.data?.pages.flatMap((p) => p.customers) ?? [],
+    [optionsQuery.data],
+  );
+  const customerTotal = optionsQuery.data?.pages[0]?.customerTotal ?? customers.length;
+  const formatsFromOptions = optionsQuery.data?.pages[0]?.formats;
 
   const { data: formatsPublic } = useQuery({
     queryKey: ["formats"],
     queryFn: () =>
       apiGet<Array<{ id: string; name: string; ratio: string }>>("/public/formats"),
-    enabled: canCreate && !formatsFromOptions?.length,
+    enabled: canCreate && !parentId && !formatsFromOptions?.length,
   });
 
   const formats = formatsFromOptions?.length
@@ -159,7 +188,7 @@ export default function NewProjectPage() {
     queryKey: ["crm-customer", selectedCustomerId],
     queryFn: () =>
       apiGet<CrmCustomerDetail>(`/crm/customers/${selectedCustomerId}`),
-    enabled: Boolean(selectedCustomerId) && canCreate,
+    enabled: Boolean(selectedCustomerId) && canCreate && !parentId,
   });
 
   const assetsQuery = useQuery({
@@ -168,7 +197,7 @@ export default function NewProjectPage() {
       apiGet<ClientAssetItem[]>(
         `/crm/customers/${selectedCustomerId}/assets`,
       ),
-    enabled: Boolean(selectedCustomerId) && canCreate,
+    enabled: Boolean(selectedCustomerId) && canCreate && !parentId,
   });
 
   const selectedOption = selectedCustomer;
@@ -230,14 +259,18 @@ export default function NewProjectPage() {
     return null;
   }
 
+  if (parentId) {
+    return <CreateChildProject parentId={parentId} />;
+  }
+
   return (
     <div className="min-w-0 space-y-5">
-      {!selectedCustomerId ? (
+      {!selectedCustomerId && !projectType ? (
         <>
           <PageHeader
             inline
             title="ایجاد پروژه جدید"
-            subtitle="ابتدا مشتری را انتخاب کنید، سپس فرم اطلاعات پروژه را تکمیل کنید"
+            subtitle="نوع پروژه را انتخاب کنید"
             subtitleClassName="hidden sm:block"
             actions={
               <Button
@@ -249,17 +282,77 @@ export default function NewProjectPage() {
               </Button>
             }
           />
+          <div className="grid max-w-3xl gap-3 sm:grid-cols-2">
+            {(
+              [
+                { type: "single", label: "پروژه تک‌ویدیویی", Icon: Clapperboard },
+                { type: "contract", label: "قرارداد چندویدیویی / ماهانه", Icon: CalendarRange },
+              ] as const
+            ).map(({ type, label, Icon }) => (
+              <button
+                key={type}
+                type="button"
+                className="group flex items-center gap-4 rounded-2xl border border-border/70 bg-card p-4 text-start shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand/50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 sm:p-5"
+                onClick={() => setProjectType(type)}
+              >
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand transition-colors group-hover:bg-brand group-hover:text-brand-foreground">
+                  <Icon className="h-6 w-6" />
+                </span>
+                <span className="min-w-0 flex-1 text-base font-semibold">{label}</span>
+                <ChevronLeft className="h-5 w-5 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-0.5 group-hover:text-brand" />
+              </button>
+            ))}
+          </div>
+        </>
+      ) : !selectedCustomerId ? (
+        <>
+          <PageHeader
+            inline
+            title="ایجاد پروژه جدید"
+            subtitle={
+              projectType === "contract"
+                ? "مشتری قرارداد ماهانه را انتخاب کنید"
+                : "ابتدا مشتری را انتخاب کنید، سپس فرم اطلاعات پروژه را تکمیل کنید"
+            }
+            subtitleClassName="hidden sm:block"
+            actions={
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setProjectType(null)}
+                >
+                  تغییر نوع
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => router.push("/projects")}
+                >
+                  بازگشت به پروژه‌ها
+                </Button>
+              </div>
+            }
+          />
 
           <Card className="border shadow-sm">
             <CardContent className="space-y-4 p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <UserRound className="h-4 w-4 text-muted-foreground" />
-                  انتخاب مشتری
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <UserRound className="h-4 w-4 text-muted-foreground" />
+                    انتخاب مشتری
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">
+                    مشتریان فعال صفحه مدیریت مشتری
+                  </p>
                 </div>
                 {!optionsQuery.isLoading && !optionsError ? (
-                  <span className="text-xs text-muted-foreground">
-                    {customers.length} مشتری
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    {optionsQuery.isFetching && !optionsQuery.isFetchingNextPage ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : null}
+                    {customerTotal.toLocaleString("fa-AF", { numberingSystem: "latn" })} مشتری
                   </span>
                 ) : null}
               </div>
@@ -303,12 +396,12 @@ export default function NewProjectPage() {
                     <p className="text-sm font-semibold">
                       {debouncedQuery
                         ? "مشتری‌ای با این جستجو یافت نشد"
-                        : "هنوز مشتری‌ای ثبت نشده"}
+                        : "هنوز مشتری‌ای در مدیریت مشتری نیست"}
                     </p>
                     <p className="max-w-sm text-xs text-muted-foreground">
                       {debouncedQuery
-                        ? "عبارت جستجو را تغییر دهید یا از کد مشتری استفاده کنید."
-                        : "ابتدا مشتری را از بخش CRM اضافه کنید، سپس اینجا انتخاب کنید."}
+                        ? "عبارت جستجو را تغییر دهید یا از کد مشتری یا شماره تماس استفاده کنید."
+                        : "ابتدا مشتری را از CRM و فروش به مدیریت مشتری منتقل کنید، سپس اینجا انتخاب کنید."}
                     </p>
                   </div>
                 ) : (
@@ -343,6 +436,22 @@ export default function NewProjectPage() {
                         </button>
                       </li>
                     ))}
+                    {optionsQuery.hasNextPage ? (
+                      <li className="p-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full rounded-xl"
+                          disabled={optionsQuery.isFetchingNextPage}
+                          onClick={() => void optionsQuery.fetchNextPage()}
+                        >
+                          {optionsQuery.isFetchingNextPage ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : null}
+                          نمایش مشتریان بیشتر
+                        </Button>
+                      </li>
+                    ) : null}
                   </ul>
                 )}
               </div>
@@ -379,6 +488,23 @@ export default function NewProjectPage() {
             </Button>
           </div>
 
+          {projectType === "contract" ? (
+            <CreateContractForm
+              crmCustomerId={selectedCustomerId}
+              profile={profile}
+              onCreated={async (project) => {
+                await Promise.all([
+                  queryClient.invalidateQueries({ queryKey: ["projects"] }),
+                  queryClient.invalidateQueries({ queryKey: ["projects-home"] }),
+                  queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] }),
+                  queryClient.invalidateQueries({ queryKey: ["crm-customers"] }),
+                  queryClient.invalidateQueries({ queryKey: ["crm-customer"] }),
+                  queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+                ]);
+                router.push(`/projects/${project.id}`);
+              }}
+            />
+          ) : (
           <ProjectBriefWizard
             key={selectedCustomerId}
             mode="internal"
@@ -412,6 +538,7 @@ export default function NewProjectPage() {
               router.push(`/projects/${project.id}`);
             }}
           />
+          )}
         </div>
       )}
     </div>

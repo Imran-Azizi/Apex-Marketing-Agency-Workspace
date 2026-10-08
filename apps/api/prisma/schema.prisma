@@ -84,6 +84,13 @@ enum CustomerFacingStatus {
   COMPLETED
 }
 
+/// SINGLE = one video. CONTRACT = monthly parent. CHILD = a video inside a contract.
+enum ProjectKind {
+  SINGLE
+  CONTRACT
+  CHILD
+}
+
 enum AssignmentRole {
   MANAGER
   EDITOR
@@ -839,6 +846,11 @@ model Project {
   deletedAt            DateTime?
   /// Client-generated key so duplicate submits reuse the same project.
   createIdempotencyKey String?                 @unique
+  kind                 ProjectKind             @default(SINGLE)
+  /// Set only when kind is CHILD. Points at the monthly contract project.
+  parentProjectId      String?
+  parentProject        Project?                @relation("ContractVideos", fields: [parentProjectId], references: [id], onDelete: Restrict)
+  childProjects        Project[]               @relation("ContractVideos")
 
   opportunity        Opportunity?
   context            ProjectContext?
@@ -874,6 +886,9 @@ model Project {
   @@index([deletedAt, updatedAt])
   @@index([customerFacingStatus])
   @@index([portalAccountId])
+  @@index([parentProjectId])
+  @@index([kind])
+  @@index([deletedAt, kind])
   @@map("projects")
 }
 

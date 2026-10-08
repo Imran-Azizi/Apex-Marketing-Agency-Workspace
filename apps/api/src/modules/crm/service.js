@@ -31,10 +31,7 @@ import {
   buildInvoiceDocumentHtml,
   invoiceStatusLabel,
 } from "./invoiceDocumentHtml.js";
-import {
-  allocateCustomerCode,
-  normalizeCustomerCodeQuery,
-} from "./customerCode.js";
+import { allocateCustomerCode } from "./customerCode.js";
 import {
   applyCrmEvent,
   maybeAutoConvertAfterFirstVerifiedPayment,
@@ -60,7 +57,10 @@ import {
   canRevealPortalPassword,
   serializePortalCredentials,
 } from "./portalInvites.js";
-import { customerListScopeCondition } from "./visibility.js";
+import {
+  customerListScopeCondition,
+  customerSearchCondition,
+} from "./visibility.js";
 import {
   assertSalesCustomerAccess,
   assertSalesCustomerListOwnerFilter,
@@ -399,26 +399,8 @@ export const crmService = {
       }
       where.createdAt = createdAt;
     }
-    if (q) {
-      const trimmed = q.trim();
-      const digits = trimmed.replace(/\D/g, "");
-      const code = normalizeCustomerCodeQuery(trimmed);
-      const or = [
-        { personName: { contains: trimmed, mode: "insensitive" } },
-        { companyName: { contains: trimmed, mode: "insensitive" } },
-        { customerCode: { contains: code, mode: "insensitive" } },
-        { source: { contains: trimmed, mode: "insensitive" } },
-        {
-          salesOwner: { fullName: { contains: trimmed, mode: "insensitive" } },
-        },
-      ];
-      if (digits) {
-        or.push({ normalizedWhatsapp: { contains: digits } });
-        or.push({ phone: { contains: digits } });
-        or.push({ whatsappRaw: { contains: digits } });
-      }
-      and.push({ OR: or });
-    }
+    const searchCondition = customerSearchCondition(q);
+    if (searchCondition) and.push(searchCondition);
     if (and.length) where.AND = and;
 
     const orderBy =

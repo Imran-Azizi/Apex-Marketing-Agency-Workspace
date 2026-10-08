@@ -16,7 +16,6 @@ import { PageHeader } from "@/components/shared/page-header";
 import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { EmptyState } from "@/components/shared/empty-state";
-import { UserAvatar } from "@/components/shared/user-avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +67,13 @@ import {
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import { TablePagination } from "@/components/shared/table-pagination";
 import type { ProjectProgress } from "@/lib/project-progress";
+import type { ContractVideoStats, ProjectKind } from "@/lib/contract-project";
+import {
+  AssignedPersonCell,
+  ContractVideoStatsSummary,
+  getAssignedPerson,
+  type ProjectAssignmentRecord,
+} from "@/components/projects/project-table-cells";
 
 const ALL = "ALL";
 const PAGE_SIZE = 15;
@@ -80,21 +86,14 @@ const DATE_PRESET_OPTIONS = [
   { value: "custom", label: "بازه سفارشی" },
 ] as const;
 
-interface AssignmentRecord {
-  role: string;
-  teamProfile?: { displayName?: string | null; userId?: string | null };
-  user?: {
-    id?: string;
-    fullName?: string | null;
-    profileImage?: string | null;
-  };
-}
-
 interface Project {
   id: string;
   code: string;
   title: string;
   status: string;
+  kind?: ProjectKind;
+  videoStats?: ContractVideoStats | null;
+  parentProject?: { id: string; code: string; title: string } | null;
   customerFacingStatus: string;
   deliveryStatus?: string | null;
   progress?: ProjectProgress | number | null;
@@ -103,7 +102,7 @@ interface Project {
     personName: string;
     companyName: string | null;
   };
-  assignments?: AssignmentRecord[];
+  assignments?: ProjectAssignmentRecord[];
 }
 
 interface ProjectListResponse {
@@ -128,21 +127,6 @@ type ActiveChip = {
   label: string;
   onClear: () => void;
 };
-
-function getAssignedPerson(
-  project: Project,
-  role: "EDITOR" | "NARRATOR" | "PROJECT_LEAD",
-) {
-  const assignment = project.assignments?.find((item) => item.role === role);
-  if (!assignment) return null;
-  const name =
-    assignment.teamProfile?.displayName || assignment.user?.fullName || null;
-  if (!name) return null;
-  return {
-    name,
-    profileImage: assignment.user?.profileImage || null,
-  };
-}
 
 function customerLabel(customer: {
   personName: string;
@@ -191,6 +175,7 @@ export default function ProjectsPage() {
       if (createdFrom) params.set("createdFrom", createdFrom);
       if (createdTo) params.set("createdTo", createdTo);
     }
+    params.set("topLevel", "1");
     return params.toString();
   }, [
     page,
@@ -570,7 +555,7 @@ export default function ProjectsPage() {
       <PageHeader
         inline
         title="پروژه‌ها"
-        subtitle="لیست پروژه‌های فعال و تکمیل‌شده"
+        subtitle="پروژه‌های تک‌ویدیویی و قراردادهای ماهانه"
         actions={
           canCreateProject ? (
             <Button
@@ -932,9 +917,25 @@ export default function ProjectsPage() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      <span className="block min-w-[8rem] max-w-[16rem] font-medium leading-snug">
+                      <span className="block min-w-[8rem] max-w-[18rem] font-medium leading-snug">
                         {project.title}
                       </span>
+                      {project.kind === "CONTRACT" ? (
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          ماهانه / چندویدیویی
+                        </span>
+                      ) : project.kind === "CHILD" ? (
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          ویدیوی قرارداد
+                          {project.parentProject
+                            ? ` · ${project.parentProject.title}`
+                            : ""}
+                        </span>
+                      ) : (
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          تک‌ویدیو
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="min-w-[8rem]">
@@ -949,88 +950,45 @@ export default function ProjectsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      {(() => {
-                        const lead = getAssignedPerson(project, "PROJECT_LEAD");
-                        return lead ? (
-                          <div
-                            className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
-                            title={lead.name}
-                          >
-                            <UserAvatar
-                              name={lead.name}
-                              profileImage={lead.profileImage}
-                              className="h-8 w-8"
-                            />
-                            <span className="truncate text-sm font-medium">
-                              {lead.name}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
-                            تعیین نشده
-                          </span>
-                        );
-                      })()}
+                      <AssignedPersonCell
+                        person={getAssignedPerson(project.assignments, "PROJECT_LEAD")}
+                      />
                     </TableCell>
+                    {project.kind === "CONTRACT" ? (
+                      <TableCell colSpan={2}>
+                        <ContractVideoStatsSummary stats={project.videoStats} />
+                      </TableCell>
+                    ) : (
+                      <>
+                        <TableCell>
+                          <AssignedPersonCell
+                            person={getAssignedPerson(project.assignments, "EDITOR")}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <AssignedPersonCell
+                            person={getAssignedPerson(project.assignments, "NARRATOR")}
+                          />
+                        </TableCell>
+                      </>
+                    )}
                     <TableCell>
-                      {(() => {
-                        const editor = getAssignedPerson(project, "EDITOR");
-                        return editor ? (
-                          <div
-                            className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
-                            title={editor.name}
-                          >
-                            <UserAvatar
-                              name={editor.name}
-                              profileImage={editor.profileImage}
-                              className="h-8 w-8"
-                            />
-                            <span className="truncate text-sm font-medium">
-                              {editor.name}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
-                            تعیین نشده
-                          </span>
-                        );
-                      })()}
-                    </TableCell>
-                    <TableCell>
-                      {(() => {
-                        const narrator = getAssignedPerson(project, "NARRATOR");
-                        return narrator ? (
-                          <div
-                            className="flex min-w-[10rem] items-center gap-3 overflow-hidden text-sm"
-                            title={narrator.name}
-                          >
-                            <UserAvatar
-                              name={narrator.name}
-                              profileImage={narrator.profileImage}
-                              className="h-8 w-8"
-                            />
-                            <span className="truncate text-sm font-medium">
-                              {narrator.name}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="inline-flex min-w-[10rem] items-center text-sm text-muted-foreground">
-                            تعیین نشده
-                          </span>
-                        );
-                      })()}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          project.status === "COMPLETED"
-                            ? "success"
-                            : "secondary"
-                        }
-                        className="whitespace-nowrap"
-                      >
-                        {getProjectStatusLabel(project.status)}
-                      </Badge>
+                      {project.kind === "CONTRACT" ? (
+                        <Badge variant="brand" className="whitespace-nowrap">
+                          قرارداد فعال
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant={
+                            project.status === "COMPLETED"
+                              ? "success"
+                              : "secondary"
+                          }
+                          className="whitespace-nowrap"
+                        >
+                          {getProjectStatusLabel(project.status)}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell
                       className="min-w-[10rem]"

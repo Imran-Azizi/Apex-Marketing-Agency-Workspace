@@ -122,7 +122,16 @@ async function sumCompanyExpenses({ from, to }) {
 
 export async function loadAllProjectsForFinanceList() {
   return prisma.project.findMany({
-    where: { deletedAt: null },
+    where: {
+      deletedAt: null,
+      kind: { not: 'CONTRACT' },
+      NOT: {
+        AND: [
+          { kind: 'CHILD' },
+          { finance: { is: { agreedPrice: 0, finalProjectPrice: 0 } } },
+        ],
+      },
+    },
     select: {
       id: true,
       code: true,

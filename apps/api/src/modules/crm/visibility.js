@@ -7,8 +7,34 @@ import {
   isActiveInManagement,
   MANAGEMENT_INACTIVE_STAGES,
 } from './pipeline.js';
+import { normalizeCustomerCodeQuery } from './customerCode.js';
 
 const MANAGEMENT_INACTIVE_SET = new Set(MANAGEMENT_INACTIVE_STAGES);
+
+/**
+ * Prisma `where` fragment for the customer search box (name, company, code, phone).
+ * Shared by مدیریت مشتری and the project customer picker so both find the same rows.
+ * @returns {object|null}
+ */
+export function customerSearchCondition(q) {
+  const trimmed = String(q || '').trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, '');
+  const code = normalizeCustomerCodeQuery(trimmed);
+  const or = [
+    { personName: { contains: trimmed, mode: 'insensitive' } },
+    { companyName: { contains: trimmed, mode: 'insensitive' } },
+    { customerCode: { contains: code, mode: 'insensitive' } },
+    { source: { contains: trimmed, mode: 'insensitive' } },
+    { salesOwner: { fullName: { contains: trimmed, mode: 'insensitive' } } },
+  ];
+  if (digits) {
+    or.push({ normalizedWhatsapp: { contains: digits } });
+    or.push({ phone: { contains: digits } });
+    or.push({ whatsappRaw: { contains: digits } });
+  }
+  return { OR: or };
+}
 
 /**
  * Prisma `where` fragment for `/crm/customers?scope=…`.

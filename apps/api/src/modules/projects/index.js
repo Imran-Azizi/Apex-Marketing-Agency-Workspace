@@ -65,12 +65,41 @@ router.post(
   },
 );
 
+router.post(
+  "/contracts",
+  requireCsrf,
+  requirePermission("projects.create"),
+  async (req, res, next) => {
+    try {
+      created(res, await projectService.createContract(req.body, req.auth, req));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.get(
   "/:id",
   requirePermission("projects.view"),
   async (req, res, next) => {
     try {
       ok(res, await projectService.get(req.params.id, req.auth));
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.patch(
+  "/:id/contract",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await projectService.updateContract(req.params.id, req.body, req.auth, req),
+      );
     } catch (e) {
       next(e);
     }

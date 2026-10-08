@@ -44,6 +44,10 @@ import {
 } from "@/lib/project-status";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
 import type { ProjectProgress } from "@/lib/project-progress";
+import {
+  ContractProjectDashboard,
+  type ContractProjectDetail,
+} from "@/components/projects/contract-project-dashboard";
 import { getMe, type MeResponse } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
 import {
@@ -100,10 +104,9 @@ const ProjectFinancePanel = dynamic(
   { ssr: false, loading: () => <PanelSkeleton className="h-40" /> },
 );
 
-interface ProjectDetail {
-  id: string;
-  code: string;
-  title: string;
+interface ProjectDetail extends ContractProjectDetail {
+  kind?: "SINGLE" | "CONTRACT" | "CHILD";
+  parentProject?: { id: string; code: string; title: string } | null;
   status: string;
   customerFacingStatus: string;
   progress?: ProjectProgress | number | null;
@@ -516,6 +519,20 @@ export default function ProjectDetailPage({
     );
   }
 
+  const canCreateProject = hasPermission(permissions, "projects.create", role);
+  const canEditProject = hasPermission(permissions, "projects.edit", role);
+
+  if (data.kind === "CONTRACT") {
+    return (
+      <ContractProjectDashboard
+        project={data}
+        canCreate={canCreateProject}
+        canEdit={canEditProject}
+        canDelete={hasPermission(permissions, "projects.delete", role)}
+      />
+    );
+  }
+
   const progress = data.progress;
 
   const showCustomerSection = customerTabs.length > 0;
@@ -546,10 +563,17 @@ export default function ProjectDetailPage({
                   className="h-8 shrink-0 gap-1.5"
                   asChild
                 >
-                  <Link href="/projects">
-                    <ArrowRight className="h-3.5 w-3.5" />
-                    پروژه‌ها
-                  </Link>
+                  {data.kind === "CHILD" && data.parentProject ? (
+                    <Link href={`/projects/${data.parentProject.id}`}>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                      قرارداد
+                    </Link>
+                  ) : (
+                    <Link href="/projects">
+                      <ArrowRight className="h-3.5 w-3.5" />
+                      پروژه‌ها
+                    </Link>
+                  )}
                 </Button>
                 <Badge
                   variant="outline"

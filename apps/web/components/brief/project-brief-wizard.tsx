@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
+import { cn, formatCurrency, toEnglishDigits } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,9 +26,12 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleDollarSign,
   Clapperboard,
+  FileText,
   FolderOpen,
   Loader2,
+  Lock,
   Megaphone,
   X,
   type LucideIcon,
@@ -69,6 +72,8 @@ export type ProjectBriefSubmitPayload = {
   /** One-time key so duplicate submits reuse the same project. */
   idempotencyKey: string;
   notes?: string | null;
+  agreedPrice?: number | null;
+  agreedTerms?: string;
 };
 
 export type ProjectBriefWizardProfile = {
@@ -100,6 +105,10 @@ export type ProjectBriefWizardProps = {
     payload: ProjectBriefSubmitPayload & { opportunityId?: string },
   ) => Promise<{ id: string }>;
   onSuccess: (project: { id: string }) => void;
+  /** Child videos reuse the saved contract customer and skip the contact step. */
+  inheritCustomer?: boolean;
+  /** Adds the required price and agreed-terms step (same rules as CRM «جزئیات قرارداد»). */
+  requirePricing?: boolean;
 };
 
 const PLATFORMS: { id: string; label: string }[] = [
@@ -116,7 +125,7 @@ const LANGUAGE_OPTIONS = [
   { value: "en", label: "انگلیسی" },
 ];
 
-type WizardStepId = "contact" | "content" | "video" | "assets";
+type WizardStepId = "contact" | "pricing" | "content" | "video" | "assets";
 
 function createSubmissionKey() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -125,7 +134,7 @@ function createSubmissionKey() {
   return `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-const WIZARD_STEPS: {
+const ALL_WIZARD_STEPS: {
   id: WizardStepId;
   label: string;
   shortLabel: string;
@@ -136,6 +145,20 @@ const WIZARD_STEPS: {
   { id: "video", label: "مشخصات ویدیو", shortLabel: "ویدیو", icon: Clapperboard },
   { id: "assets", label: "فایل‌ها و دارایی‌های برند", shortLabel: "فایل‌ها", icon: FolderOpen },
 ];
+
+const PRICING_STEP: (typeof ALL_WIZARD_STEPS)[number] = {
+  id: "pricing",
+  label: "قیمت و شرایط قرارداد",
+  shortLabel: "قیمت",
+  icon: CircleDollarSign,
+};
+
+function parsePriceInput(value: string): number | null {
+  const raw = toEnglishDigits(value).replace(/[,٬\s]/g, "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+}
 
 function FieldLabel({
   children,
@@ -172,18 +195,20 @@ function Field({
 }
 
 function StepIndicator({
+  steps,
   currentIndex,
   highestReached,
   onStepSelect,
 }: {
+  steps: typeof ALL_WIZARD_STEPS;
   currentIndex: number;
   highestReached: number;
   onStepSelect: (index: number) => void;
 }) {
   const progressPct =
-    WIZARD_STEPS.length <= 1
+    steps.length <= 1
       ? 0
-      : (currentIndex / (WIZARD_STEPS.length - 1)) * 100;
+      : (currentIndex / (steps.length - 1)) * 100;
 
   return (
     <div className="space-y-3 rounded-2xl border bg-card p-3 shadow-sm sm:space-y-4 sm:p-5">
@@ -196,11 +221,11 @@ function StepIndicator({
               numberingSystem: "latn",
             })}{" "}
             از{" "}
-            {WIZARD_STEPS.length.toLocaleString("fa-AF", {
+            {steps.length.toLocaleString("fa-AF", {
               numberingSystem: "latn",
             })}
             <span className="mx-1.5 text-muted-foreground">·</span>
-            <span className="text-foreground">{WIZARD_STEPS[currentIndex]?.label}</span>
+            <span className="text-foreground">{steps[currentIndex]?.label}</span>
           </p>
         </div>
         <span className="shrink-0 rounded-full bg-brand/10 px-2.5 py-1 text-xs font-semibold tabular-nums text-brand">
@@ -222,7 +247,7 @@ function StepIndicator({
       <div className="sm:hidden">
         <div className="apex-h-scroll -mx-1 overflow-x-auto overscroll-x-contain px-1 pb-1 [scrollbar-width:thin]">
           <ol className="flex w-max min-w-full gap-2">
-            {WIZARD_STEPS.map((step, index) => {
+            {steps.map((step, index) => {
               const Icon = step.icon;
               const isActive = index === currentIndex;
               const isCompleted = index < currentIndex;
@@ -292,8 +317,16 @@ function StepIndicator({
       </div>
 
       {/* Tablet / desktop: equal grid */}
-      <ol className="hidden grid-cols-4 gap-2 sm:grid">
-        {WIZARD_STEPS.map((step, index) => {
+      <ol
+        className={cn(
+          "hidden gap-2 sm:grid",
+          steps.length >= 4 && "sm:grid-cols-4",
+          steps.length === 3 && "sm:grid-cols-3",
+          steps.length === 2 && "sm:grid-cols-2",
+          steps.length <= 1 && "sm:grid-cols-1",
+        )}
+      >
+        {steps.map((step, index) => {
           const Icon = step.icon;
           const isActive = index === currentIndex;
           const isCompleted = index < currentIndex;
@@ -376,7 +409,13 @@ export function ProjectBriefWizard({
   emptyState,
   onSubmit,
   onSuccess,
+  inheritCustomer = false,
+  requirePricing = false,
 }: ProjectBriefWizardProps) {
+  const baseSteps = inheritCustomer
+    ? ALL_WIZARD_STEPS.filter((step) => step.id !== "contact")
+    : ALL_WIZARD_STEPS;
+  const steps = requirePricing ? [PRICING_STEP, ...baseSteps] : baseSteps;
   const [stepIndex, setStepIndex] = useState(0);
   const [highestReached, setHighestReached] = useState(0);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -408,6 +447,8 @@ export function ProjectBriefWizard({
     IDLE_ASSET_UPLOAD_STATE,
   );
   const [notes, setNotes] = useState("");
+  const [agreedPrice, setAgreedPrice] = useState("");
+  const [agreedTerms, setAgreedTerms] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSucceeded, setSubmitSucceeded] = useState(false);
   const submitLockRef = useRef(false);
@@ -469,13 +510,25 @@ export function ProjectBriefWizard({
     setProductName((current) => current || selectedOrder.service!.name);
   }, [selectedOrder]);
 
-  const currentStep = WIZARD_STEPS[stepIndex];
+  const currentStep = steps[stepIndex];
   const StepIcon = currentStep.icon;
   const isFirstStep = stepIndex === 0;
-  const isLastStep = stepIndex === WIZARD_STEPS.length - 1;
+  const isLastStep = stepIndex === steps.length - 1;
+
+  const pricingError = (): string | null => {
+    const price = parsePriceInput(agreedPrice);
+    if (price == null || Number.isNaN(price) || price <= 0) {
+      return "قیمت مجموعی پروژه الزامی و باید بیشتر از صفر باشد.";
+    }
+    if (!agreedTerms.trim()) {
+      return "شرایط توافق‌شده الزامی است.";
+    }
+    return null;
+  };
 
   const validateStep = (index: number): string | null => {
-    const stepId = WIZARD_STEPS[index]?.id;
+    const stepId = steps[index]?.id;
+    if (stepId === "pricing") return pricingError();
     if (stepId === "contact") {
       if (mode === "portal" && !opportunityId) {
         return "لطفاً سفارش تأییدشده را مشخص کنید.";
@@ -511,7 +564,7 @@ export function ProjectBriefWizard({
 
   const goToStep = (index: number) => {
     if (submitLockRef.current || submitSucceeded || isSubmitting) return;
-    if (index < 0 || index >= WIZARD_STEPS.length) return;
+    if (index < 0 || index >= steps.length) return;
     if (index > highestReached) return;
     setStepError(null);
     setStepIndex(index);
@@ -541,7 +594,7 @@ export function ProjectBriefWizard({
       return;
     }
     setStepError(null);
-    const next = Math.min(stepIndex + 1, WIZARD_STEPS.length - 1);
+    const next = Math.min(stepIndex + 1, steps.length - 1);
     setStepIndex(next);
     setHighestReached((h) => Math.max(h, next));
   };
@@ -570,7 +623,11 @@ export function ProjectBriefWizard({
       throw new Error(WHATSAPP_VALIDATION_MESSAGE);
     }
     if (!personName.trim() || !jobTitle.trim() || !companyName.trim() || !address.trim()) {
-      throw new Error("نام، سمت، شرکت و آدرس الزامی هستند.");
+      throw new Error(
+        inheritCustomer
+          ? "اطلاعات مشتری در قرارداد ناقص است. ابتدا قرارداد را تکمیل کنید."
+          : "نام، سمت، شرکت و آدرس الزامی هستند.",
+      );
     }
     if (mode === "portal" && !opportunityId) {
       throw new Error("لطفاً سفارش تأییدشده را مشخص کنید.");
@@ -619,6 +676,13 @@ export function ProjectBriefWizard({
       payload.notes = notes.trim() || null;
     }
 
+    if (requirePricing) {
+      const error = pricingError();
+      if (error) throw new Error(error);
+      payload.agreedPrice = parsePriceInput(agreedPrice);
+      payload.agreedTerms = agreedTerms.trim();
+    }
+
     return payload;
   };
 
@@ -648,11 +712,11 @@ export function ProjectBriefWizard({
         ? "هنوز آپلود فایل‌ها تمام نشده است. لطفاً صبر کنید."
         : "آپلود برخی فایل‌ها ناموفق بود. تا رفع خطا امکان ساخت پروژه وجود ندارد.";
       toast.error(msg);
-      setStepIndex(WIZARD_STEPS.findIndex((s) => s.id === "assets"));
+      setStepIndex(steps.findIndex((s) => s.id === "assets"));
       setStepError(msg);
       return;
     }
-    for (let i = 0; i < WIZARD_STEPS.length; i += 1) {
+    for (let i = 0; i < steps.length; i += 1) {
       const error = validateStep(i);
       if (error) {
         setStepError(error);
@@ -688,15 +752,18 @@ export function ProjectBriefWizard({
     >
       <div className="space-y-1">
         <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
-          فرم اطلاعات پروژه
+          {inheritCustomer ? "پروژه ویدیو جدید" : "فرم اطلاعات پروژه"}
         </h1>
-        <p className="hidden text-sm text-muted-foreground sm:block">
-          اطلاعات را مرحله‌به‌مرحله تکمیل کنید. فیلدهای دارای{" "}
-          <span className="text-destructive">*</span> الزامی هستند.
-        </p>
+        {!inheritCustomer && (
+          <p className="hidden text-sm text-muted-foreground sm:block">
+            اطلاعات را مرحله‌به‌مرحله تکمیل کنید. فیلدهای دارای{" "}
+            <span className="text-destructive">*</span> الزامی هستند.
+          </p>
+        )}
       </div>
 
       <StepIndicator
+        steps={steps}
         currentIndex={stepIndex}
         highestReached={highestReached}
         onStepSelect={goToStep}
@@ -726,6 +793,85 @@ export function ProjectBriefWizard({
             >
               {stepError}
             </div>
+          )}
+
+          {currentStep.id === "pricing" && (
+            <Card className="overflow-hidden border shadow-sm">
+              <div className="border-b border-border/60 bg-gradient-to-l from-brand-muted/80 via-card to-card px-4 py-4 sm:px-6">
+                <h3 className="text-base font-bold">جزئیات قرارداد این ویدیو</h3>
+              </div>
+              <CardContent className="space-y-5 p-4 sm:p-6">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="agreed-price" required>
+                      قیمت مجموعی پروژه
+                    </FieldLabel>
+                    <div className="relative">
+                      <Input
+                        id="agreed-price"
+                        dir="ltr"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={agreedPrice}
+                        onChange={(e) => {
+                          setAgreedPrice(e.target.value);
+                          setStepError(null);
+                        }}
+                        className="h-11 rounded-xl pe-14 text-right tabular-nums"
+                      />
+                      <span className="pointer-events-none absolute inset-y-0 end-0 flex items-center pe-3">
+                        <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-bold tracking-wide text-muted-foreground">
+                          AFN
+                        </span>
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">مبلغ کل قرارداد این ویدیو</p>
+                  </Field>
+                  <div className="rounded-2xl border border-border/80 bg-muted/20 p-4">
+                    <p className="text-[11px] font-semibold text-muted-foreground">
+                      باقی‌مانده پرداخت
+                    </p>
+                    <p
+                      dir="ltr"
+                      className="mt-2 text-right text-xl font-black tabular-nums [unicode-bidi:isolate]"
+                    >
+                      {formatCurrency(
+                        (() => {
+                          const n = parsePriceInput(agreedPrice);
+                          return n != null && Number.isFinite(n) && n > 0 ? n : 0;
+                        })(),
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <Field>
+                  <FieldLabel htmlFor="agreed-terms" required>
+                    <span className="inline-flex items-center gap-1.5">
+                      <FileText className="h-4 w-4 text-brand" />
+                      شرایط توافق‌شده
+                    </span>
+                  </FieldLabel>
+                  <Textarea
+                    id="agreed-terms"
+                    rows={5}
+                    className="min-h-[130px] resize-y rounded-2xl leading-7"
+                    placeholder="شرایط پرداخت، زمان‌بندی تحویل، تعهدات طرفین و سایر توافق‌های تجاری را وارد کنید..."
+                    value={agreedTerms}
+                    onChange={(e) => {
+                      setAgreedTerms(e.target.value);
+                      setStepError(null);
+                    }}
+                  />
+                </Field>
+
+                <div className="flex items-start gap-2 rounded-xl border border-brand/20 bg-brand-muted/40 px-3 py-2.5 text-[12px] leading-6 text-brand">
+                  <Lock className="mt-1 h-3.5 w-3.5 shrink-0" />
+                  پس از ساخت پروژه، قیمت و شرایط قفل می‌شوند و پرداخت‌ها از پرونده مشتری
+                  برای همین ویدیو ثبت می‌شوند.
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {currentStep.id === "contact" && (

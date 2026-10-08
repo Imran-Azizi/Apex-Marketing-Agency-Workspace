@@ -3,7 +3,11 @@ import { AppError } from '../../utils/response.js';
 import { writeAudit } from '../../middleware/audit.js';
 import { aiProvider } from '../../services/aiProvider.js';
 import { rebuildProjectContext, mapProjectStatusToCustomer, computeFinanceFields } from '../../services/projectContext.js';
-import { syncProjectFinanceFromPayments, batchOpportunityFinanceSnapshots } from '../crm/paymentFinance.js';
+import {
+  batchOpportunityFinanceSnapshots,
+  syncOpportunityFinance,
+  syncProjectFinanceFromPayments,
+} from '../crm/paymentFinance.js';
 import {
   syncCustomerWhatsappFromBrief,
 } from '../../utils/whatsappNormalize.js';
@@ -32,7 +36,16 @@ import {
   projectLeadScopeWhere,
   resolveProjectLead,
 } from '../../services/projectAccess.js';
-import { createNotificationOnce } from '../../services/notifications.js';
+import { createNotificationOnce, notifyManagersOnce } from '../../services/notifications.js';
+import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
+import {
+  customerListScopeCondition,
+  customerSearchCondition,
+} from '../crm/visibility.js';
+import {
+  contractProgressPayload,
+  summarizeContractVideos,
+} from './contractVideoStats.js';
 import { z } from 'zod';
 import { storage } from '../../services/storage.js';
 import { serializePortalAsset } from '../portal/helpers.js';
@@ -71,6 +84,7 @@ const createProjectSchema = z.object({
   goal: z.string().trim().max(400).optional().nullable(),
   cta: z.string().trim().max(200).optional().nullable(),
   agreedPrice: z.coerce.number().nonnegative().optional().nullable(),
+  agreedTerms: z.string().trim().max(4000).optional().nullable(),
   personName: z.string().trim().min(1).max(200).optional().nullable(),
   jobTitle: z.string().trim().min(1).max(200).optional().nullable(),
   companyName: z.string().trim().min(1).max(200).optional().nullable(),
@@ -87,6 +101,44 @@ const createProjectSchema = z.object({
   ),
   clientAssetIds: z.array(z.string()).optional(),
   idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
+  parentProjectId: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+    z.string().trim().min(1).optional().nullable(),
+  ),
+});
+
+const optionalEmail = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().email().optional().nullable(),
+);
+
+const optionalWebsite = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+  z.string().trim().max(500).optional().nullable(),
+);
+
+const createContractSchema = z.object({
+  crmCustomerId: z.string().min(1),
+  idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
+  personName: z.string().trim().min(1).max(200),
+  jobTitle: z.string().trim().min(1).max(200),
+  companyName: z.string().trim().min(1).max(200),
+  phone: z.string().trim().min(5).max(40),
+  whatsapp: z.string().trim().min(5).max(40),
+  address: z.string().trim().min(1).max(500),
+  email: optionalEmail,
+  website: optionalWebsite,
+});
+
+const updateContractSchema = z.object({
+  personName: z.string().trim().min(1).max(200).optional(),
+  jobTitle: z.string().trim().min(1).max(200).optional(),
+  companyName: z.string().trim().min(1).max(200).optional(),
+  phone: z.string().trim().min(5).max(40).optional(),
+  whatsapp: z.string().trim().min(5).max(40).optional(),
+  address: z.string().trim().min(1).max(500).optional(),
+  email: optionalEmail,
+  website: optionalWebsite,
 });
 
 const PROJECT_CLIENT_ASSET_KINDS = new Set([
@@ -109,6 +161,63 @@ const attachProjectAssetSchema = z.object({
   sizeBytes: z.number().int().nonnegative().optional().nullable(),
   meta: z.record(z.string(), z.unknown()).optional().nullable(),
 });
+
+function trimText(value) {
+  return String(value || '').trim();
+}
+
+function assertVideoWorkflowProject(project) {
+  if (project?.kind === 'CONTRACT') {
+    throw new AppError(
+      'این یک قرارداد چندویدیویی است. این عملیات را روی پروژه ویدیو انجام دهید.',
+      400,
+      'CONTRACT_CONTAINER',
+    );
+  }
+}
+
+async function assertLoadedVideoProject(projectId) {
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, deletedAt: null },
+    select: { id: true, kind: true },
+  });
+  if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+  assertVideoWorkflowProject(project);
+  return project;
+}
+
+function customerSnapshotFromParent(parent, customer) {
+  const brief = parent?.brief && typeof parent.brief === 'object' ? parent.brief : {};
+  return {
+    personName: trimText(brief.personName) || customer.personName,
+    jobTitle: trimText(brief.jobTitle) || customer.jobTitle || '',
+    companyName: trimText(brief.companyName) || customer.companyName || '',
+    phone: trimText(brief.phone) || customer.phone || customer.whatsappRaw || '',
+    whatsapp:
+      trimText(brief.whatsapp) ||
+      customer.whatsappRaw ||
+      customer.normalizedWhatsapp ||
+      '',
+    address: trimText(brief.address) || customer.address || '',
+    email: trimText(brief.email) || customer.email || undefined,
+    website: trimText(brief.website) || undefined,
+  };
+}
+
+function contractTitleFor({ companyName, personName }) {
+  const who = trimText(companyName) || trimText(personName) || 'مشتری';
+  return `${who} — قرارداد ماهانه`;
+}
+
+function withContractPresentation(project, videoStats) {
+  if (!project || project.kind !== 'CONTRACT') return project;
+  const stats = videoStats || summarizeContractVideos([]);
+  return {
+    ...project,
+    videoStats: stats,
+    progress: contractProgressPayload(stats),
+  };
+}
 
 function stripFinanceForRole(project, roleCode) {
   if (['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(roleCode)) {
@@ -201,9 +310,24 @@ function buildListWhere(auth, query = {}) {
   const customerId = String(query.customerId || '').trim();
   const editorId = String(query.editorId || '').trim();
   const deliveryStatus = String(query.deliveryStatus || '').trim();
+  const wantsTopLevel = query.topLevel === '1' || query.topLevel === 'true';
+  const assignmentScoped =
+    shouldScopeToProjectLead(auth) ||
+    auth.roleCode === 'EDITOR' ||
+    auth.roleCode === 'NARRATOR';
 
   const where = { deletedAt: null };
   const and = [];
+
+  // Managers see contracts and single videos. Child videos live inside the contract.
+  // Assignment-scoped staff still see the videos they are responsible for.
+  // Editor / delivery filters switch to the matching video rows.
+  const hideChildRows =
+    wantsTopLevel && !assignmentScoped && !editorId && !deliveryStatus && !status;
+  if (hideChildRows) and.push({ kind: { not: 'CHILD' } });
+  if (wantsTopLevel && !assignmentScoped && !hideChildRows) {
+    and.push({ kind: { not: 'CONTRACT' } });
+  }
 
   if (status) where.status = status;
   if (customerId) where.crmCustomerId = customerId;
@@ -213,15 +337,28 @@ function buildListWhere(auth, query = {}) {
   if (createdAt) where.createdAt = createdAt;
 
   if (q) {
-    and.push({
-      OR: [
-        { id: { equals: q } },
-        { code: { contains: q, mode: 'insensitive' } },
-        { title: { contains: q, mode: 'insensitive' } },
-        { crmCustomer: { personName: { contains: q, mode: 'insensitive' } } },
-        { crmCustomer: { companyName: { contains: q, mode: 'insensitive' } } },
-      ],
-    });
+    const textMatch = [
+      { id: { equals: q } },
+      { code: { contains: q, mode: 'insensitive' } },
+      { title: { contains: q, mode: 'insensitive' } },
+      { crmCustomer: { personName: { contains: q, mode: 'insensitive' } } },
+      { crmCustomer: { companyName: { contains: q, mode: 'insensitive' } } },
+    ];
+    if (hideChildRows) {
+      textMatch.push({
+        kind: 'CONTRACT',
+        childProjects: {
+          some: {
+            deletedAt: null,
+            OR: [
+              { code: { contains: q, mode: 'insensitive' } },
+              { title: { contains: q, mode: 'insensitive' } },
+            ],
+          },
+        },
+      });
+    }
+    and.push({ OR: textMatch });
   }
 
   if (editorId) {
@@ -261,6 +398,49 @@ function withProjectLead(project) {
   };
 }
 
+async function presentProjectDetail(result, auth) {
+  if (!result) return result;
+
+  if (result.kind === 'CHILD' && result.parentProjectId) {
+    result = {
+      ...result,
+      parentProject: await prisma.project.findFirst({
+        where: { id: result.parentProjectId, deletedAt: null },
+        select: { id: true, code: true, title: true, kind: true },
+      }),
+    };
+  }
+
+  if (result.kind !== 'CONTRACT') {
+    return attachProjectProgress(result, 'internal');
+  }
+
+  const children = await prisma.project.findMany({
+    where: { parentProjectId: result.id, deletedAt: null },
+    orderBy: { createdAt: 'asc' },
+    include: {
+      assignments: {
+        where: { isActive: true },
+        include: {
+          teamProfile: { select: { displayName: true, userId: true } },
+          user: { select: { id: true, fullName: true, profileImage: true } },
+        },
+      },
+      finance: {
+        select: { agreedPrice: true, finalProjectPrice: true, received: true },
+      },
+    },
+  });
+  const videos = await attachProjectProgressMany(
+    children.map((child) => withProjectLead(stripFinanceForRole(child, auth.roleCode))),
+    'internal',
+  );
+  return withContractPresentation(
+    { ...result, videos },
+    summarizeContractVideos(videos),
+  );
+}
+
 export const projectService = {
   async list(auth, query = {}) {
     assertCanListProjects(auth);
@@ -275,6 +455,7 @@ export const projectService = {
         where,
         include: {
           crmCustomer: { select: { id: true, personName: true, companyName: true } },
+          parentProject: { select: { id: true, code: true, title: true } },
           assignments: {
             where: { isActive: true },
             include: {
@@ -293,9 +474,29 @@ export const projectService = {
       prisma.project.count({ where }),
     ]);
 
-    const items = await attachProjectProgressMany(
+    const contractIds = rows.filter((p) => p.kind === 'CONTRACT').map((p) => p.id);
+    const statsByParent = new Map();
+    if (contractIds.length) {
+      const children = await prisma.project.findMany({
+        where: { parentProjectId: { in: contractIds }, deletedAt: null },
+        select: { parentProjectId: true, status: true },
+      });
+      const grouped = new Map();
+      for (const child of children) {
+        const bucket = grouped.get(child.parentProjectId) || [];
+        bucket.push(child);
+        grouped.set(child.parentProjectId, bucket);
+      }
+      for (const id of contractIds) {
+        statsByParent.set(id, summarizeContractVideos(grouped.get(id) || []));
+      }
+    }
+
+    const items = (await attachProjectProgressMany(
       rows.map((p) => withProjectLead(stripFinanceForRole(p, auth.roleCode))),
       'internal',
+    )).map((project) =>
+      withContractPresentation(project, statsByParent.get(project.id)),
     );
 
     const totalPages = Math.max(1, Math.ceil(total / safePageSize));
@@ -473,21 +674,24 @@ export const projectService = {
       };
     }
 
-    return attachProjectProgress(result, 'internal');
+    return presentProjectDetail(result, auth);
   },
 
   async generateContent(id, auth, req) {
+    await assertLoadedVideoProject(id);
     const { aiService } = await import('../ai/service.js');
     const result = await aiService.generateContent(id, auth, req);
     return result.version;
   },
 
   async approveContentForClient(projectId, versionId, auth, req) {
+    await assertLoadedVideoProject(projectId);
     const { aiService } = await import('../ai/service.js');
     return aiService.approveVersion(projectId, versionId, auth, req);
   },
 
   async enableExtraRevision(projectId, { scope }, auth, req) {
+    await assertLoadedVideoProject(projectId);
     const data = scope === 'VIDEO' ? { extraVideoRevision: true } : { extraContentRevision: true };
     await prisma.project.update({ where: { id: projectId }, data });
     await writeAudit({
@@ -502,6 +706,7 @@ export const projectService = {
   },
 
   async acceptVoice(projectId, auth, req) {
+    await assertLoadedVideoProject(projectId);
     await prisma.$transaction(async (tx) => {
       await tx.approval.create({
         data: {
@@ -552,6 +757,7 @@ export const projectService = {
   },
 
   async returnVoice(projectId, { comment }, auth, req) {
+    await assertLoadedVideoProject(projectId);
     await prisma.approval.create({
       data: {
         projectId,
@@ -567,16 +773,19 @@ export const projectService = {
   },
 
   async submitProduction(projectId, body, auth, req) {
+    await assertLoadedVideoProject(projectId);
     const { productionService } = await import('../production/service.js');
     return productionService.submitProduction(projectId, body, auth, req);
   },
 
   async runQcAndApproveFinal(projectId, body, auth, req) {
+    await assertLoadedVideoProject(projectId);
     const { productionService } = await import('../production/service.js');
     return productionService.managerReview(projectId, body, auth, req);
   },
 
   async uploadVoice(projectId, { storageKey, name }, auth, req) {
+    await assertLoadedVideoProject(projectId);
     const project = await this.get(projectId, auth);
     if (!canAccessProject(project, auth) && auth.roleCode !== 'MANAGER' && auth.roleCode !== 'ADMIN') {
       throw new AppError('FORBIDDEN', 403, 'FORBIDDEN');
@@ -626,6 +835,19 @@ export const projectService = {
       },
     });
     if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+
+    if (project.kind === 'CONTRACT') {
+      const childCount = await prisma.project.count({
+        where: { parentProjectId: id, deletedAt: null },
+      });
+      if (childCount > 0) {
+        throw new AppError(
+          'این قرارداد ویدیو دارد. ابتدا ویدیوها را حذف کنید، سپس قرارداد را حذف کنید.',
+          400,
+          'CONTRACT_HAS_VIDEOS',
+        );
+      }
+    }
 
     const [portfolioItems, expenses] = await Promise.all([
       prisma.portfolioItem.findMany({
@@ -783,8 +1005,8 @@ export const projectService = {
     const now = new Date();
     const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
     const projectScope = shouldScopeToProjectLead(auth)
-      ? { deletedAt: null, ...projectLeadScopeWhere(auth.userId) }
-      : { deletedAt: null };
+      ? { deletedAt: null, kind: { not: 'CONTRACT' }, ...projectLeadScopeWhere(auth.userId) }
+      : { deletedAt: null, kind: { not: 'CONTRACT' } };
     const [counts, leadsToday, followUps, createdRows] = await Promise.all([
       prisma.project.groupBy({
         by: ['status'],
@@ -821,6 +1043,7 @@ export const projectService = {
                COUNT(*)::int AS count
         FROM projects
         WHERE "deletedAt" IS NULL
+          AND "kind"::text <> 'CONTRACT'
           AND "createdAt" >= ${sixMonthsAgo}
         GROUP BY 1
       `,
@@ -885,23 +1108,20 @@ export const projectService = {
    */
   async createOptions(auth, query = {}) {
     assertCanListProjects(auth);
-    const q = String(query.q || '').trim();
-    const customerWhere = { deletedAt: null };
-    if (q) {
-      customerWhere.OR = [
-        { personName: { contains: q, mode: 'insensitive' } },
-        { companyName: { contains: q, mode: 'insensitive' } },
-        { phone: { contains: q, mode: 'insensitive' } },
-        { customerCode: { contains: q, mode: 'insensitive' } },
-        { whatsappRaw: { contains: q, mode: 'insensitive' } },
-      ];
-    }
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 50));
+    // Same list as مدیریت مشتری: transferred from CRM و فروش and not yet delivered.
+    const and = [customerListScopeCondition('management')];
+    const searchCondition = customerSearchCondition(query.q);
+    if (searchCondition) and.push(searchCondition);
+    const customerWhere = { deletedAt: null, AND: and };
 
-    const [customers, services, formats] = await Promise.all([
+    const [customers, customerTotal, services, formats] = await Promise.all([
       prisma.crmCustomer.findMany({
         where: customerWhere,
-        orderBy: [{ updatedAt: 'desc' }, { personName: 'asc' }],
-        take: 100,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
         select: {
           id: true,
           customerCode: true,
@@ -917,6 +1137,7 @@ export const projectService = {
           pipelineStage: true,
         },
       }),
+      prisma.crmCustomer.count({ where: customerWhere }),
       prisma.service.findMany({
         where: { deletedAt: null, isPublished: true },
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -928,7 +1149,15 @@ export const projectService = {
       }),
     ]);
 
-    return { customers, services, formats };
+    return {
+      customers,
+      customerTotal,
+      page,
+      pageSize,
+      hasMore: page * pageSize < customerTotal,
+      services,
+      formats,
+    };
   },
 
   /**
@@ -943,6 +1172,25 @@ export const projectService = {
       throw new AppError('اطلاعات پروژه ناقص یا نامعتبر است', 400, 'VALIDATION');
     }
     const input = parsed.data;
+    let parentProject = null;
+    if (input.parentProjectId) {
+      parentProject = await assertProjectAccess(input.parentProjectId, auth);
+      if (parentProject.kind !== 'CONTRACT') {
+        throw new AppError(
+          'ویدیو فقط می‌تواند داخل یک قرارداد چندویدیویی ساخته شود',
+          400,
+          'VALIDATION',
+        );
+      }
+      input.crmCustomerId = parentProject.crmCustomerId;
+      input.opportunityId = null;
+      if (!(Number(input.agreedPrice) > 0)) {
+        throw new AppError('قیمت مجموعی پروژه الزامی است', 400, 'VALIDATION');
+      }
+      if (!trimText(input.agreedTerms)) {
+        throw new AppError('شرایط توافق‌شده الزامی است', 400, 'VALIDATION');
+      }
+    }
     const title = input.title.trim();
     const crmCustomerId = input.crmCustomerId;
     const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
@@ -1006,6 +1254,11 @@ export const projectService = {
 
       try {
         const result = await prisma.$transaction(async (tx) => {
+          const inherited = parentProject
+            ? customerSnapshotFromParent(parentProject, customer)
+            : null;
+          if (inherited) Object.assign(input, inherited);
+
           const customerWithWhatsapp = await syncCustomerWhatsappFromBrief(
             tx,
             customer,
@@ -1019,7 +1272,7 @@ export const projectService = {
               opportunityId: input.opportunityId || null,
               title,
               pipelineStage: priorProjects > 0 ? 'REPEAT_CUSTOMER' : 'ORDER_CONFIRMED',
-              alwaysCreateFresh: false,
+              alwaysCreateFresh: Boolean(parentProject),
             },
           );
 
@@ -1049,7 +1302,7 @@ export const projectService = {
             !liveOpportunity.agreedPrice &&
             !liveOpportunity.proposedPrice &&
             !liveOpportunity.contractLocked;
-          if (isFreshBlank && agreed <= 0) {
+          if (!parentProject && isFreshBlank && agreed <= 0) {
             throw new AppError(
               'مبلغ توافق‌شده برای پروژه الزامی است',
               400,
@@ -1068,10 +1321,30 @@ export const projectService = {
             service,
             agreedPrice: agreed,
             financeSnap,
-            timelineBody: 'پروژه توسط مدیر برای مشتری موجود ایجاد شد',
+            timelineBody: parentProject
+              ? 'ویدیوی قرارداد ماهانه ایجاد شد'
+              : 'پروژه توسط مدیر برای مشتری موجود ایجاد شد',
             notifyPortal: Boolean(customerWithWhatsapp.portalAccount?.id),
             createIdempotencyKey: idempotencyKey,
+            kind: parentProject ? 'CHILD' : 'SINGLE',
+            parentProjectId: parentProject ? parentProject.id : null,
           });
+
+          if (parentProject) {
+            // Same lock as saving «جزئیات قرارداد» in CRM, so payments can be recorded.
+            await tx.opportunity.update({
+              where: { id: liveOpportunity.id },
+              data: {
+                agreedPrice: agreed,
+                proposedPrice: liveOpportunity.proposedPrice ?? agreed,
+                agreedTerms: trimText(input.agreedTerms),
+                contractLocked: true,
+                contractLockedAt: new Date(),
+                contractLockedById: auth.userId,
+              },
+            });
+            await syncOpportunityFinance(tx, liveOpportunity.id, { persist: true });
+          }
           return { ...created, replayed: false };
         });
 
@@ -1088,6 +1361,8 @@ export const projectService = {
               opportunityId: result.opportunityId,
               agreedPrice: result.agreedPrice,
               source: 'INTERNAL',
+              kind: parentProject ? 'CHILD' : 'SINGLE',
+              parentProjectId: parentProject?.id || null,
             },
             req,
           });
@@ -1130,8 +1405,263 @@ export const projectService = {
     });
   },
 
+  /**
+   * Monthly / multi-video parent. Stores the customer once.
+   * Child videos are created later through the normal project workflow.
+   */
+  async createContract(body, auth, req) {
+    assertCanListProjects(auth);
+    const parsed = createContractSchema.safeParse(body || {});
+    if (!parsed.success) {
+      throw new AppError(
+        parsed.error.issues?.[0]?.message || 'اطلاعات قرارداد ناقص یا نامعتبر است',
+        400,
+        'VALIDATION',
+      );
+    }
+    const input = parsed.data;
+    const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
+
+    const replay = async () =>
+      findProjectByCreateKey(prisma, idempotencyKey, input.crmCustomerId);
+
+    const existing = await replay();
+    if (existing) return this.get(existing.id, auth);
+
+    return withProjectCreateLock(idempotencyKey, async () => {
+      const lockedExisting = await replay();
+      if (lockedExisting) return this.get(lockedExisting.id, auth);
+
+      const customer = await prisma.crmCustomer.findFirst({
+        where: { id: input.crmCustomerId, deletedAt: null },
+        include: { portalAccount: true },
+      });
+      if (!customer) throw new AppError('مشتری یافت نشد', 404, 'NOT_FOUND');
+
+      const manager =
+        (auth.roleCode === 'MANAGER' || auth.roleCode === 'ADMIN'
+          ? await prisma.user.findFirst({
+              where: { id: auth.userId, isActive: true, deletedAt: null },
+            })
+          : null) ||
+        (await prisma.user.findFirst({
+          where: { role: { code: 'MANAGER' }, isActive: true, deletedAt: null },
+        }));
+      if (!manager) {
+        throw new AppError('مدیر سیستم تعریف نشده', 500, 'NO_MANAGER');
+      }
+
+      const brief = {
+        personName: input.personName,
+        jobTitle: input.jobTitle,
+        companyName: input.companyName,
+        phone: input.phone,
+        whatsapp: input.whatsapp,
+        address: input.address,
+        email: input.email || undefined,
+        website: input.website || undefined,
+        createdBy: 'INTERNAL',
+        createdByUserId: auth.userId,
+      };
+      for (const key of Object.keys(brief)) {
+        if (brief[key] === undefined) delete brief[key];
+      }
+
+      try {
+        const created = await prisma.$transaction(async (tx) => {
+          await syncCustomerWhatsappFromBrief(tx, customer, input.whatsapp);
+          const year = new Date().getFullYear();
+          const count = await tx.project.count();
+          const code = `APX-${year}-${String(count + 1).padStart(4, '0')}`;
+          const project = await tx.project.create({
+            data: {
+              code,
+              title: contractTitleFor(input),
+              status: 'NEW_MANAGER_REVIEW',
+              customerFacingStatus: 'INFO_RECEIVED',
+              crmCustomerId: customer.id,
+              managerId: manager.id,
+              kind: 'CONTRACT',
+              brief,
+              platforms: [],
+            },
+          });
+
+          if (idempotencyKey) {
+            await tx.$executeRaw`
+              UPDATE "projects"
+              SET "createIdempotencyKey" = ${idempotencyKey}
+              WHERE id = ${project.id}
+            `;
+          }
+
+          await tx.projectAssignment.create({
+            data: {
+              projectId: project.id,
+              role: 'MANAGER',
+              userId: manager.id,
+            },
+          });
+
+          await tx.projectTimelineEvent.create({
+            data: {
+              projectId: project.id,
+              type: 'CREATED',
+              title: 'قرارداد چندویدیویی ایجاد شد',
+              body: 'اطلاعات مشتری روی قرارداد ذخیره شد. ویدیوها جداگانه ساخته می‌شوند.',
+              actorId: auth.userId,
+            },
+          });
+
+          await rebuildProjectContext(project.id, tx);
+
+          const customerName =
+            getCustomerPersonName({
+              personName: input.personName,
+              companyName: input.companyName,
+            }) ||
+            getCustomerPersonName(customer) ||
+            'مشتری';
+
+          await notifyManagersOnce(
+            {
+              eventKey: `contract.created:${project.id}`,
+              title: 'قرارداد چندویدیویی ایجاد شد',
+              body: `${customerName} — ${project.title} (${project.code})`,
+              link: `/projects/${project.id}`,
+              meta: {
+                type: 'CONTRACT_CREATED',
+                projectId: project.id,
+                projectCode: project.code,
+                projectName: project.title,
+              },
+            },
+            tx,
+          );
+
+          return project;
+        });
+
+        if (auth.roleCode === 'PROJECT_MANAGER') {
+          const creatorProfile = await prisma.teamProfile.findFirst({
+            where: {
+              userId: auth.userId,
+              deletedAt: null,
+              status: { not: 'INACTIVE' },
+            },
+            select: { id: true },
+          });
+          await prisma.projectAssignment.create({
+            data: {
+              projectId: created.id,
+              role: 'PROJECT_LEAD',
+              userId: auth.userId,
+              teamProfileId: creatorProfile?.id || null,
+              assignedById: auth.userId,
+              notes: 'اختصاص خودکار هنگام ایجاد قرارداد',
+              isActive: true,
+            },
+          });
+        }
+
+        await writeAudit({
+          userId: auth.userId,
+          action: 'PROJECT_CREATE',
+          entityType: 'Project',
+          entityId: created.id,
+          after: {
+            code: created.code,
+            title: created.title,
+            kind: 'CONTRACT',
+            crmCustomerId: customer.id,
+          },
+          req,
+        });
+
+        return this.get(created.id, auth);
+      } catch (err) {
+        if (isIdempotencyUniqueConflict(err)) {
+          const replayed = await replay();
+          if (replayed) return this.get(replayed.id, auth);
+        }
+        throw err;
+      }
+    });
+  },
+
+  async updateContract(id, body, auth, req) {
+    const project = await assertProjectAccess(id, auth);
+    if (project.kind !== 'CONTRACT') {
+      throw new AppError('این پروژه یک قرارداد چندویدیویی نیست', 400, 'VALIDATION');
+    }
+    const parsed = updateContractSchema.safeParse(body || {});
+    if (!parsed.success) {
+      throw new AppError(
+        parsed.error.issues?.[0]?.message || 'اطلاعات قرارداد نامعتبر است',
+        400,
+        'VALIDATION',
+      );
+    }
+    const input = parsed.data;
+    const brief = {
+      ...(project.brief && typeof project.brief === 'object' ? project.brief : {}),
+    };
+    for (const key of [
+      'personName',
+      'jobTitle',
+      'companyName',
+      'phone',
+      'whatsapp',
+      'address',
+      'email',
+      'website',
+    ]) {
+      if (input[key] !== undefined) brief[key] = input[key] || undefined;
+    }
+    for (const key of Object.keys(brief)) {
+      if (brief[key] === undefined) delete brief[key];
+    }
+
+    const data = { brief };
+    if (input.companyName !== undefined || input.personName !== undefined) {
+      data.title = contractTitleFor(brief);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (input.whatsapp) {
+        const customer = await tx.crmCustomer.findFirst({
+          where: { id: project.crmCustomerId, deletedAt: null },
+        });
+        if (customer) await syncCustomerWhatsappFromBrief(tx, customer, input.whatsapp);
+      }
+      await tx.project.update({ where: { id: project.id }, data });
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId: project.id,
+          type: 'UPDATED',
+          title: 'اطلاعات قرارداد به‌روزرسانی شد',
+          actorId: auth.userId,
+        },
+      });
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_UPDATE',
+      entityType: 'Project',
+      entityId: project.id,
+      after: {
+        title: data.title || project.title,
+      },
+      req,
+    });
+
+    return this.get(project.id, auth);
+  },
+
   async addClientAsset(projectId, body, auth, req) {
     const project = await assertProjectAccess(projectId, auth);
+    assertVideoWorkflowProject(project);
     const parsed = attachProjectAssetSchema.parse(body);
     const kind = parsed.kind.toUpperCase();
     if (!PROJECT_CLIENT_ASSET_KINDS.has(kind)) {
@@ -1179,6 +1709,7 @@ export const projectService = {
 
   async removeClientAsset(projectId, assetId, auth, req) {
     const project = await assertProjectAccess(projectId, auth);
+    assertVideoWorkflowProject(project);
     const ref = await prisma.assetReference.findFirst({
       where: { projectId: project.id, clientAssetId: assetId },
       include: { clientAsset: true },

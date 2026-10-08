@@ -7,7 +7,11 @@ import { formatFaDateTime, formatFaTime } from "../../utils/datetime.js";
 import { storedAssetUrl } from "../../services/storage/asset-url.js";
 
 export function customerProjectWhere(auth) {
-  return { crmCustomerId: auth.customerId, deletedAt: null };
+  return {
+    crmCustomerId: auth.customerId,
+    deletedAt: null,
+    kind: { not: "CONTRACT" },
+  };
 }
 
 /**

@@ -144,6 +144,8 @@ export async function createProjectGraph(tx, {
   timelineBody = 'پروژه ایجاد شد',
   notifyPortal = false,
   createIdempotencyKey = null,
+  kind = 'SINGLE',
+  parentProjectId = null,
 }) {
   const crmCustomerId = customer.id;
   const year = new Date().getFullYear();
@@ -240,6 +242,8 @@ export async function createProjectGraph(tx, {
       brief: briefPayload,
       contentRevisionMax: revisionCount,
       videoRevisionMax: revisionCount,
+      kind: kind === 'CHILD' ? 'CHILD' : 'SINGLE',
+      parentProjectId: kind === 'CHILD' ? parentProjectId : null,
     },
   });
 

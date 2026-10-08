@@ -392,9 +392,17 @@ export async function forceCompleteProject(
       crmCustomerId: true,
       title: true,
       code: true,
+      kind: true,
     },
   });
   if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+  if (project.kind === 'CONTRACT') {
+    throw new AppError(
+      'قرارداد چندویدیویی خودش تکمیل نمی‌شود. هر ویدیو را جداگانه تکمیل کنید.',
+      400,
+      'CONTRACT_CONTAINER',
+    );
+  }
 
   if (project.status === 'COMPLETED' && project.completedAt) {
     return {
