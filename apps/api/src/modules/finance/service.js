@@ -16,6 +16,7 @@ import {
   derivePnlPerformance,
   emptyMonthlyActuals,
   employeeNetPayable,
+  fixedSalaryForRange,
   gregorianToAfghan,
   isAfghanYear,
   isCurrentPnlMonth,
@@ -206,7 +207,7 @@ function boundsForPnlTarget(requestYear, requestMonth, target) {
 
 async function computeMonthlyPnlActuals(year, month) {
   const { from, to } = pnlMonthBounds(year, month);
-  const kpis = await computeFinanceKpis({ from, to });
+  const kpis = await computeFinanceKpis({ from, to, maxSalaryMonths: 1 });
   return {
     received: kpis.received,
     receivable: kpis.receivable,
@@ -508,8 +509,13 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
       paidTotal: 0,
       openAdvances,
     });
+    // All salary payments are cumulative, so weigh them against every month owed so far.
+    const fixedOwed = fixedSalaryForRange({
+      monthlyAmount: fixedMonthly,
+      salaryStart: p.compensationProfile?.createdAt || p.createdAt,
+    });
     const fixedNet = employeeNetPayable({
-      grossPayable: fixedMonthly,
+      grossPayable: fixedOwed,
       paidTotal: salaryPaidTotal,
       openAdvances,
     });
@@ -589,7 +595,7 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
       projectHistory,
       contributingProjects,
       grossPayable:
-        compensationType === "FIXED" ? fixedMonthly : projectShareGross,
+        compensationType === "FIXED" ? fixedOwed : projectShareGross,
       paidTotal: salaryPaidTotal,
       openAdvances,
       netPayable: compensationType === "FIXED" ? fixedNet : projectShareNet,

@@ -52,7 +52,12 @@ import {
   buildCategoryWhere,
   isClosedStage,
 } from "./pipeline.js";
-import { serializeListItem, withCrmView } from "./serialize.js";
+import {
+  CONTRACT_SUMMARY_SELECT,
+  serializeContractSummary,
+  serializeListItem,
+  withCrmView,
+} from "./serialize.js";
 import {
   canRevealPortalPassword,
   serializePortalCredentials,
@@ -423,6 +428,12 @@ export const crmService = {
             take: 1,
             select: { agreedPrice: true, pipelineStage: true },
           },
+          projects: {
+            where: { deletedAt: null, kind: "CONTRACT" },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            select: CONTRACT_SUMMARY_SELECT,
+          },
           payments: {
             where: {
               verification: "VERIFIED",
@@ -564,7 +575,7 @@ export const crmService = {
     const recorderIds = [
       ...new Set(customer.payments.map((p) => p.recordedById).filter(Boolean)),
     ];
-    const [recorders, financeByOpp, activities, verifiedProbe] = await Promise.all([
+    const [recorders, financeByOpp, activities, verifiedProbe, contractProjects] = await Promise.all([
       recorderIds.length
         ? prisma.user.findMany({
             where: { id: { in: recorderIds } },
@@ -581,8 +592,19 @@ export const crmService = {
         },
         select: { id: true },
       }),
+      prisma.project.findMany({
+        where: { crmCustomerId: customer.id, deletedAt: null, kind: "CONTRACT" },
+        orderBy: { createdAt: "desc" },
+        select: CONTRACT_SUMMARY_SELECT,
+      }),
     ]);
     const recorderById = Object.fromEntries(recorders.map((u) => [u.id, u]));
+    const contracts = contractProjects.map(serializeContractSummary);
+    const contractByOpportunityId = new Map(
+      contracts
+        .filter((contract) => contract.opportunityId)
+        .map((contract) => [contract.opportunityId, contract]),
+    );
 
     const payments = customer.payments.map((p) => ({
       ...p,
@@ -597,6 +619,7 @@ export const crmService = {
         ...opp,
         advancePayment: finance.totalPaid,
         finance,
+        contract: contractByOpportunityId.get(opp.id) || null,
       };
     });
 
@@ -625,6 +648,7 @@ export const crmService = {
         portalAccount,
         portalCredentials,
         opportunities,
+        contracts,
         payments,
         activities,
       },

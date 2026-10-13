@@ -19,6 +19,24 @@ export interface CrmCustomer {
   salesOwner: { id: string; fullName: string } | null;
   pipelineStage?: string;
   pipelineStageLabel?: string;
+  activeContract?: CrmContractSummary | null;
+}
+
+/** Multi-video contract scope captured in the contract creation wizard. */
+export interface CrmContractSummary {
+  projectId: string;
+  code: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  videoCount: number | null;
+  posterCount: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  opportunityId: string | null;
+  agreedPrice: number | null;
+  agreedTerms: string | null;
+  contractLocked: boolean;
 }
 
 export interface CrmListResponse {

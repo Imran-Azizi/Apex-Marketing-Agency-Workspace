@@ -500,6 +500,7 @@ export default function NewProjectPage() {
                   queryClient.invalidateQueries({ queryKey: ["crm-customers"] }),
                   queryClient.invalidateQueries({ queryKey: ["crm-customer"] }),
                   queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+                  invalidateFinanceQueries(queryClient),
                 ]);
                 router.push(`/projects/${project.id}`);
               }}

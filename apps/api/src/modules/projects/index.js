@@ -4,9 +4,18 @@ import { requireInternal, requirePermission } from "../../middleware/rbac.js";
 import { requireCsrf } from "../../middleware/csrf.js";
 import { ok, created } from "../../utils/response.js";
 import { projectService } from "./service.js";
+import { contractWorkspaceService } from "./contractWorkspace.js";
 
 const router = Router();
 router.use(requireAuth, requireInternal);
+
+const handle = (fn) => async (req, res, next) => {
+  try {
+    await fn(req, res);
+  } catch (e) {
+    next(e);
+  }
+};
 
 router.get(
   "/dashboard-summary",
@@ -104,6 +113,117 @@ router.patch(
       next(e);
     }
   },
+);
+
+// ─── Contract workspace: company info, assets, content calendar ───
+
+router.get(
+  "/:id/workspace",
+  requirePermission("projects.view"),
+  handle(async (req, res) => {
+    ok(res, await contractWorkspaceService.get(req.params.id, req.auth));
+  }),
+);
+
+router.put(
+  "/:id/workspace/company",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    ok(res, await contractWorkspaceService.saveCompany(req.params.id, req.body, req.auth, req));
+  }),
+);
+
+router.post(
+  "/:id/workspace/assets",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    created(res, await contractWorkspaceService.createAsset(req.params.id, req.body, req.auth, req));
+  }),
+);
+
+router.patch(
+  "/:id/workspace/assets/:assetId",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    ok(
+      res,
+      await contractWorkspaceService.updateAsset(
+        req.params.id,
+        req.params.assetId,
+        req.body,
+        req.auth,
+        req,
+      ),
+    );
+  }),
+);
+
+router.delete(
+  "/:id/workspace/assets/:assetId",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    ok(
+      res,
+      await contractWorkspaceService.deleteAsset(req.params.id, req.params.assetId, req.auth, req),
+    );
+  }),
+);
+
+router.post(
+  "/:id/workspace/calendars",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    created(res, await contractWorkspaceService.createCalendar(req.params.id, req.body, req.auth, req));
+  }),
+);
+
+router.put(
+  "/:id/workspace/calendars/:calendarId",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    ok(
+      res,
+      await contractWorkspaceService.updateCalendar(
+        req.params.id,
+        req.params.calendarId,
+        req.body,
+        req.auth,
+        req,
+      ),
+    );
+  }),
+);
+
+router.delete(
+  "/:id/workspace/calendars/:calendarId",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    ok(
+      res,
+      await contractWorkspaceService.deleteCalendar(
+        req.params.id,
+        req.params.calendarId,
+        req.auth,
+        req,
+      ),
+    );
+  }),
+);
+
+router.post(
+  "/:id/workspace/share",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  handle(async (req, res) => {
+    ok(res, await contractWorkspaceService.share(req.params.id, req.body, req.auth, req));
+  }),
 );
 
 router.post(

@@ -47,7 +47,7 @@ export function projectProfit(revenue, costs) {
   return roundMoney(Number(revenue || 0) - Number(costs || 0));
 }
 
-/** Net company profit = project profit − company expenses − fixed monthly salaries */
+/** Net company profit = project profit − company expenses − fixed salaries for the period */
 export function netCompanyProfit(
   projectProfitTotal,
   companyExpenses,
@@ -73,6 +73,44 @@ export function resolveCompensationType(profile) {
 /** Outstanding / receivable for one contract */
 export function remainingBalance(projectTotal, verifiedPaid) {
   return roundMoney(Math.max(0, Number(projectTotal || 0) - Number(verifiedPaid || 0)));
+}
+
+function afghanMonthIndex(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return null;
+  const afghan = localTodayAfghan(d);
+  return afghan ? afghan.jy * 12 + afghan.jm : null;
+}
+
+/**
+ * Number of Afghan salary months a fixed salary is owed for inside [from, to].
+ * The window is clamped to [salaryStart, now]; every Afghan month it touches
+ * counts once. No bound on a side means "since salary start" / "up to now".
+ */
+export function salaryMonthsInRange({
+  salaryStart,
+  from = null,
+  to = null,
+  now = new Date(),
+  maxMonths = null,
+}) {
+  const startMs = salaryStart ? new Date(salaryStart).getTime() : NaN;
+  if (!Number.isFinite(startMs)) return 0;
+  const lo = new Date(Math.max(from ? new Date(from).getTime() : startMs, startMs));
+  const hi = new Date(Math.min(to ? new Date(to).getTime() : now.getTime(), now.getTime()));
+  if (hi < lo) return 0;
+  const loIdx = afghanMonthIndex(lo);
+  const hiIdx = afghanMonthIndex(hi);
+  if (loIdx == null || hiIdx == null) return 0;
+  const months = hiIdx - loIdx + 1;
+  return maxMonths != null ? Math.min(months, maxMonths) : months;
+}
+
+/** Salary owed for a FIXED employee within a range (monthly amount × salary months). */
+export function fixedSalaryForRange({ monthlyAmount, salaryStart, ...range }) {
+  return roundMoney(
+    Number(monthlyAmount || 0) * salaryMonthsInRange({ salaryStart, ...range }),
+  );
 }
 
 /**

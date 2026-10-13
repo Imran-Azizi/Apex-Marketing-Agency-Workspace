@@ -54,6 +54,7 @@ import { CrmSelectionBar } from "./_components/crm-selection-bar";
 import { useCustomerSelection } from "./_components/use-customer-selection";
 import { CustomerActions } from "./_components/customer-actions";
 import { CustomerPipelineStatusBadge } from "./_components/customer-pipeline-status-badge";
+import { ContractListCell } from "./_components/contract-summary";
 import { formatLeadSource, isWhatsAppLeadSource } from "./_components/constants";
 import type {
   CrmCustomer,
@@ -447,7 +448,7 @@ export default function CrmPage() {
           onClear={clearSelection}
         />
 
-        {isLoading && <LoadingTable columns={canDelete ? 8 : 7} />}
+        {isLoading && <LoadingTable columns={canDelete ? 9 : 8} />}
 
         {error && (
           <EmptyState
@@ -489,7 +490,7 @@ export default function CrmPage() {
                 isFetching ? "opacity-70 transition-opacity" : undefined
               }
             >
-              <Table scrollContainer={false} className="min-w-[56rem]">
+              <Table scrollContainer={false} className="min-w-[64rem]">
                 <TableHeader>
                   <TableRow className="bg-muted/40 hover:bg-muted/40">
                     {canDelete ? (
@@ -512,6 +513,9 @@ export default function CrmPage() {
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       وضعیت
+                    </TableHead>
+                    <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
+                      قرارداد
                     </TableHead>
                     <TableHead className="sticky top-0 z-[1] whitespace-nowrap bg-muted/95 backdrop-blur supports-[backdrop-filter]:bg-muted/80">
                       منبع ورود
@@ -604,6 +608,9 @@ export default function CrmPage() {
                           stage={customer.pipelineStage}
                           label={customer.pipelineStageLabel}
                         />
+                      </TableCell>
+                      <TableCell>
+                        <ContractListCell contract={customer.activeContract} />
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-sm">
                         {customer.source ? (

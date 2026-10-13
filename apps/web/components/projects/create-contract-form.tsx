@@ -15,6 +15,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import { ContractScopeFields } from "@/components/projects/contract-scope-fields";
+import {
+  parseNumberInput,
+  validateContractScope,
+  type ContractScopeInput,
+} from "@/lib/contract-project";
 
 export type ContractCustomerProfile = {
   personName: string;
@@ -78,6 +84,14 @@ export function CreateContractForm({
   const [address, setAddress] = useState(profile.address || "");
   const [email, setEmail] = useState(profile.email || "");
   const [website, setWebsite] = useState("");
+  const [scope, setScope] = useState<ContractScopeInput>({
+    agreedPrice: "",
+    agreedTerms: "",
+    videoCount: "",
+    posterCount: "",
+    startDate: "",
+    endDate: "",
+  });
 
   const createMut = useMutation({
     mutationFn: () => {
@@ -91,6 +105,11 @@ export function CreateContractForm({
       if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
         throw new Error("ایمیل معتبر نیست.");
       }
+      const scopeError = validateContractScope(scope, {
+        commercials: "required",
+        requireScope: true,
+      });
+      if (scopeError) throw new Error(scopeError);
 
       return apiPost<{ id: string }>("/projects/contracts", {
         crmCustomerId,
@@ -103,6 +122,12 @@ export function CreateContractForm({
         address: address.trim(),
         email: trimmedEmail || undefined,
         website: website.trim() || undefined,
+        agreedPrice: parseNumberInput(scope.agreedPrice),
+        agreedTerms: scope.agreedTerms.trim(),
+        videoCount: parseNumberInput(scope.videoCount),
+        posterCount: parseNumberInput(scope.posterCount) ?? 0,
+        startDate: scope.startDate,
+        endDate: scope.endDate,
       });
     },
     onSuccess: (project) => {
@@ -214,6 +239,17 @@ export function CreateContractForm({
               onChange={(event) => setWebsite(event.target.value)}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border shadow-sm">
+        <CardContent className="space-y-5 p-4 sm:p-6">
+          <h2 className="text-base font-semibold">جزئیات قرارداد</h2>
+          <ContractScopeFields
+            idPrefix="contract"
+            value={scope}
+            onChange={(patch) => setScope((current) => ({ ...current, ...patch }))}
+          />
         </CardContent>
       </Card>
 

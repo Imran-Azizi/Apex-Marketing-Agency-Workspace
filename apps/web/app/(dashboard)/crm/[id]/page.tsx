@@ -31,6 +31,8 @@ import {
   type CrmDetailTabValue,
 } from "../_components/customer-detail-tabs";
 import type { PortalCredentials } from "@/lib/portal-invites";
+import type { CrmContractSummary } from "../_components/types";
+import { cn } from "@/lib/utils";
 
 interface Opportunity {
   id: string;
@@ -48,6 +50,7 @@ interface Opportunity {
     remainingBalance: number;
     customerDebt: number;
   } | null;
+  contract?: CrmContractSummary | null;
 }
 
 interface CrmCustomerDetail {
@@ -158,12 +161,30 @@ export default function CrmDetailPage({
     },
   });
 
-  const opp = useMemo(() => {
-    if (!data?.opportunities?.length) return null;
-    return (
-      data.opportunities.find((o) => !o.projectId) || data.opportunities[0]
-    );
+  const [selectedOppId, setSelectedOppId] = useState<string | null>(null);
+
+  const oppChoices = useMemo(() => {
+    const opportunities = data?.opportunities ?? [];
+    if (!opportunities.length) return [];
+    const contractOpps = opportunities
+      .filter((o) => o.contract)
+      .sort(
+        (a, b) =>
+          new Date(b.contract!.createdAt).getTime() -
+          new Date(a.contract!.createdAt).getTime(),
+      );
+    const salesOpp =
+      opportunities.find((o) => !o.projectId) || opportunities[0];
+    return contractOpps.some((o) => o.id === salesOpp.id)
+      ? contractOpps
+      : [...contractOpps, salesOpp];
   }, [data]);
+
+  const opp = useMemo(
+    () =>
+      oppChoices.find((o) => o.id === selectedOppId) ?? oppChoices[0] ?? null,
+    [oppChoices, selectedOppId],
+  );
 
   const { data: eligibility } = useQuery({
     queryKey: ["invite-eligibility", opp?.id],
@@ -288,6 +309,44 @@ export default function CrmDetailPage({
             showPortalTab={canInvite}
           />
         </div>
+
+        {oppChoices.length > 1 && opp ? (
+          <div
+            role="radiogroup"
+            aria-label="انتخاب قرارداد"
+            className="flex flex-wrap items-center gap-2"
+          >
+            {oppChoices.map((choice) => {
+              const active = choice.id === opp.id;
+              return (
+                <button
+                  key={choice.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setSelectedOppId(choice.id)}
+                  className={cn(
+                    "rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors",
+                    active
+                      ? "border-brand/40 bg-brand-muted text-brand"
+                      : "border-border/80 bg-card text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {choice.contract ? (
+                    <>
+                      قرارداد{" "}
+                      <span dir="ltr" className="tabular-nums">
+                        {choice.contract.code}
+                      </span>
+                    </>
+                  ) : (
+                    "فرصت فروش"
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         <TabsContent
           value="details"

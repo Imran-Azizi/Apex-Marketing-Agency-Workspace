@@ -5,6 +5,7 @@ import { aiProvider } from '../../services/aiProvider.js';
 import { rebuildProjectContext, mapProjectStatusToCustomer, computeFinanceFields } from '../../services/projectContext.js';
 import {
   batchOpportunityFinanceSnapshots,
+  roundMoney,
   syncOpportunityFinance,
   syncProjectFinanceFromPayments,
 } from '../crm/paymentFinance.js';
@@ -39,6 +40,7 @@ import {
 import { createNotificationOnce, notifyManagersOnce } from '../../services/notifications.js';
 import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
 import { customerSearchCondition } from '../crm/visibility.js';
+import { openFreshCycleOpportunity } from '../crm/repeatCycle.js';
 import {
   contractProgressPayload,
   summarizeContractVideos,
@@ -81,7 +83,6 @@ const createProjectSchema = z.object({
   goal: z.string().trim().max(400).optional().nullable(),
   cta: z.string().trim().max(200).optional().nullable(),
   agreedPrice: z.coerce.number().nonnegative().optional().nullable(),
-  agreedTerms: z.string().trim().max(4000).optional().nullable(),
   personName: z.string().trim().min(1).max(200).optional().nullable(),
   jobTitle: z.string().trim().min(1).max(200).optional().nullable(),
   companyName: z.string().trim().min(1).max(200).optional().nullable(),
@@ -114,29 +115,77 @@ const optionalWebsite = z.preprocess(
   z.string().trim().max(500).optional().nullable(),
 );
 
-const createContractSchema = z.object({
-  crmCustomerId: z.string().min(1),
-  idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
-  personName: z.string().trim().min(1).max(200),
-  jobTitle: z.string().trim().min(1).max(200),
-  companyName: z.string().trim().min(1).max(200),
-  phone: z.string().trim().min(5).max(40),
-  whatsapp: z.string().trim().min(5).max(40),
-  address: z.string().trim().min(1).max(500),
-  email: optionalEmail,
-  website: optionalWebsite,
-});
+const contractDate = (message) =>
+  z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+    z.coerce.date({ errorMap: () => ({ message }) }),
+  );
 
-const updateContractSchema = z.object({
-  personName: z.string().trim().min(1).max(200).optional(),
-  jobTitle: z.string().trim().min(1).max(200).optional(),
-  companyName: z.string().trim().min(1).max(200).optional(),
-  phone: z.string().trim().min(5).max(40).optional(),
-  whatsapp: z.string().trim().min(5).max(40).optional(),
-  address: z.string().trim().min(1).max(500).optional(),
-  email: optionalEmail,
-  website: optionalWebsite,
-});
+const contractScopeFields = {
+  agreedPrice: z.coerce
+    .number({ invalid_type_error: 'قیمت مجموعی پروژه معتبر نیست' })
+    .positive('قیمت مجموعی پروژه باید بیشتر از صفر باشد')
+    .max(1_000_000_000_000),
+  agreedTerms: z
+    .string()
+    .trim()
+    .min(1, 'شرایط توافق‌شده الزامی است')
+    .max(4000),
+  videoCount: z.coerce
+    .number({ invalid_type_error: 'تعداد ویدیو معتبر نیست' })
+    .int('تعداد ویدیو باید عدد صحیح باشد')
+    .min(1, 'تعداد ویدیو حداقل ۱ است')
+    .max(1000),
+  posterCount: z.coerce
+    .number({ invalid_type_error: 'تعداد پوستر معتبر نیست' })
+    .int('تعداد پوستر باید عدد صحیح باشد')
+    .min(0, 'تعداد پوستر نمی‌تواند منفی باشد')
+    .max(1000),
+  startDate: contractDate('تاریخ شروع قرارداد معتبر نیست'),
+  endDate: contractDate('تاریخ ختم قرارداد معتبر نیست'),
+};
+
+function contractPeriodIsValid({ startDate, endDate }) {
+  return !startDate || !endDate || endDate.getTime() >= startDate.getTime();
+}
+
+const CONTRACT_PERIOD_MESSAGE = 'تاریخ ختم قرارداد نمی‌تواند قبل از تاریخ شروع باشد';
+
+const createContractSchema = z
+  .object({
+    crmCustomerId: z.string().min(1),
+    idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
+    personName: z.string().trim().min(1).max(200),
+    jobTitle: z.string().trim().min(1).max(200),
+    companyName: z.string().trim().min(1).max(200),
+    phone: z.string().trim().min(5).max(40),
+    whatsapp: z.string().trim().min(5).max(40),
+    address: z.string().trim().min(1).max(500),
+    email: optionalEmail,
+    website: optionalWebsite,
+    ...contractScopeFields,
+    posterCount: contractScopeFields.posterCount.optional().default(0),
+  })
+  .refine(contractPeriodIsValid, { message: CONTRACT_PERIOD_MESSAGE, path: ['endDate'] });
+
+const updateContractSchema = z
+  .object({
+    personName: z.string().trim().min(1).max(200).optional(),
+    jobTitle: z.string().trim().min(1).max(200).optional(),
+    companyName: z.string().trim().min(1).max(200).optional(),
+    phone: z.string().trim().min(5).max(40).optional(),
+    whatsapp: z.string().trim().min(5).max(40).optional(),
+    address: z.string().trim().min(1).max(500).optional(),
+    email: optionalEmail,
+    website: optionalWebsite,
+    agreedPrice: contractScopeFields.agreedPrice.optional(),
+    agreedTerms: contractScopeFields.agreedTerms.optional(),
+    videoCount: contractScopeFields.videoCount.optional(),
+    posterCount: contractScopeFields.posterCount.optional(),
+    startDate: contractScopeFields.startDate.optional(),
+    endDate: contractScopeFields.endDate.optional(),
+  })
+  .refine(contractPeriodIsValid, { message: CONTRACT_PERIOD_MESSAGE, path: ['endDate'] });
 
 const PROJECT_CLIENT_ASSET_KINDS = new Set([
   'LOGO',
@@ -206,6 +255,72 @@ function contractTitleFor({ companyName, personName }) {
   return `${who} — قرارداد ماهانه`;
 }
 
+/**
+ * Give a monthly contract its own CRM cycle: a locked opportunity (price + terms,
+ * like «جزئیات قرارداد» in CRM) and a ProjectFinance row, so payments are recorded
+ * once against the contract and its remaining balance stays live.
+ */
+async function attachContractCommercials(tx, {
+  project,
+  customer,
+  actorId,
+  agreedPrice,
+  agreedTerms,
+  videoCount,
+}) {
+  const priorProjects = await tx.project.count({
+    where: { crmCustomerId: customer.id, deletedAt: null, id: { not: project.id } },
+  });
+  const { opportunity } = await openFreshCycleOpportunity(tx, customer, {
+    alwaysCreate: true,
+    title: project.title,
+    pipelineStage: priorProjects > 0 ? 'REPEAT_CUSTOMER' : 'ORDER_CONFIRMED',
+  });
+
+  await tx.opportunity.update({
+    where: { id: opportunity.id },
+    data: {
+      projectId: project.id,
+      agreedPrice,
+      proposedPrice: agreedPrice,
+      agreedTerms,
+      videoCount,
+      contractLocked: true,
+      contractLockedAt: new Date(),
+      contractLockedById: actorId || null,
+    },
+  });
+
+  await tx.projectFinance.create({
+    data: {
+      projectId: project.id,
+      basePrice: agreedPrice,
+      agreedPrice,
+      discount: 0,
+      finalProjectPrice: agreedPrice,
+      received: 0,
+    },
+  });
+  await syncOpportunityFinance(tx, opportunity.id, { persist: true });
+
+  const { applyCrmEvent } = await import('../crm/sync.js');
+  const { CRM_EVENTS } = await import('../crm/pipeline.js');
+  await applyCrmEvent(tx, {
+    customerId: customer.id,
+    opportunityId: opportunity.id,
+    event: CRM_EVENTS.PROJECT_CREATED,
+    source: 'INTERNAL',
+    relatedType: 'Project',
+    relatedId: project.id,
+    isRepeat: priorProjects > 0,
+    title: 'قرارداد چندویدیویی ایجاد شد',
+    actorId,
+    actorType: 'USER',
+  });
+
+  return opportunity;
+}
+
 function withContractPresentation(project, videoStats) {
   if (!project || project.kind !== 'CONTRACT') return project;
   const stats = videoStats || summarizeContractVideos([]);
@@ -216,8 +331,10 @@ function withContractPresentation(project, videoStats) {
   };
 }
 
+const FINANCE_HIDDEN_ROLES = ['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'];
+
 function stripFinanceForRole(project, roleCode) {
-  if (['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'].includes(roleCode)) {
+  if (FINANCE_HIDDEN_ROLES.includes(roleCode)) {
     const { finance, invoices, payables, ...rest } = project;
     return rest;
   }
@@ -432,8 +549,25 @@ async function presentProjectDetail(result, auth) {
     children.map((child) => withProjectLead(stripFinanceForRole(child, auth.roleCode))),
     'internal',
   );
+  const canSeeCommercials = !FINANCE_HIDDEN_ROLES.includes(auth.roleCode);
+  const commercials = canSeeCommercials
+    ? await prisma.opportunity.findFirst({
+        where: { projectId: result.id, deletedAt: null },
+        select: { agreedTerms: true, contractLocked: true },
+      })
+    : null;
+  const contractScope = {
+    videoCount: result.contractVideoCount ?? null,
+    posterCount: result.contractPosterCount ?? null,
+    startDate: result.contractStartDate ?? null,
+    endDate: result.contractEndDate ?? null,
+    agreedTerms: commercials?.agreedTerms ?? null,
+    hasCommercials: Boolean(result.opportunityId),
+    contractLocked: Boolean(commercials?.contractLocked),
+    canViewCommercials: canSeeCommercials,
+  };
   return withContractPresentation(
-    { ...result, videos },
+    { ...result, videos, contractScope },
     summarizeContractVideos(videos),
   );
 }
@@ -1181,12 +1315,8 @@ export const projectService = {
       }
       input.crmCustomerId = parentProject.crmCustomerId;
       input.opportunityId = null;
-      if (!(Number(input.agreedPrice) > 0)) {
-        throw new AppError('قیمت مجموعی پروژه الزامی است', 400, 'VALIDATION');
-      }
-      if (!trimText(input.agreedTerms)) {
-        throw new AppError('شرایط توافق‌شده الزامی است', 400, 'VALIDATION');
-      }
+      // Price and terms are agreed once on the contract, not per video.
+      input.agreedPrice = null;
     }
     const title = input.title.trim();
     const crmCustomerId = input.crmCustomerId;
@@ -1326,22 +1456,6 @@ export const projectService = {
             kind: parentProject ? 'CHILD' : 'SINGLE',
             parentProjectId: parentProject ? parentProject.id : null,
           });
-
-          if (parentProject) {
-            // Same lock as saving «جزئیات قرارداد» in CRM, so payments can be recorded.
-            await tx.opportunity.update({
-              where: { id: liveOpportunity.id },
-              data: {
-                agreedPrice: agreed,
-                proposedPrice: liveOpportunity.proposedPrice ?? agreed,
-                agreedTerms: trimText(input.agreedTerms),
-                contractLocked: true,
-                contractLockedAt: new Date(),
-                contractLockedById: auth.userId,
-              },
-            });
-            await syncOpportunityFinance(tx, liveOpportunity.id, { persist: true });
-          }
           return { ...created, replayed: false };
         });
 
@@ -1481,6 +1595,10 @@ export const projectService = {
               kind: 'CONTRACT',
               brief,
               platforms: [],
+              contractVideoCount: input.videoCount,
+              contractPosterCount: input.posterCount,
+              contractStartDate: input.startDate,
+              contractEndDate: input.endDate,
             },
           });
 
@@ -1500,12 +1618,21 @@ export const projectService = {
             },
           });
 
+          await attachContractCommercials(tx, {
+            project,
+            customer,
+            actorId: auth.userId,
+            agreedPrice: input.agreedPrice,
+            agreedTerms: input.agreedTerms,
+            videoCount: input.videoCount,
+          });
+
           await tx.projectTimelineEvent.create({
             data: {
               projectId: project.id,
               type: 'CREATED',
               title: 'قرارداد چندویدیویی ایجاد شد',
-              body: 'اطلاعات مشتری روی قرارداد ذخیره شد. ویدیوها جداگانه ساخته می‌شوند.',
+              body: 'اطلاعات مشتری، قیمت و شرایط قرارداد ذخیره شد. ویدیوها جداگانه ساخته می‌شوند.',
               actorId: auth.userId,
             },
           });
@@ -1571,6 +1698,11 @@ export const projectService = {
             title: created.title,
             kind: 'CONTRACT',
             crmCustomerId: customer.id,
+            agreedPrice: input.agreedPrice,
+            videoCount: input.videoCount,
+            posterCount: input.posterCount,
+            startDate: input.startDate,
+            endDate: input.endDate,
           },
           req,
         });
@@ -1623,15 +1755,87 @@ export const projectService = {
     if (input.companyName !== undefined || input.personName !== undefined) {
       data.title = contractTitleFor(brief);
     }
+    if (input.videoCount !== undefined) data.contractVideoCount = input.videoCount;
+    if (input.posterCount !== undefined) data.contractPosterCount = input.posterCount;
+    if (input.startDate !== undefined) data.contractStartDate = input.startDate;
+    if (input.endDate !== undefined) data.contractEndDate = input.endDate;
+    if (
+      !contractPeriodIsValid({
+        startDate: data.contractStartDate ?? project.contractStartDate,
+        endDate: data.contractEndDate ?? project.contractEndDate,
+      })
+    ) {
+      throw new AppError(CONTRACT_PERIOD_MESSAGE, 400, 'VALIDATION');
+    }
+
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { projectId: project.id, deletedAt: null },
+      select: { id: true, agreedPrice: true, agreedTerms: true, contractLocked: true },
+    });
+    const priceChanged =
+      input.agreedPrice !== undefined &&
+      roundMoney(input.agreedPrice) !== roundMoney(opportunity?.agreedPrice);
+    const termsChanged =
+      input.agreedTerms !== undefined &&
+      trimText(input.agreedTerms) !== trimText(opportunity?.agreedTerms);
+    if ((priceChanged || termsChanged) && FINANCE_HIDDEN_ROLES.includes(auth.roleCode)) {
+      throw new AppError('اجازه تغییر قیمت و شرایط قرارداد را ندارید', 403, 'FORBIDDEN');
+    }
+    if (opportunity?.contractLocked && (priceChanged || termsChanged)) {
+      throw new AppError(
+        'قیمت و شرایط این قرارداد قفل است. برای تغییر، از پرونده مشتری در CRM و فروش اقدام کنید.',
+        400,
+        'CONTRACT_LOCKED',
+      );
+    }
+    if (!opportunity && (priceChanged || termsChanged)) {
+      if (!(Number(input.agreedPrice) > 0) || !trimText(input.agreedTerms)) {
+        throw new AppError(
+          'برای ثبت قیمت قرارداد، قیمت مجموعی و شرایط توافق‌شده هر دو الزامی هستند',
+          400,
+          'VALIDATION',
+        );
+      }
+    }
 
     await prisma.$transaction(async (tx) => {
-      if (input.whatsapp) {
-        const customer = await tx.crmCustomer.findFirst({
-          where: { id: project.crmCustomerId, deletedAt: null },
-        });
-        if (customer) await syncCustomerWhatsappFromBrief(tx, customer, input.whatsapp);
+      const customer = await tx.crmCustomer.findFirst({
+        where: { id: project.crmCustomerId, deletedAt: null },
+      });
+      if (input.whatsapp && customer) {
+        await syncCustomerWhatsappFromBrief(tx, customer, input.whatsapp);
       }
       await tx.project.update({ where: { id: project.id }, data });
+
+      if (!opportunity && (priceChanged || termsChanged) && customer) {
+        await attachContractCommercials(tx, {
+          project: { id: project.id, title: data.title || project.title },
+          customer,
+          actorId: auth.userId,
+          agreedPrice: input.agreedPrice,
+          agreedTerms: trimText(input.agreedTerms),
+          videoCount: data.contractVideoCount ?? project.contractVideoCount ?? null,
+        });
+      } else if (opportunity) {
+        const oppData = {};
+        if (priceChanged) {
+          oppData.agreedPrice = input.agreedPrice;
+          oppData.proposedPrice = input.agreedPrice;
+        }
+        if (termsChanged) oppData.agreedTerms = trimText(input.agreedTerms);
+        if (priceChanged || termsChanged) {
+          oppData.contractLocked = true;
+          oppData.contractLockedAt = new Date();
+          oppData.contractLockedById = auth.userId;
+        }
+        if (input.videoCount !== undefined) oppData.videoCount = input.videoCount;
+        if (Object.keys(oppData).length) {
+          await tx.opportunity.update({ where: { id: opportunity.id }, data: oppData });
+        }
+        if (priceChanged) {
+          await syncOpportunityFinance(tx, opportunity.id, { persist: true });
+        }
+      }
       await tx.projectTimelineEvent.create({
         data: {
           projectId: project.id,
@@ -1649,6 +1853,11 @@ export const projectService = {
       entityId: project.id,
       after: {
         title: data.title || project.title,
+        ...(priceChanged ? { agreedPrice: input.agreedPrice } : {}),
+        ...(input.videoCount !== undefined ? { videoCount: input.videoCount } : {}),
+        ...(input.posterCount !== undefined ? { posterCount: input.posterCount } : {}),
+        ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
+        ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
       },
       req,
     });

@@ -25,6 +25,8 @@ import {
   type OpportunityFinance,
   type RecordedPayment,
 } from "./new-payment-dialog";
+import { ContractScopeOverview } from "./contract-summary";
+import type { CrmContractSummary } from "./types";
 
 export type { OpportunityFinance };
 
@@ -36,6 +38,7 @@ export type OpportunityDetails = {
   contractLocked?: boolean | null;
   contractLockedAt?: string | null;
   finance?: OpportunityFinance | null;
+  contract?: CrmContractSummary | null;
 };
 
 type FormState = {
@@ -294,7 +297,9 @@ export function CustomerDetailsForm({
                 )}
               </div>
               <p className="mt-1.5 hidden max-w-xl text-[13px] leading-relaxed text-muted-foreground sm:block">
-                قیمت پروژه و شرایط تجاری را مدیریت کنید
+                {opportunity.contract
+                  ? opportunity.contract.title
+                  : "قیمت پروژه و شرایط تجاری را مدیریت کنید"}
               </p>
             </div>
           </div>
@@ -318,6 +323,10 @@ export function CustomerDetailsForm({
       </header>
 
       <div className="space-y-6 p-5 sm:p-7">
+        {opportunity.contract ? (
+          <ContractScopeOverview contract={opportunity.contract} />
+        ) : null}
+
         {/* Financial summary */}
         <section className="space-y-3.5">
           <div className="flex items-center gap-2.5 text-start">

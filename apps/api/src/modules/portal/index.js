@@ -6,6 +6,7 @@ import { otpLimiter } from '../../middleware/rateLimit.js';
 import { validate } from '../../middleware/validate.js';
 import { ok, created } from '../../utils/response.js';
 import { portalService, registerSchema, briefSchema } from './service.js';
+import { portalContractService } from '../projects/contractWorkspace.js';
 
 const router = Router();
 
@@ -96,6 +97,14 @@ router.get('/downloads/:projectId', async (req, res, next) => {
 
 router.get('/projects/:id/contact-manager', async (req, res, next) => {
   try { ok(res, await portalService.contactManager(req.params.id, req.auth)); } catch (e) { next(e); }
+});
+
+router.get('/contracts', async (req, res, next) => {
+  try { ok(res, await portalContractService.list(req.auth)); } catch (e) { next(e); }
+});
+
+router.get('/contracts/:id', async (req, res, next) => {
+  try { ok(res, await portalContractService.get(req.params.id, req.auth)); } catch (e) { next(e); }
 });
 
 router.get('/profile', async (req, res, next) => {

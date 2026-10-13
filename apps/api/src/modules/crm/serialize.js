@@ -51,6 +51,47 @@ export function withCrmView(customer, auth = {}, extras = {}) {
   };
 }
 
+/** Prisma select for the contract fields captured in the multi-video contract wizard. */
+export const CONTRACT_SUMMARY_SELECT = {
+  id: true,
+  code: true,
+  title: true,
+  status: true,
+  createdAt: true,
+  contractVideoCount: true,
+  contractPosterCount: true,
+  contractStartDate: true,
+  contractEndDate: true,
+  opportunity: {
+    select: {
+      id: true,
+      agreedPrice: true,
+      agreedTerms: true,
+      contractLocked: true,
+    },
+  },
+};
+
+export function serializeContractSummary(project) {
+  if (!project) return null;
+  const opp = project.opportunity || null;
+  return {
+    projectId: project.id,
+    code: project.code,
+    title: project.title,
+    status: project.status,
+    createdAt: project.createdAt,
+    videoCount: project.contractVideoCount ?? null,
+    posterCount: project.contractPosterCount ?? null,
+    startDate: project.contractStartDate ?? null,
+    endDate: project.contractEndDate ?? null,
+    opportunityId: opp?.id ?? null,
+    agreedPrice: opp?.agreedPrice != null ? Number(opp.agreedPrice) : null,
+    agreedTerms: opp?.agreedTerms ?? null,
+    contractLocked: Boolean(opp?.contractLocked),
+  };
+}
+
 export function serializeListItem(customer, auth) {
   const opp = customer.opportunities?.[0] || null;
   const hasVerifiedPayment = Boolean(customer.payments?.length);
@@ -111,6 +152,7 @@ export function serializeListItem(customer, auth) {
     updatedAt: view.updatedAt,
     portalStatus: view.portalStatus,
     orderAmount: opp?.agreedPrice != null ? Number(opp.agreedPrice) : null,
+    activeContract: serializeContractSummary(customer.projects?.[0]),
     paymentStatus,
     allowedActions: view.allowedActions,
   };

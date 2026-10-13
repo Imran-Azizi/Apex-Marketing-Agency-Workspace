@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -18,7 +18,25 @@ import {
 import { toast } from "sonner";
 import { apiDelete, apiPatch } from "@/lib/api";
 import { invalidateFinanceQueries } from "@/lib/finance-queries";
-import { formatCount, type ContractVideoStats } from "@/lib/contract-project";
+import {
+  formatCount,
+  parseNumberInput,
+  toDateInputValue,
+  validateContractScope,
+  type ContractScope,
+  type ContractScopeInput,
+  type ContractVideoStats,
+} from "@/lib/contract-project";
+import { ContractScopeFields } from "@/components/projects/contract-scope-fields";
+import {
+  NewPaymentButton,
+  type OpportunityFinance,
+} from "@/app/(dashboard)/crm/_components/new-payment-dialog";
+import {
+  ContractWorkspaceTabs,
+  ContractWorkspaceView,
+} from "@/components/projects/contract-workspace/workspace-view";
+import { parseWorkspaceTab, type WorkspaceTab } from "@/lib/contract-workspace";
 import { formatCurrency, formatDate, formatPhoneDisplay } from "@/lib/utils";
 import {
   isValidWhatsAppNumber,
@@ -88,6 +106,15 @@ export type ContractProjectDetail = {
   brief?: Record<string, unknown> | null;
   videoStats?: ContractVideoStats;
   videos?: ContractVideo[];
+  contractScope?: ContractScope;
+  finance?: {
+    agreedPrice?: number | string | null;
+    finalProjectPrice?: number | string | null;
+    received?: number | string | null;
+  } | null;
+  opportunityId?: string | null;
+  contractLocked?: boolean;
+  paymentFinance?: OpportunityFinance | null;
   projectLead?: ProjectLeadInfo;
   crmCustomer: {
     id?: string;
@@ -101,6 +128,27 @@ export type ContractProjectDetail = {
     whatsappRaw?: string | null;
   };
 };
+
+function toAmount(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Contract price / received / remaining; null when the viewer cannot see finance. */
+function contractMoney(project: ContractProjectDetail) {
+  if (!project.contractScope?.canViewCommercials) return null;
+  if (project.paymentFinance) {
+    return {
+      price: toAmount(project.paymentFinance.projectTotal),
+      received: toAmount(project.paymentFinance.totalPaid),
+      remaining: toAmount(project.paymentFinance.remainingBalance),
+    };
+  }
+  if (!project.finance) return null;
+  const price = toAmount(project.finance.finalProjectPrice ?? project.finance.agreedPrice);
+  const received = toAmount(project.finance.received);
+  return { price, received, remaining: Math.max(0, price - received) };
+}
 
 function briefText(
   brief: Record<string, unknown> | null | undefined,
@@ -127,6 +175,112 @@ function Stat({
       <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
       {hint ? <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p> : null}
     </div>
+  );
+}
+
+function MoneyStat({
+  label,
+  amount,
+  highlight,
+}: {
+  label: string;
+  amount: number;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      className={
+        highlight
+          ? "rounded-xl border border-brand/25 bg-brand/5 px-4 py-3"
+          : "rounded-xl border border-border/70 bg-muted/20 px-4 py-3"
+      }
+    >
+      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+      <p
+        dir="ltr"
+        className={`mt-1 text-right text-lg font-bold tabular-nums [unicode-bidi:isolate] ${
+          highlight ? "text-brand" : ""
+        }`}
+      >
+        {formatCurrency(amount)}
+      </p>
+    </div>
+  );
+}
+
+function ContractDetailsSection({
+  project,
+  createdVideos,
+}: {
+  project: ContractProjectDetail;
+  createdVideos: number;
+}) {
+  const scope = project.contractScope;
+  if (!scope) return null;
+  const money = contractMoney(project);
+  const terms = scope.canViewCommercials ? scope.agreedTerms?.trim() : "";
+  const paymentFinance: OpportunityFinance | null = money
+    ? project.paymentFinance ?? {
+        projectTotal: money.price,
+        totalPaid: money.received,
+        remainingBalance: money.remaining,
+        customerDebt: money.remaining,
+      }
+    : null;
+
+  return (
+    <section className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-base font-semibold">جزئیات قرارداد</h2>
+        {paymentFinance && project.opportunityId ? (
+          <NewPaymentButton
+            opportunityId={project.opportunityId}
+            finance={paymentFinance}
+            contractLocked={Boolean(
+              project.contractLocked ?? scope.contractLocked,
+            )}
+            paymentCount={paymentFinance.totalPaid > 0 ? 1 : 0}
+          />
+        ) : null}
+      </div>
+      {money ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <MoneyStat label="قیمت مجموعی پروژه" amount={money.price} />
+          <MoneyStat label="دریافت‌شده" amount={money.received} />
+          <MoneyStat label="باقی مانده" amount={money.remaining} highlight />
+        </div>
+      ) : null}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <InfoRow
+          label="تعداد ویدیو"
+          value={
+            scope.videoCount != null
+              ? `${formatCount(createdVideos)} از ${formatCount(scope.videoCount)} ایجاد شده`
+              : null
+          }
+        />
+        <InfoRow
+          label="تعداد پوستر"
+          value={scope.posterCount != null ? formatCount(scope.posterCount) : null}
+        />
+        <InfoRow
+          label="تاریخ شروع قرارداد"
+          value={scope.startDate ? formatDate(scope.startDate) : null}
+        />
+        <InfoRow
+          label="تاریخ ختم قرارداد"
+          value={scope.endDate ? formatDate(scope.endDate) : null}
+        />
+      </div>
+      {terms ? (
+        <div className="space-y-1">
+          <p className="text-[11px] font-medium text-muted-foreground">شرایط توافق شده</p>
+          <p className="whitespace-pre-wrap rounded-xl border border-border/70 bg-muted/20 px-4 py-3 text-sm leading-7">
+            {terms}
+          </p>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -347,6 +501,16 @@ export function ContractProjectDashboard({
   const website = briefText(brief, "website");
 
   const [editOpen, setEditOpen] = useState(false);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const activeTab = parseWorkspaceTab(searchParams.get("view"));
+  const selectTab = (tab: WorkspaceTab | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab) params.set("view", tab);
+    else params.delete("view");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  };
 
   return (
     <div className="min-w-0 space-y-5 text-start sm:space-y-6">
@@ -385,26 +549,25 @@ export function ContractProjectDashboard({
                 ) : null}
               </p>
             </div>
-            {canCreate || canEdit ? (
-              <div className="flex flex-wrap gap-2 md:shrink-0 md:justify-end">
-                {canEdit ? (
-                  <Button variant="outline" className="rounded-xl" onClick={() => setEditOpen(true)}>
-                    <Pencil className="h-4 w-4" />
-                    ویرایش قرارداد
-                  </Button>
-                ) : null}
-                {canCreate ? (
-                  <Button
-                    variant="brand"
-                    className="rounded-xl"
-                    onClick={() => router.push(`/projects/new?parent=${project.id}`)}
-                  >
-                    <PlusCircle className="h-4 w-4" />
-                    ایجاد پروژه ویدیو
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
+              <ContractWorkspaceTabs active={activeTab} onSelect={selectTab} />
+              {canEdit ? (
+                <Button variant="outline" className="rounded-xl" onClick={() => setEditOpen(true)}>
+                  <Pencil className="h-4 w-4" />
+                  ویرایش قرارداد
+                </Button>
+              ) : null}
+              {canCreate ? (
+                <Button
+                  variant="brand"
+                  className="rounded-xl"
+                  onClick={() => router.push(`/projects/new?parent=${project.id}`)}
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  ایجاد پروژه ویدیو
+                </Button>
+              ) : null}
+            </div>
           </div>
           <ProjectProgressBar
             progress={{ percent: stats.progressPercent }}
@@ -414,78 +577,107 @@ export function ContractProjectDashboard({
         </div>
       </section>
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        <Stat label="ویدیوها" value={formatCount(stats.total)} hint="بدون سقف ثابت" />
-        <Stat label="تکمیل‌شده" value={formatCount(stats.completed)} />
-        <Stat label="در جریان" value={formatCount(stats.inProgress)} />
-        <Stat label="در انتظار" value={formatCount(stats.pending)} />
-      </div>
-      {stats.canceled > 0 ? (
-        <p className="-mt-2 text-xs text-muted-foreground">
-          {formatCount(stats.canceled)} ویدیوی لغوشده در جمع پیشرفت حساب نمی‌شود.
-        </p>
-      ) : null}
-
-      <section className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
-        <h2 className="text-base font-semibold">اطلاعات مشتری</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <InfoRow label="نام" value={personName} />
-          <InfoRow label="سمت" value={jobTitle} />
-          <InfoRow label="شرکت" value={companyName} />
-          <InfoRow label="تلفن" value={formatPhoneDisplay(phone)} />
-          <InfoRow label="واتساپ" value={formatPhoneDisplay(whatsapp)} />
-          <InfoRow label="ایمیل" value={email} />
-          <InfoRow label="آدرس" value={address} />
-          <InfoRow label="وب‌سایت" value={website} />
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Clapperboard className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-base font-semibold">پروژه‌های ویدیو</h2>
-            <Badge variant="secondary" className="tabular-nums">
-              {formatCount(project.videos?.length || 0)}
-            </Badge>
+      {activeTab ? (
+        <ContractWorkspaceView
+          projectId={project.id}
+          contractTitle={project.title}
+          contractCode={project.code}
+          customerName={companyName || personName}
+          tab={activeTab}
+          canEdit={canEdit}
+          customerWhatsapp={whatsapp || null}
+          companyDefaults={{ companyName, address, contactNumber: phone || whatsapp }}
+          onClose={() => selectTab(null)}
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <Stat
+              label="ویدیوها"
+              value={formatCount(stats.total)}
+              hint={
+                project.contractScope?.videoCount != null
+                  ? `از ${formatCount(project.contractScope.videoCount)} ویدیوی قرارداد`
+                  : "بدون سقف ثابت"
+              }
+            />
+            <Stat label="تکمیل‌شده" value={formatCount(stats.completed)} />
+            <Stat label="در جریان" value={formatCount(stats.inProgress)} />
+            <Stat label="در انتظار" value={formatCount(stats.pending)} />
           </div>
-          {canCreate && project.videos?.length ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-xl"
-              onClick={() => router.push(`/projects/new?parent=${project.id}`)}
-            >
-              <PlusCircle className="h-4 w-4" />
-              ویدیو جدید
-            </Button>
-          ) : null}
-        </div>
-        {project.videos?.length ? (
-          <ContractVideosTable
-            videos={project.videos}
-            canDelete={canDelete}
-            onDelete={setDeletingVideo}
-          />
-        ) : (
-          <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-10 text-center">
-            <p className="font-semibold">هنوز ویدیویی ثبت نشده</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              هر ویدیو یک پروژه مستقل است و اطلاعات مشتری را از همین قرارداد می‌گیرد.
+          {stats.canceled > 0 ? (
+            <p className="-mt-2 text-xs text-muted-foreground">
+              {formatCount(stats.canceled)} ویدیوی لغوشده در جمع پیشرفت حساب نمی‌شود.
             </p>
-            {canCreate ? (
-              <Button
-                variant="brand"
-                className="mt-4 rounded-xl"
-                onClick={() => router.push(`/projects/new?parent=${project.id}`)}
-              >
-                <PlusCircle className="h-4 w-4" />
-                ایجاد پروژه ویدیو
-              </Button>
-            ) : null}
-          </div>
-        )}
-      </section>
+          ) : null}
+
+          <ContractDetailsSection
+            project={project}
+            createdVideos={project.videos?.length || 0}
+          />
+
+          <section className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
+            <h2 className="text-base font-semibold">اطلاعات مشتری</h2>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <InfoRow label="نام" value={personName} />
+              <InfoRow label="سمت" value={jobTitle} />
+              <InfoRow label="شرکت" value={companyName} />
+              <InfoRow label="تلفن" value={formatPhoneDisplay(phone)} />
+              <InfoRow label="واتساپ" value={formatPhoneDisplay(whatsapp)} />
+              <InfoRow label="ایمیل" value={email} />
+              <InfoRow label="آدرس" value={address} />
+              <InfoRow label="وب‌سایت" value={website} />
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Clapperboard className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-base font-semibold">پروژه‌های ویدیو</h2>
+                <Badge variant="secondary" className="tabular-nums">
+                  {formatCount(project.videos?.length || 0)}
+                </Badge>
+              </div>
+              {canCreate && project.videos?.length ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={() => router.push(`/projects/new?parent=${project.id}`)}
+                >
+                  <PlusCircle className="h-4 w-4" />
+                  ویدیو جدید
+                </Button>
+              ) : null}
+            </div>
+            {project.videos?.length ? (
+              <ContractVideosTable
+                videos={project.videos}
+                canDelete={canDelete}
+                onDelete={setDeletingVideo}
+              />
+            ) : (
+              <div className="rounded-2xl border border-dashed bg-muted/20 px-4 py-10 text-center">
+                <p className="font-semibold">هنوز ویدیویی ثبت نشده</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  هر ویدیو یک پروژه مستقل است و اطلاعات مشتری را از همین قرارداد می‌گیرد.
+                </p>
+                {canCreate ? (
+                  <Button
+                    variant="brand"
+                    className="mt-4 rounded-xl"
+                    onClick={() => router.push(`/projects/new?parent=${project.id}`)}
+                  >
+                    <PlusCircle className="h-4 w-4" />
+                    ایجاد پروژه ویدیو
+                  </Button>
+                ) : null}
+              </div>
+            )}
+          </section>
+        </>
+      )}
 
       {canEdit ? (
         <EditContractDialog
@@ -506,6 +698,8 @@ export function ContractProjectDashboard({
             await Promise.all([
               queryClient.invalidateQueries({ queryKey: ["project", project.id] }),
               queryClient.invalidateQueries({ queryKey: ["projects"] }),
+              queryClient.invalidateQueries({ queryKey: ["crm-customer"] }),
+              invalidateFinanceQueries(queryClient),
             ]);
           }}
         />
@@ -573,11 +767,33 @@ function EditContractDialog({
   };
   onSaved: () => Promise<void>;
 }) {
+  const contractScope = project.contractScope;
+  const money = contractMoney(project);
+  const showCommercials = Boolean(contractScope?.canViewCommercials);
+  const commercialsLocked = Boolean(contractScope?.contractLocked);
+  const commercialsEditable = showCommercials && !commercialsLocked;
+  const scopeRequired = Boolean(
+    contractScope &&
+      (contractScope.videoCount != null || contractScope.startDate || contractScope.endDate),
+  );
+  const scopeDefaults = (): ContractScopeInput => ({
+    agreedPrice: money && money.price > 0 ? String(money.price) : "",
+    agreedTerms: contractScope?.agreedTerms || "",
+    videoCount: contractScope?.videoCount != null ? String(contractScope.videoCount) : "",
+    posterCount: contractScope?.posterCount != null ? String(contractScope.posterCount) : "",
+    startDate: toDateInputValue(contractScope?.startDate),
+    endDate: toDateInputValue(contractScope?.endDate),
+  });
+
   const [form, setForm] = useState(defaults);
+  const [scope, setScope] = useState<ContractScopeInput>(scopeDefaults);
   const [prevOpen, setPrevOpen] = useState(open);
   if (open !== prevOpen) {
     setPrevOpen(open);
-    if (open) setForm(defaults);
+    if (open) {
+      setForm(defaults);
+      setScope(scopeDefaults());
+    }
   }
 
   const save = useMutation({
@@ -588,6 +804,19 @@ function EditContractDialog({
       if (!isValidWhatsAppNumber(form.phone) || !isValidWhatsAppNumber(form.whatsapp)) {
         throw new Error(WHATSAPP_VALIDATION_MESSAGE);
       }
+      const scopeError = validateContractScope(scope, {
+        commercials: !commercialsEditable
+          ? "skip"
+          : contractScope?.hasCommercials
+            ? "required"
+            : "optional",
+        requireScope: scopeRequired,
+      });
+      if (scopeError) throw new Error(scopeError);
+
+      const videoCount = parseNumberInput(scope.videoCount);
+      const posterCount = parseNumberInput(scope.posterCount);
+      const agreedPrice = parseNumberInput(scope.agreedPrice);
       return apiPatch(`/projects/${project.id}/contract`, {
         personName: form.personName.trim(),
         jobTitle: form.jobTitle.trim(),
@@ -597,6 +826,13 @@ function EditContractDialog({
         address: form.address.trim(),
         email: form.email.trim() || undefined,
         website: form.website.trim() || undefined,
+        videoCount: videoCount ?? undefined,
+        posterCount: posterCount ?? undefined,
+        startDate: scope.startDate || undefined,
+        endDate: scope.endDate || undefined,
+        ...(commercialsEditable && agreedPrice != null
+          ? { agreedPrice, agreedTerms: scope.agreedTerms.trim() }
+          : {}),
       });
     },
     onSuccess: async () => {
@@ -614,7 +850,7 @@ function EditContractDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>ویرایش قرارداد</DialogTitle>
         </DialogHeader>
@@ -651,6 +887,20 @@ function EditContractDialog({
             <Label htmlFor="edit-website">وب‌سایت</Label>
             <Input id="edit-website" dir="ltr" value={form.website} onChange={(e) => set("website")(e.target.value)} />
           </div>
+        </div>
+        <div className="space-y-4 border-t border-border/70 pt-4">
+          <h3 className="text-sm font-semibold">جزئیات قرارداد</h3>
+          <ContractScopeFields
+            idPrefix="edit-contract"
+            value={scope}
+            onChange={(patch) => setScope((current) => ({ ...current, ...patch }))}
+            showCommercials={showCommercials}
+            commercialsLocked={commercialsLocked}
+            commercialsRequired={Boolean(contractScope?.hasCommercials)}
+            scopeRequired={scopeRequired}
+            lockedPrice={money?.price}
+            received={money?.received ?? 0}
+          />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={save.isPending}>

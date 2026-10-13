@@ -6,7 +6,9 @@ import {
   directProjectCosts,
   emptyMonthlyActuals,
   employeeNetPayable,
+  fixedSalaryForRange,
   isCurrentPnlMonth,
+  salaryMonthsInRange,
   netCompanyProfit,
   pnlMonthBounds,
   priorCalendarMonth,
@@ -27,6 +29,7 @@ import {
   paymentBelongsToProject,
 } from '../../src/modules/finance/service.js';
 import {
+  contractVideoCostInRange,
   projectFinanceMetrics,
   resolveContractPrice,
   resolvePaymentProjectId,
@@ -59,6 +62,69 @@ test('employee net payable deducts payments and advances', () => {
   assert.equal(
     employeeNetPayable({ grossPayable: 1000, paidTotal: 800, openAdvances: 500 }),
     0,
+  );
+});
+
+function afghanLocal(jy, jm, jd, hour = 12) {
+  const g = afghanToGregorian(jy, jm, jd);
+  return new Date(g.gy, g.gm - 1, g.gd, hour);
+}
+
+test('salary months count Afghan months touched, clamped to salary start and now', () => {
+  const salaryStart = afghanLocal(1405, 6, 4);
+  const now = afghanLocal(1405, 7, 21);
+  // All time: Sonbola + Mizan.
+  assert.equal(salaryMonthsInRange({ salaryStart, now }), 2);
+  // This month (Mizan 1 → today).
+  assert.equal(
+    salaryMonthsInRange({ salaryStart, from: afghanLocal(1405, 7, 1, 0), to: now, now }),
+    1,
+  );
+  // A single day still belongs to one salary month.
+  assert.equal(
+    salaryMonthsInRange({ salaryStart, from: afghanLocal(1405, 7, 21, 0), to: now, now }),
+    1,
+  );
+  // Before salary was set up / in the future → nothing owed.
+  assert.equal(
+    salaryMonthsInRange({ salaryStart, from: afghanLocal(1405, 4, 1), to: afghanLocal(1405, 5, 30), now }),
+    0,
+  );
+  assert.equal(
+    salaryMonthsInRange({ salaryStart, from: afghanLocal(1405, 8, 1), to: afghanLocal(1405, 8, 30), now }),
+    0,
+  );
+  // Gregorian month spanning two Afghan months is capped for single-month P&L.
+  assert.equal(
+    salaryMonthsInRange({
+      salaryStart,
+      from: new Date(2026, 8, 1),
+      to: new Date(2026, 8, 30, 23, 59),
+      now,
+      maxMonths: 1,
+    }),
+    1,
+  );
+  assert.equal(salaryMonthsInRange({ salaryStart: null, now }), 0);
+});
+
+test('fixed salary owed = monthly amount × salary months', () => {
+  const now = afghanLocal(1405, 7, 21);
+  assert.equal(
+    fixedSalaryForRange({ monthlyAmount: 20000, salaryStart: afghanLocal(1405, 6, 4), now }),
+    40000,
+  );
+  // Old payments no longer wipe out a later month: 40,000 owed − 20,000 paid.
+  assert.equal(
+    employeeNetPayable({
+      grossPayable: fixedSalaryForRange({
+        monthlyAmount: 20000,
+        salaryStart: afghanLocal(1405, 6, 4),
+        now,
+      }),
+      paidTotal: 20000,
+    }),
+    20000,
   );
 });
 
@@ -331,4 +397,23 @@ test('parseDateBound returns null for empty or invalid values', () => {
   assert.equal(parseDateBound(null), null);
   assert.equal(parseDateBound(''), null);
   assert.equal(parseDateBound('not-a-date'), null);
+});
+
+test('contractVideoCostInRange scopes contract video costs by created/completed date', () => {
+  const from = new Date('2026-10-01T00:00:00Z');
+  const to = new Date('2026-10-31T23:59:59Z');
+  const createdInRange = { createdAt: '2026-10-12T18:03:21Z', completedAt: null };
+  const completedInRange = {
+    createdAt: '2026-09-20T10:00:00Z',
+    completedAt: '2026-10-05T10:00:00Z',
+  };
+  const outOfRange = {
+    createdAt: '2026-09-20T10:00:00Z',
+    completedAt: '2026-09-25T10:00:00Z',
+  };
+
+  assert.equal(contractVideoCostInRange(outOfRange, null, null), true);
+  assert.equal(contractVideoCostInRange(createdInRange, from, to), true);
+  assert.equal(contractVideoCostInRange(completedInRange, from, to), true);
+  assert.equal(contractVideoCostInRange(outOfRange, from, to), false);
 });

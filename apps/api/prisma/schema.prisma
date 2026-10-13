@@ -851,6 +851,11 @@ model Project {
   parentProjectId      String?
   parentProject        Project?                @relation("ContractVideos", fields: [parentProjectId], references: [id], onDelete: Restrict)
   childProjects        Project[]               @relation("ContractVideos")
+  /// Contract scope (kind CONTRACT only). Price and agreed terms live on the linked opportunity.
+  contractVideoCount   Int?
+  contractPosterCount  Int?
+  contractStartDate    DateTime?
+  contractEndDate      DateTime?
 
   opportunity        Opportunity?
   context            ProjectContext?
@@ -875,6 +880,9 @@ model Project {
   editingResources   EditingResource[]
   portfolioItems     PortfolioItem[]
   posters            ProjectPoster[]
+  companyProfile     ContractCompanyProfile?
+  contentCalendars   ContentCalendar[]
+  contractShares     ContractShare[]
 
   @@index([status])
   @@index([crmCustomerId])
@@ -1178,6 +1186,78 @@ model AssetReference {
 
   @@unique([projectId, clientAssetId])
   @@map("asset_references")
+}
+
+/// Company profile of a monthly contract (kind CONTRACT). Lists are JSON string arrays.
+model ContractCompanyProfile {
+  id             String   @id @default(cuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  companyName    String
+  companyIntro   String?
+  features       Json?
+  audience       String?
+  goal           String?
+  mainMessage    String?
+  cta            String?
+  address        String?
+  contactNumbers Json?
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("contract_company_profiles")
+}
+
+/// Content calendar of a monthly contract; at most 31 rows (enforced in the API).
+model ContentCalendar {
+  id          String                @id @default(cuid())
+  projectId   String
+  project     Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String
+  createdById String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  items       ContentCalendarItem[]
+
+  @@index([projectId])
+  @@map("content_calendars")
+}
+
+model ContentCalendarItem {
+  id          String          @id @default(cuid())
+  calendarId  String
+  calendar    ContentCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  position    Int
+  topic       String
+  contentType String
+  language    String
+  publishDate DateTime?
+
+  @@unique([calendarId, position])
+  @@map("content_calendar_items")
+}
+
+/// Contract content made visible in the customer portal.
+/// section: COMPANY | ASSETS | CALENDAR. refId is the calendar id for CALENDAR, otherwise "".
+model ContractShare {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  section    String
+  refId      String   @default("")
+  /// Last channel used: PORTAL | WHATSAPP
+  channel    String
+  sharedAt   DateTime
+  sharedById String?
+  /// Snapshot sent to the customer, e.g. { pdf: { storageKey, name, sizeBytes, meta } }
+  meta       Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([projectId, section, refId])
+  @@index([projectId])
+  @@map("contract_shares")
 }
 
 model ProjectContext {

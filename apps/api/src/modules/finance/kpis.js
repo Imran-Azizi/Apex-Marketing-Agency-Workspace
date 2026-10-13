@@ -23,9 +23,9 @@
  * monthly[]: last 6 calendar months of contract revenue + verified receipts (always).
  */
 
-import { prisma } from '../../db/prisma.js';
-import { APPROVED_PAYMENT_VERIFICATIONS } from '../crm/paymentFinance.js';
-import { financialPaymentWhere } from '../crm/sampleInvoice.js';
+import { prisma } from "../../db/prisma.js";
+import { APPROVED_PAYMENT_VERIFICATIONS } from "../crm/paymentFinance.js";
+import { financialPaymentWhere } from "../crm/sampleInvoice.js";
 import {
   directProjectCosts,
   netCompanyProfit,
@@ -33,8 +33,8 @@ import {
   projectProfit,
   resolveCompensationType,
   roundMoney,
-} from './metrics.js';
-import { createTtlCache } from '../../utils/ttlCache.js';
+} from "./metrics.js";
+import { createTtlCache } from "../../utils/ttlCache.js";
 
 const financeSourceCache = createTtlCache();
 const FINANCE_SOURCE_TTL_MS = 30_000;
@@ -82,7 +82,7 @@ export function resolveContractPrice(project) {
 }
 
 function monthKey(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function buildLastNMonthKeys(n = 6) {
@@ -98,7 +98,7 @@ function buildLastNMonthKeys(n = 6) {
 async function sumVerifiedPayments({ from, to }) {
   const where = {
     verification: { in: [...APPROVED_PAYMENT_VERIFICATIONS] },
-    ...dateFilter('paidAt', from, to),
+    ...dateFilter("paidAt", from, to),
     ...financialPaymentWhere(),
   };
   const agg = await prisma.payment.aggregate({
@@ -110,8 +110,8 @@ async function sumVerifiedPayments({ from, to }) {
 
 async function sumCompanyExpenses({ from, to }) {
   const where = {
-    category: 'COMPANY_GENERAL',
-    ...dateFilter('expenseDate', from, to),
+    category: "COMPANY_GENERAL",
+    ...dateFilter("expenseDate", from, to),
   };
   const agg = await prisma.expense.aggregate({
     where,
@@ -120,15 +120,21 @@ async function sumCompanyExpenses({ from, to }) {
   return dec(agg._sum.amount || 0);
 }
 
+const UNPRICED_FINANCE = { agreedPrice: 0, finalProjectPrice: 0 };
+
 export async function loadAllProjectsForFinanceList() {
   return prisma.project.findMany({
     where: {
       deletedAt: null,
-      kind: { not: 'CONTRACT' },
+      // Monthly contracts carry the price; their videos are usually unpriced.
+      // Hide either kind when it has no price of its own.
       NOT: {
-        AND: [
-          { kind: 'CHILD' },
-          { finance: { is: { agreedPrice: 0, finalProjectPrice: 0 } } },
+        OR: [
+          {
+            kind: { in: ["CONTRACT", "CHILD"] },
+            finance: { is: UNPRICED_FINANCE },
+          },
+          { kind: "CONTRACT", finance: { is: null } },
         ],
       },
     },
@@ -171,8 +177,51 @@ export async function loadAllProjectsForFinanceList() {
         },
       },
     },
-    orderBy: { createdAt: 'desc' },
+    orderBy: { createdAt: "desc" },
   });
+}
+
+/**
+ * Unpriced contract videos are hidden from the project list (the parent contract
+ * carries the price), but their narrator / editor / other costs are real
+ * company costs and must still reach the KPIs.
+ */
+export async function loadContractVideoCostRows() {
+  return prisma.project.findMany({
+    where: {
+      deletedAt: null,
+      kind: "CHILD",
+      parentProject: { is: { deletedAt: null } },
+      finance: {
+        is: {
+          ...UNPRICED_FINANCE,
+          OR: [
+            { narratorCost: { gt: 0 } },
+            { editorCost: { gt: 0 } },
+            { otherDirectCosts: { gt: 0 } },
+          ],
+        },
+      },
+    },
+    select: {
+      id: true,
+      createdAt: true,
+      completedAt: true,
+      finance: {
+        select: {
+          narratorCost: true,
+          editorCost: true,
+          otherDirectCosts: true,
+        },
+      },
+    },
+  });
+}
+
+export function contractVideoCostInRange(row, from, to) {
+  if (!from && !to) return true;
+  if (paymentInRange(row.createdAt, from, to)) return true;
+  return row.completedAt ? paymentInRange(row.completedAt, from, to) : false;
 }
 
 function buildPaymentProjectIndexes(projects) {
@@ -182,7 +231,8 @@ function buildPaymentProjectIndexes(projects) {
 
   for (const p of projects) {
     if (p.opportunity?.id) byOpportunityId.set(p.opportunity.id, p.id);
-    if (!byCustomerId.has(p.crmCustomerId)) byCustomerId.set(p.crmCustomerId, []);
+    if (!byCustomerId.has(p.crmCustomerId))
+      byCustomerId.set(p.crmCustomerId, []);
     // Direct CRM payments (no invoice) — only projects with an opportunity
     if (p.opportunity?.id) byCustomerId.get(p.crmCustomerId).push(p.id);
   }
@@ -198,7 +248,10 @@ export function resolvePaymentProjectId(payment, indexes) {
     }
     return null;
   }
-  if (invoice?.opportunityId && indexes.byOpportunityId.has(invoice.opportunityId)) {
+  if (
+    invoice?.opportunityId &&
+    indexes.byOpportunityId.has(invoice.opportunityId)
+  ) {
     return indexes.byOpportunityId.get(invoice.opportunityId);
   }
   if (!payment.invoiceId && payment.crmCustomerId) {
@@ -247,7 +300,7 @@ export async function loadPaymentsGroupedByProject(projects) {
         },
       },
     },
-    orderBy: [{ paidAt: 'desc' }, { createdAt: 'desc' }],
+    orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
   });
 
   for (const payment of payments) {
@@ -260,10 +313,13 @@ export async function loadPaymentsGroupedByProject(projects) {
 }
 
 async function loadCachedFinanceSource() {
-  return financeSourceCache.getOrSet('all', FINANCE_SOURCE_TTL_MS, async () => {
-    const projects = await loadAllProjectsForFinanceList();
+  return financeSourceCache.getOrSet("all", FINANCE_SOURCE_TTL_MS, async () => {
+    const [projects, contractVideoCosts] = await Promise.all([
+      loadAllProjectsForFinanceList(),
+      loadContractVideoCostRows(),
+    ]);
     const paymentsByProject = await loadPaymentsGroupedByProject(projects);
-    return { projects, paymentsByProject };
+    return { projects, paymentsByProject, contractVideoCosts };
   });
 }
 
@@ -271,7 +327,9 @@ export function projectFinanceMetrics(project, projectPayments) {
   const finance = project.finance;
   const finalProjectPrice = resolveContractPrice(project);
   const approved = (projectPayments || []).filter(isApprovedPayment);
-  const received = roundMoney(approved.reduce((sum, p) => sum + dec(p.amount), 0));
+  const received = roundMoney(
+    approved.reduce((sum, p) => sum + dec(p.amount), 0),
+  );
   const costs = directProjectCosts({
     narratorCost: finance?.narratorCost,
     editorCost: finance?.editorCost,
@@ -288,7 +346,7 @@ export function projectFinanceMetrics(project, projectPayments) {
     received,
     balance,
     profit: projectProfit(finalProjectPrice, costs),
-    currency: finance?.currency || project.opportunity?.currency || 'AFN',
+    currency: finance?.currency || project.opportunity?.currency || "AFN",
   };
 }
 
@@ -298,7 +356,7 @@ export function projectFinanceMetrics(project, projectPayments) {
  */
 async function sumFixedMonthlySalaries() {
   const profiles = await prisma.teamProfile.findMany({
-    where: { deletedAt: null, status: { not: 'INACTIVE' } },
+    where: { deletedAt: null, status: { not: "INACTIVE" } },
     select: {
       kind: true,
       compensationProfile: {
@@ -309,7 +367,7 @@ async function sumFixedMonthlySalaries() {
   let total = 0;
   for (const p of profiles) {
     const active = p.compensationProfile?.isActive ?? true;
-    if (!active || resolveCompensationType(p) !== 'FIXED') continue;
+    if (!active || resolveCompensationType(p) !== "FIXED") continue;
     total = roundMoney(
       total + dec(p.compensationProfile?.fixedMonthlyAmount || 0),
     );
@@ -322,9 +380,7 @@ async function sumFixedMonthlySalaries() {
  */
 export async function computeFinanceKpis(range = {}) {
   const from =
-    range.from instanceof Date
-      ? range.from
-      : parseDateBound(range.from, false);
+    range.from instanceof Date ? range.from : parseDateBound(range.from, false);
   const to =
     range.to instanceof Date ? range.to : parseDateBound(range.to, true);
   const hasRange = Boolean(from || to);
@@ -335,7 +391,7 @@ export async function computeFinanceKpis(range = {}) {
     loadCachedFinanceSource(),
     sumVerifiedPayments({ from, to }),
   ]);
-  const { projects, paymentsByProject } = source;
+  const { projects, paymentsByProject, contractVideoCosts = [] } = source;
 
   let totalFinalPrice = 0;
   let directProjectCosts = 0;
@@ -397,6 +453,19 @@ export async function computeFinanceKpis(range = {}) {
     otherDirectCosts = roundMoney(otherDirectCosts + m.otherDirectCosts);
   }
 
+  for (const row of contractVideoCosts) {
+    if (!contractVideoCostInRange(row, from, to)) continue;
+    const rowNarrator = dec(row.finance?.narratorCost);
+    const rowEditor = dec(row.finance?.editorCost);
+    const rowOther = dec(row.finance?.otherDirectCosts);
+    narratorCost = roundMoney(narratorCost + rowNarrator);
+    editorCost = roundMoney(editorCost + rowEditor);
+    otherDirectCosts = roundMoney(otherDirectCosts + rowOther);
+    directProjectCosts = roundMoney(
+      directProjectCosts + rowNarrator + rowEditor + rowOther,
+    );
+  }
+
   // Profit uses verified cash received — never receivable / unpaid contract balance.
   const projectProfitVal = projectProfit(received, directProjectCosts);
   const netCompanyProfitVal = netCompanyProfit(
@@ -406,7 +475,7 @@ export async function computeFinanceKpis(range = {}) {
   );
 
   const monthly = monthKeys.map((k) => {
-    const [y, m] = k.split('-').map(Number);
+    const [y, m] = k.split("-").map(Number);
     const row = monthlyMap.get(k);
     return {
       key: k,

@@ -15,7 +15,14 @@ import {
   type ProjectBriefSubmitPayload,
   type ProjectBriefWizardProfile,
 } from "@/components/brief/project-brief-wizard";
-import type { ClientAssetItem } from "@/components/brief/client-assets-uploader";
+import type {
+  ClientAssetItem,
+  ClientAssetUploadKind,
+} from "@/components/brief/client-assets-uploader";
+import type { AssetLibrary } from "@/components/brief/asset-library-picker";
+import type { ContractWorkspace } from "@/lib/contract-workspace";
+
+const CHILD_VIDEO_ASSET_KINDS: ClientAssetUploadKind[] = ["PRODUCT_IMAGE", "VIDEO"];
 
 type ParentProject = {
   id: string;
@@ -68,6 +75,21 @@ export function CreateChildProject({ parentId }: { parentId: string }) {
       apiGet<ClientAssetItem[]>(`/crm/customers/${customerId}/assets`),
     enabled: Boolean(customerId),
   });
+
+  const workspaceQuery = useQuery({
+    queryKey: ["contract-workspace", parentId],
+    queryFn: () => apiGet<ContractWorkspace>(`/projects/${parentId}/workspace`),
+    enabled: Boolean(customerId),
+  });
+
+  const assetLibrary: AssetLibrary = useMemo(
+    () => ({
+      title: "دارایی‌های قرارداد",
+      assets: workspaceQuery.data?.assets ?? [],
+      isLoading: workspaceQuery.isLoading,
+    }),
+    [workspaceQuery.data, workspaceQuery.isLoading],
+  );
 
   const profile: ProjectBriefWizardProfile | null = useMemo(() => {
     if (!parent || parent.kind !== "CONTRACT") return null;
@@ -143,7 +165,6 @@ export function CreateChildProject({ parentId }: { parentId: string }) {
         key={parent.id}
         mode="internal"
         inheritCustomer
-        requirePricing
         profile={profile}
         formats={formatsQuery.data}
         assets={assetsQuery.data}
@@ -152,6 +173,8 @@ export function CreateChildProject({ parentId }: { parentId: string }) {
         }}
         assetsCreatePath={`/crm/customers/${customerId}/assets`}
         assetsDeletePath={(id) => `/crm/customers/${customerId}/assets/${id}`}
+        assetKinds={CHILD_VIDEO_ASSET_KINDS}
+        assetLibrary={assetLibrary}
         onSubmit={async (payload: ProjectBriefSubmitPayload) =>
           apiPost<{ id: string }>("/projects", {
             crmCustomerId: customerId,

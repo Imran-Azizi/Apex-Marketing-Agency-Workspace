@@ -103,6 +103,8 @@ const nextConfig: NextConfig = {
       "form-action 'self'",
       "object-src 'none'",
       "frame-ancestors 'self'",
+      // In-page PDF preview loads a fetched blob: URL into an iframe.
+      "frame-src 'self' blob:",
       // Next.js requires 'unsafe-inline' for styles. Webpack HMR in development
       // also needs 'unsafe-eval'. Production builds do not.
       `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,

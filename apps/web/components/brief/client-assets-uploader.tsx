@@ -54,6 +54,10 @@ import {
   isClientAssetDisplayImage,
   validateClientAssetImageFile,
 } from "@/lib/client-asset-images";
+import {
+  AssetLibraryPicker,
+  type AssetLibrary,
+} from "@/components/brief/asset-library-picker";
 
 export type ClientAssetItem = {
   id: string;
@@ -66,13 +70,15 @@ export type ClientAssetItem = {
   meta?: Record<string, unknown> | null;
 };
 
-type AssetKind =
+export type ClientAssetUploadKind =
   | "LOGO"
   | "PRODUCT_IMAGE"
   | "VIDEO"
   | "BRANDBOOK"
   | "REFERENCE"
   | "PRONUNCIATION";
+
+type AssetKind = ClientAssetUploadKind;
 
 type UploadSlot = {
   kind: AssetKind;
@@ -176,6 +182,13 @@ type ClientAssetsUploaderProps = {
   showExistingAssets?: boolean;
   /** Copy for the in-progress banner. */
   notice?: "create" | "attach";
+  /** Restrict the upload sections (and listed assets) to these kinds. Defaults to all. */
+  kinds?: ClientAssetUploadKind[];
+  /**
+   * Existing files are offered through a picker instead of being listed;
+   * upload sections then only show files uploaded in this session.
+   */
+  library?: AssetLibrary;
 };
 
 function kindIcon(kind: string, mime?: string | null) {
@@ -436,7 +449,16 @@ export function ClientAssetsUploader({
   deletePath = (id: string) => `/portal/assets/${id}`,
   showExistingAssets = true,
   notice = "create",
+  kinds,
+  library,
 }: ClientAssetsUploaderProps) {
+  const [sessionIds, setSessionIds] = useState<string[]>([]);
+  const slots = useMemo(
+    () => (kinds ? SLOTS.filter((slot) => kinds.includes(slot.kind)) : SLOTS),
+    [kinds],
+  );
+  const showReference = !kinds || kinds.includes("REFERENCE");
+  const showOther = !kinds;
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [localPreviews, setLocalPreviews] = useState<Record<string, string>>(
     {},
@@ -522,6 +544,7 @@ export function ClientAssetsUploader({
     meta?: Record<string, unknown>;
   }) {
     const created = await apiPost<ClientAssetItem>(createPath, payload);
+    setSessionIds((prev) => [...prev, created.id]);
     onSelectedChange((prev) => Array.from(new Set([...prev, created.id])));
     onRefresh();
     return created;
@@ -675,8 +698,11 @@ export function ClientAssetsUploader({
     setPending((prev) => prev.filter((x) => x.id !== id));
   }
 
-  function renderAssetList(list: ClientAssetItem[]) {
+  function renderAssetList(allAssets: ClientAssetItem[]) {
     if (!showExistingAssets) return null;
+    const list = library
+      ? allAssets.filter((a) => sessionIds.includes(a.id))
+      : allAssets;
     if (!list.length) {
       return (
         <p className="text-xs text-muted-foreground">
@@ -781,7 +807,16 @@ export function ClientAssetsUploader({
         </div>
       ) : null}
 
-      {SLOTS.map((slot) => (
+      {library ? (
+        <AssetLibraryPicker
+          library={library}
+          selectedIds={selectedIds}
+          onSelectedChange={onSelectedChange}
+          disabled={uploadState.isUploading}
+        />
+      ) : null}
+
+      {slots.map((slot) => (
         <div key={slot.kind} className="space-y-3">
           <DropZone
             slot={slot}
@@ -836,65 +871,67 @@ export function ClientAssetsUploader({
         </div>
       ))}
 
-      <div className="space-y-3 rounded-lg border p-4">
-        <div className="flex items-start gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10 text-brand">
-            <Link2 className="h-5 w-5" />
+      {showReference ? (
+        <div className="space-y-3 rounded-lg border p-4">
+          <div className="flex items-start gap-2">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10 text-brand">
+              <Link2 className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-sm font-medium">ویدیو مرجع (لینک)</div>
+              <p className="text-xs text-muted-foreground">
+                یوتیوب، ویمئو، گوگل درایو یا لینک مستقیم ویدیو
+              </p>
+            </div>
           </div>
-          <div>
-            <div className="text-sm font-medium">ویدیو مرجع (لینک)</div>
-            <p className="text-xs text-muted-foreground">
-              یوتیوب، ویمئو، گوگل درایو یا لینک مستقیم ویدیو
-            </p>
+          <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">آدرس لینک</Label>
+              <Input
+                dir="ltr"
+                placeholder="https://..."
+                value={refUrl}
+                disabled={refBusy || uploadState.isUploading}
+                onChange={(e) => {
+                  setRefUrl(e.target.value);
+                  setRefError(null);
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                عنوان (اختیاری)
+              </Label>
+              <Input
+                placeholder="مثال: ویدیو رفرنس برند"
+                value={refLabel}
+                disabled={refBusy || uploadState.isUploading}
+                onChange={(e) => setRefLabel(e.target.value)}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={refBusy || uploadState.isUploading}
+                onClick={() => {
+                  void addReference();
+                }}
+              >
+                {refBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "افزودن لینک"
+                )}
+              </Button>
+            </div>
           </div>
+          {refError && <p className="text-xs text-destructive">{refError}</p>}
+          {renderAssetList(grouped.REFERENCE || [])}
         </div>
-        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">آدرس لینک</Label>
-            <Input
-              dir="ltr"
-              placeholder="https://..."
-              value={refUrl}
-              disabled={refBusy || uploadState.isUploading}
-              onChange={(e) => {
-                setRefUrl(e.target.value);
-                setRefError(null);
-              }}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">
-              عنوان (اختیاری)
-            </Label>
-            <Input
-              placeholder="مثال: ویدیو رفرنس برند"
-              value={refLabel}
-              disabled={refBusy || uploadState.isUploading}
-              onChange={(e) => setRefLabel(e.target.value)}
-            />
-          </div>
-          <div className="flex items-end">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={refBusy || uploadState.isUploading}
-              onClick={() => {
-                void addReference();
-              }}
-            >
-              {refBusy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                "افزودن لینک"
-              )}
-            </Button>
-          </div>
-        </div>
-        {refError && <p className="text-xs text-destructive">{refError}</p>}
-        {renderAssetList(grouped.REFERENCE || [])}
-      </div>
+      ) : null}
 
-      {showExistingAssets && (grouped.OTHER?.length ?? 0) > 0 && (
+      {showOther && showExistingAssets && (grouped.OTHER?.length ?? 0) > 0 && (
         <div className="space-y-2">
           <Label>سایر دارایی‌ها</Label>
           {renderAssetList(grouped.OTHER)}

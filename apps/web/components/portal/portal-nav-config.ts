@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import {
+  FileSignature,
   FolderKanban,
   LayoutDashboard,
   UserRound,
@@ -16,6 +17,7 @@ export type PortalNavEntry = {
 export const PORTAL_NAV_ENTRIES: PortalNavEntry[] = [
   { key: "dashboard", href: "/portal", label: "داشبورد", icon: LayoutDashboard, exact: true },
   { key: "projects", href: "/portal/projects", label: "پروژه‌های من", icon: FolderKanban },
+  { key: "contracts", href: "/portal/contracts", label: "قراردادها", icon: FileSignature },
   { key: "profile", href: "/portal/profile", label: "پروفایل", icon: UserRound },
 ];
 

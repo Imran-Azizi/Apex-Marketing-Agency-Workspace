@@ -52,6 +52,10 @@ export const BACKUP_TABLES = [
   'EditingTask',
   'EditingResource',
   'ProjectPoster',
+  'ContractCompanyProfile',
+  'ContentCalendar',
+  'ContentCalendarItem',
+  'ContractShare',
   'Approval',
   'ClientFeedback',
 

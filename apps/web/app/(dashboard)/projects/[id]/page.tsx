@@ -211,10 +211,12 @@ const DETAIL_TABS: Array<{
 function tabsForAccess(
   role?: string | null,
   permissions?: string[] | null,
+  { isContractChild = false }: { isContractChild?: boolean } = {},
 ): typeof DETAIL_TABS {
   const can = (code: string) => hasPermission(permissions, code, role);
   return DETAIL_TABS.filter((tab) => {
-    if (tab.id === "finance") return can("finance.view");
+    // Sub-projects of a multi-video contract are billed on the parent contract.
+    if (tab.id === "finance") return !isContractChild && can("finance.view");
     if (tab.id === "ai") return can("content.view");
     if (tab.id === "narration") {
       return (
@@ -418,9 +420,10 @@ export default function ProjectDetailPage({
     }
   }, [role, id, router, canOpenProjectHub]);
 
+  const isContractChild = data?.kind === "CHILD";
   const visibleTabs = useMemo(
-    () => tabsForAccess(role, permissions),
-    [role, permissions],
+    () => tabsForAccess(role, permissions, { isContractChild }),
+    [role, permissions, isContractChild],
   );
 
   const customerTabs = useMemo(
@@ -732,7 +735,7 @@ export default function ProjectDetailPage({
                 />
               )}
 
-              {tab === "finance" && (
+              {tab === "finance" && !isContractChild && (
                 <ProjectFinancePanel
                   finance={data.finance}
                   opportunityId={data.opportunityId}
