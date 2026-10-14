@@ -336,19 +336,9 @@ export const portalService = {
     // Customer-wide totals must count each approved payment once. Per-project
     // `received` is not additive: direct (invoice-less) payments match every
     // cycle of the customer, e.g. a contract and its unpriced videos.
-    const [customerPaid, unlinkedOpportunities] = await Promise.all([
-      sumActivePayments(prisma, { crmCustomerId: auth.customerId }),
-      prisma.opportunity.findMany({
-        where: {
-          crmCustomerId: auth.customerId,
-          deletedAt: null,
-          projectId: null,
-          pipelineStage: { not: "LOST_CANCELED" },
-          agreedPrice: { gt: 0 },
-        },
-        select: { agreedPrice: true },
-      }),
-    ]);
+    const customerPaid = await sumActivePayments(prisma, {
+      crmCustomerId: auth.customerId,
+    });
 
     const stats = {
       total: 0,
@@ -401,15 +391,14 @@ export const portalService = {
     }
 
     const summaries = recentProjects.map(serializePortalProjectSummary);
+    // Only real projects carry value here. Orders without a project are not
+    // added: a CRM order priced before its contract was created would be
+    // counted twice (once on the order, once on the contract).
     const totalProjectValue = roundMoney(
       financeRows.reduce(
         (sum, p) => sum + Number(p.finance?.finalProjectPrice || 0),
         0,
-      ) +
-        unlinkedOpportunities.reduce(
-          (sum, opp) => sum + Number(opp.agreedPrice || 0),
-          0,
-        ),
+      ),
     );
     const projectReceived = roundMoney(customerPaid);
     const pendingInvoices = invoices.filter(
