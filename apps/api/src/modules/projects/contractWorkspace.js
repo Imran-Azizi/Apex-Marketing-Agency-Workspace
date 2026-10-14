@@ -640,7 +640,57 @@ export const contractWorkspaceService = {
   },
 };
 
-/** Read-only view of shared contract content for the customer portal. */
+const PORTAL_REQUESTED_CONTRACT = { brief: { path: ['createdBy'], equals: 'PORTAL' } };
+
+function isPortalRequested(brief) {
+  return plainMeta(brief).createdBy === 'PORTAL';
+}
+
+function portalContractScope(row) {
+  return {
+    videoCount: row.contractVideoCount ?? null,
+    posterCount: row.contractPosterCount ?? null,
+    requestedByCustomer: isPortalRequested(row.brief),
+  };
+}
+
+function briefText(brief, key) {
+  const value = plainMeta(brief)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/** Contact details saved on the contract, falling back to the CRM customer record. */
+function portalContractCustomer(brief, customer) {
+  return {
+    personName: briefText(brief, 'personName') || customer?.personName || null,
+    jobTitle: briefText(brief, 'jobTitle') || customer?.jobTitle || null,
+    companyName: briefText(brief, 'companyName') || customer?.companyName || null,
+    phone: briefText(brief, 'phone') || customer?.phone || customer?.whatsappRaw || null,
+    whatsapp:
+      briefText(brief, 'whatsapp') || customer?.whatsappRaw || customer?.normalizedWhatsapp || null,
+    address: briefText(brief, 'address') || customer?.address || null,
+    email: briefText(brief, 'email') || customer?.email || null,
+    website: briefText(brief, 'website'),
+  };
+}
+
+/** Price and payments for the customer's own contract; null until the team prices it. */
+function portalContractCommercials(finance, opportunity) {
+  const price = Number(finance?.finalProjectPrice) || 0;
+  if (price <= 0) return null;
+  const received = Number(finance?.received) || 0;
+  return {
+    price,
+    received,
+    remaining: Math.max(0, price - received),
+    agreedTerms: opportunity?.agreedTerms?.trim() || null,
+  };
+}
+
+/**
+ * Read-only contract view for the customer portal: contracts with shared content,
+ * plus contracts the customer requested from the portal.
+ */
 export const portalContractService = {
   async list(auth) {
     const rows = await prisma.project.findMany({
@@ -648,14 +698,18 @@ export const portalContractService = {
         crmCustomerId: auth.customerId,
         kind: 'CONTRACT',
         deletedAt: null,
-        contractShares: { some: {} },
+        OR: [{ contractShares: { some: {} } }, PORTAL_REQUESTED_CONTRACT],
       },
       select: {
         id: true,
         code: true,
         title: true,
+        brief: true,
+        createdAt: true,
         contractStartDate: true,
         contractEndDate: true,
+        contractVideoCount: true,
+        contractPosterCount: true,
         contractShares: { select: { section: true, sharedAt: true } },
       },
       orderBy: { updatedAt: 'desc' },
@@ -666,6 +720,8 @@ export const portalContractService = {
       title: row.title,
       startDate: row.contractStartDate,
       endDate: row.contractEndDate,
+      createdAt: row.createdAt,
+      ...portalContractScope(row),
       sections: [...new Set(row.contractShares.map((share) => share.section))],
       lastSharedAt: row.contractShares.reduce(
         (latest, share) => (!latest || share.sharedAt > latest ? share.sharedAt : latest),
@@ -686,17 +742,33 @@ export const portalContractService = {
         id: true,
         code: true,
         title: true,
+        brief: true,
         contractStartDate: true,
         contractEndDate: true,
+        contractVideoCount: true,
+        contractPosterCount: true,
         contractShares: true,
+        finance: { select: { finalProjectPrice: true, received: true } },
+        crmCustomer: {
+          select: {
+            personName: true,
+            jobTitle: true,
+            companyName: true,
+            phone: true,
+            whatsappRaw: true,
+            normalizedWhatsapp: true,
+            address: true,
+            email: true,
+          },
+        },
       },
     });
-    if (!project || !project.contractShares.length) {
+    if (!project || (!project.contractShares.length && !isPortalRequested(project.brief))) {
       throw new AppError('قرارداد یافت نشد', 404, 'NOT_FOUND');
     }
     const shares = serializeShares(project.contractShares);
     const sharedCalendarIds = Object.keys(shares.calendars);
-    const [company, assets, calendars] = await Promise.all([
+    const [company, assets, calendars, opportunity] = await Promise.all([
       shares.company
         ? prisma.contractCompanyProfile.findUnique({ where: { projectId: project.id } })
         : null,
@@ -708,6 +780,10 @@ export const portalContractService = {
             orderBy: { createdAt: 'asc' },
           })
         : [],
+      prisma.opportunity.findFirst({
+        where: { projectId: project.id, deletedAt: null },
+        select: { agreedTerms: true },
+      }),
     ]);
     return {
       id: project.id,
@@ -715,6 +791,9 @@ export const portalContractService = {
       title: project.title,
       startDate: project.contractStartDate,
       endDate: project.contractEndDate,
+      ...portalContractScope(project),
+      customer: portalContractCustomer(project.brief, project.crmCustomer),
+      commercials: portalContractCommercials(project.finance, opportunity),
       company: serializeCompany(company),
       assets,
       calendars: calendars.map(serializeCalendar),

@@ -70,22 +70,51 @@ export type ContractWorkspace = {
   calendarMaxRows: number;
 };
 
-export type PortalContractSummary = {
+type PortalContractScope = {
+  videoCount: number | null;
+  posterCount: number | null;
+  /** Requested by the customer from the portal (no team content shared yet is normal). */
+  requestedByCustomer: boolean;
+};
+
+export type PortalContractSummary = PortalContractScope & {
   id: string;
   code: string;
   title: string;
   startDate: string | null;
   endDate: string | null;
+  createdAt: string;
   sections: Array<"COMPANY" | "ASSETS" | "CALENDAR">;
   lastSharedAt: string | null;
 };
 
-export type PortalContractDetail = {
+export type PortalContractCustomer = {
+  personName: string | null;
+  jobTitle: string | null;
+  companyName: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  address: string | null;
+  email: string | null;
+  website: string | null;
+};
+
+export type PortalContractCommercials = {
+  price: number;
+  received: number;
+  remaining: number;
+  agreedTerms: string | null;
+};
+
+export type PortalContractDetail = PortalContractScope & {
   id: string;
   code: string;
   title: string;
   startDate: string | null;
   endDate: string | null;
+  customer: PortalContractCustomer;
+  /** Null until the team sets the contract price. */
+  commercials: PortalContractCommercials | null;
   company: CompanyProfile | null;
   assets: ContractAsset[];
   calendars: ContentCalendar[];

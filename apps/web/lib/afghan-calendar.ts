@@ -330,17 +330,59 @@ export function afghanFromGregorianInput(value: string): AfghanDate | null {
 }
 
 export function localTodayGregorian(): GregorianDate {
-  const now = new Date();
-  return {
-    gy: now.getFullYear(),
-    gm: now.getMonth() + 1,
-    gd: now.getDate(),
-  };
+  // Civil day in Afghanistan, not the browser's local zone.
+  return (
+    civilGregorianParts(new Date()) ?? {
+      gy: new Date().getFullYear(),
+      gm: new Date().getMonth() + 1,
+      gd: new Date().getDate(),
+    }
+  );
 }
 
 export function localTodayAfghan(): AfghanDate | null {
   const today = localTodayGregorian();
   return gregorianToAfghan(today.gy, today.gm, today.gd);
+}
+
+/**
+ * Current Afghan Solar Hijri date from the clock. Never hardcodes a year —
+ * when the Afghan new year begins (e.g. 1405 → 1406), the returned year
+ * updates automatically.
+ */
+export function resolveLocalTodayAfghan(): AfghanDate {
+  const converted = localTodayAfghan();
+  if (converted) return converted;
+
+  // Backup via Intl's Persian calendar (same Solar Hijri year numbering).
+  const parts = new Intl.DateTimeFormat("en-u-ca-persian", {
+    timeZone: AFGHAN_TIME_ZONE,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(new Date());
+  const jy = Number(parts.find((part) => part.type === "year")?.value);
+  const jm = Number(parts.find((part) => part.type === "month")?.value);
+  const jd = Number(parts.find((part) => part.type === "day")?.value);
+  if (isValidAfghanDate(jy, jm, jd)) return { jy, jm, jd };
+
+  const gregorian = localTodayGregorian();
+  // Approximate only if both converters fail (should not happen for civil dates).
+  const approxYear = gregorian.gm > 3 || (gregorian.gm === 3 && gregorian.gd >= 21)
+    ? gregorian.gy - 621
+    : gregorian.gy - 622;
+  return { jy: approxYear, jm: 1, jd: 1 };
+}
+
+/** Current Afghan Solar Hijri year (updates every Nowruz automatically). */
+export function currentAfghanYear(): number {
+  return resolveLocalTodayAfghan().jy;
+}
+
+/** Placeholder like `1405 میزان 01` built from today's Afghan month/year. */
+export function afghanDatePlaceholder(): string {
+  const today = resolveLocalTodayAfghan();
+  return formatAfghanParts(today.jy, today.jm, 1);
 }
 
 /** Saturday = 0 … Friday = 6. Noon avoids a DST midnight skip. */
@@ -410,8 +452,8 @@ function monthIndexFromName(token: string): number | null {
 }
 
 /**
- * Accepts the displayed form and numeric entry:
- * `1405 سنبله 05`, `05 سنبله 1405`, `1405/06/05`, `1405-6-5`.
+ * Accepts the displayed form and numeric entry, e.g.
+ * `1406 سنبله 05`, `05 سنبله 1406`, `1406/06/05`, `1406-6-5`.
  */
 export function parseAfghanDateInput(raw: string): AfghanDate | null {
   const text = toEnglishDigits(raw).trim().replace(/\s+/g, " ");

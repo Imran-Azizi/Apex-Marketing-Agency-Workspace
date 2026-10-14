@@ -7,6 +7,7 @@ import { validate } from '../../middleware/validate.js';
 import { ok, created } from '../../utils/response.js';
 import { portalService, registerSchema, briefSchema } from './service.js';
 import { portalContractService } from '../projects/contractWorkspace.js';
+import { projectService } from '../projects/service.js';
 
 const router = Router();
 
@@ -101,6 +102,10 @@ router.get('/projects/:id/contact-manager', async (req, res, next) => {
 
 router.get('/contracts', async (req, res, next) => {
   try { ok(res, await portalContractService.list(req.auth)); } catch (e) { next(e); }
+});
+
+router.post('/contracts', requireCsrf, async (req, res, next) => {
+  try { created(res, await projectService.createPortalContract(req.body, req.auth, req)); } catch (e) { next(e); }
 });
 
 router.get('/contracts/:id', async (req, res, next) => {

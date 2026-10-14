@@ -1,6 +1,6 @@
 import {
   afghanMonthGregorianBounds,
-  localTodayAfghan,
+  resolveLocalTodayAfghan,
   localTodayGregorian,
   toGregorianInputValue,
 } from "@/lib/afghan-calendar";
@@ -83,8 +83,7 @@ export function startOfLastSevenDays(d: Date = todayStart()): Date {
 
 /** First day of the current Afghan (Solar Hijri) month as a local Date. */
 export function startOfCurrentAfghanMonth(): Date | null {
-  const afghan = localTodayAfghan();
-  if (!afghan) return null;
+  const afghan = resolveLocalTodayAfghan();
   const bounds = afghanMonthGregorianBounds(afghan.jy, afghan.jm);
   if (!bounds) return null;
   return parseLocalDate(bounds.fromIso);
@@ -92,8 +91,7 @@ export function startOfCurrentAfghanMonth(): Date | null {
 
 /** 1 حمل of the current Afghan year as a local Date. */
 export function startOfCurrentAfghanYear(): Date | null {
-  const afghan = localTodayAfghan();
-  if (!afghan) return null;
+  const afghan = resolveLocalTodayAfghan();
   const iso = toGregorianInputValue(afghan.jy, 1, 1);
   if (!iso) return null;
   return parseLocalDate(iso);

@@ -191,6 +191,7 @@ export default function PortalDashboardPage() {
                   ? formatDate(data.financial.lastPaymentDate)
                   : "—"
               }
+              amountDir="rtl"
               icon={Clock3}
               iconClassName="bg-sky-500/10 text-sky-700 dark:text-sky-300"
               status="تاریخ"

@@ -6,7 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn, formatCurrency } from "@/lib/utils";
-import { parseNumberInput, type ContractScopeInput } from "@/lib/contract-project";
+import { AfghanDateField } from "@/components/shared/afghan-date-field";
+import {
+  CONTRACT_PERIOD_MESSAGE,
+  parseNumberInput,
+  type ContractScopeInput,
+} from "@/lib/contract-project";
 
 function FieldLabel({
   children,
@@ -150,27 +155,26 @@ export function ContractScopeFields({
         <FieldLabel htmlFor={id("start")} required={scopeRequired}>
           تاریخ شروع قرارداد
         </FieldLabel>
-        <Input
+        <AfghanDateField
           id={id("start")}
-          type="date"
           value={value.startDate}
-          max={value.endDate || undefined}
-          onChange={(event) => onChange({ startDate: event.target.value })}
-          className="h-11"
+          onChange={(startDate) => onChange({ startDate })}
+          inputClassName="h-11"
         />
       </div>
       <div className="space-y-2">
         <FieldLabel htmlFor={id("end")} required={scopeRequired}>
           تاریخ ختم قرارداد
         </FieldLabel>
-        <Input
+        <AfghanDateField
           id={id("end")}
-          type="date"
           value={value.endDate}
-          min={value.startDate || undefined}
-          onChange={(event) => onChange({ endDate: event.target.value })}
-          className="h-11"
+          onChange={(endDate) => onChange({ endDate })}
+          inputClassName="h-11"
         />
+        {value.startDate && value.endDate && value.endDate < value.startDate ? (
+          <p className="text-xs text-destructive">{CONTRACT_PERIOD_MESSAGE}</p>
+        ) : null}
       </div>
 
       {showCommercials ? (

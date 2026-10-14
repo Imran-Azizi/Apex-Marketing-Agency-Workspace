@@ -56,15 +56,18 @@ function createKey() {
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
-export function CreateContractForm({
-  crmCustomerId,
-  profile,
-  onCreated,
-}: {
-  crmCustomerId: string;
+type CreateContractFormProps = {
   profile: ContractCustomerProfile;
   onCreated: (project: { id: string }) => void;
-}) {
+} & (
+  | { variant?: "internal"; crmCustomerId: string }
+  /** Customer request: scope only — the manager sets price and terms later. */
+  | { variant: "portal"; opportunityId: string }
+);
+
+export function CreateContractForm(props: CreateContractFormProps) {
+  const { profile, onCreated } = props;
+  const isPortal = props.variant === "portal";
   const idempotencyKey = useRef(createKey());
   const [personName, setPersonName] = useState(profile.personName || "");
   const [jobTitle, setJobTitle] = useState(profile.jobTitle || "");
@@ -106,13 +109,12 @@ export function CreateContractForm({
         throw new Error("ایمیل معتبر نیست.");
       }
       const scopeError = validateContractScope(scope, {
-        commercials: "required",
+        commercials: isPortal ? "skip" : "required",
         requireScope: true,
       });
       if (scopeError) throw new Error(scopeError);
 
-      return apiPost<{ id: string }>("/projects/contracts", {
-        crmCustomerId,
+      const body = {
         idempotencyKey: idempotencyKey.current,
         personName: personName.trim(),
         jobTitle: jobTitle.trim(),
@@ -122,16 +124,30 @@ export function CreateContractForm({
         address: address.trim(),
         email: trimmedEmail || undefined,
         website: website.trim() || undefined,
-        agreedPrice: parseNumberInput(scope.agreedPrice),
-        agreedTerms: scope.agreedTerms.trim(),
         videoCount: parseNumberInput(scope.videoCount),
         posterCount: parseNumberInput(scope.posterCount) ?? 0,
         startDate: scope.startDate,
         endDate: scope.endDate,
+      };
+      if (props.variant === "portal") {
+        return apiPost<{ id: string }>("/portal/contracts", {
+          ...body,
+          opportunityId: props.opportunityId,
+        });
+      }
+      return apiPost<{ id: string }>("/projects/contracts", {
+        ...body,
+        crmCustomerId: props.crmCustomerId,
+        agreedPrice: parseNumberInput(scope.agreedPrice),
+        agreedTerms: scope.agreedTerms.trim(),
       });
     },
     onSuccess: (project) => {
-      toast.success("قرارداد ایجاد شد. حالا می‌توانید ویدیوها را اضافه کنید.");
+      toast.success(
+        isPortal
+          ? "قرارداد ثبت شد. تیم اپکس قیمت، شرایط و ویدیوهای آن را تنظیم می‌کند."
+          : "قرارداد ایجاد شد. حالا می‌توانید ویدیوها را اضافه کنید.",
+      );
       onCreated(project);
     },
     onError: (error) => {
@@ -244,11 +260,19 @@ export function CreateContractForm({
 
       <Card className="border shadow-sm">
         <CardContent className="space-y-5 p-4 sm:p-6">
-          <h2 className="text-base font-semibold">جزئیات قرارداد</h2>
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold">جزئیات قرارداد</h2>
+            {isPortal ? (
+              <p className="text-xs text-muted-foreground">
+                قیمت و شرایط قرارداد پس از بررسی توسط تیم اپکس ثبت می‌شود.
+              </p>
+            ) : null}
+          </div>
           <ContractScopeFields
             idPrefix="contract"
             value={scope}
             onChange={(patch) => setScope((current) => ({ ...current, ...patch }))}
+            showCommercials={!isPortal}
           />
         </CardContent>
       </Card>
@@ -261,7 +285,7 @@ export function CreateContractForm({
           disabled={createMut.isPending}
         >
           {createMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          ذخیره قرارداد
+          {isPortal ? "ثبت قرارداد" : "ذخیره قرارداد"}
         </Button>
       </div>
     </form>

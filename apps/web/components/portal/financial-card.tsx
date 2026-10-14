@@ -12,6 +12,8 @@ type FinancialCardProps = {
   statusTone?: "neutral" | "success" | "warning" | "brand";
   highlight?: boolean;
   className?: string;
+  /** Money reads LTR; Persian text such as dates needs "rtl" to keep word order. */
+  amountDir?: "ltr" | "rtl";
 };
 
 const statusToneClass: Record<
@@ -33,6 +35,7 @@ export function FinancialCard({
   statusTone = "neutral",
   highlight,
   className,
+  amountDir = "ltr",
 }: FinancialCardProps) {
   return (
     <div
@@ -69,7 +72,7 @@ export function FinancialCard({
           highlight && "text-brand",
         )}
       >
-        <bdi dir="ltr" className="inline-block max-w-full truncate">
+        <bdi dir={amountDir} className="inline-block max-w-full truncate">
           {amount}
         </bdi>
       </p>

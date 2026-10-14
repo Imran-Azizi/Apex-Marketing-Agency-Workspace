@@ -1037,3 +1037,12 @@
   }
 }
 
+/*
+ * Radix Dialog / react-remove-scroll sets `pointer-events: none !important` on
+ * body. Floating calendars portaled to body must opt back in with !important
+ * or day clicks never reach the buttons.
+ */
+[data-afghan-date-calendar] {
+  pointer-events: auto !important;
+}
+

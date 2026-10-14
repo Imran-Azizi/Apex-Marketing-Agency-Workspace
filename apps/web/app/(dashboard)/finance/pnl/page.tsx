@@ -12,7 +12,7 @@ import { apiGet } from "@/lib/api";
 import {
   AFGHAN_MONTHS,
   formatAfghanMonthYear,
-  localTodayAfghan,
+  resolveLocalTodayAfghan,
 } from "@/lib/afghan-calendar";
 import { cn } from "@/lib/utils";
 import { useHasPermission } from "@/lib/permissions";
@@ -65,7 +65,7 @@ function monthKey(year: number, month: number) {
 }
 
 function initialAfghanMonth() {
-  return localTodayAfghan() ?? { jy: 1405, jm: 1, jd: 1 };
+  return resolveLocalTodayAfghan();
 }
 
 export default function FinancePnlPage() {

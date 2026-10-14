@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Building2, CalendarDays, ChevronLeft, FileSignature, FolderOpen } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import type { PortalContractSummary } from "@/lib/contract-workspace";
+import { formatCount } from "@/lib/contract-project";
 import { formatDate } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -29,7 +30,7 @@ export default function PortalContractsPage() {
     <div dir="rtl" className="space-y-4 text-start sm:space-y-6">
       <PageHeader
         title="قراردادها"
-        subtitle="اطلاعات شرکت، دارایی‌ها و تقویم محتوایی که برای شما ارسال شده"
+        subtitle="قراردادهای چندویدیویی شما و محتوایی که تیم اپکس برایتان ارسال کرده"
         subtitleClassName="hidden sm:block"
         inline
         className="mb-0 sm:mb-2"
@@ -44,8 +45,8 @@ export default function PortalContractsPage() {
         <EmptyState title="بارگذاری قراردادها ناموفق بود" />
       ) : !data?.length ? (
         <EmptyState
-          title="هنوز محتوایی ارسال نشده"
-          description="وقتی تیم اپکس اطلاعات قرارداد را برای شما ارسال کند، اینجا نمایش داده می‌شود."
+          title="هنوز قراردادی ثبت نشده"
+          description="قراردادهای چندویدیویی شما و محتوایی که تیم اپکس ارسال کند، اینجا نمایش داده می‌شود."
         />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -72,6 +73,21 @@ export default function PortalContractsPage() {
                   <ChevronLeft className="mt-2 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-hover:-translate-x-0.5" />
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
+                  {contract.requestedByCustomer && !sections.length ? (
+                    <Badge variant="outline" className="font-normal">
+                      ثبت‌شده توسط شما
+                    </Badge>
+                  ) : null}
+                  {contract.videoCount != null ? (
+                    <Badge variant="secondary" className="font-normal tabular-nums">
+                      {formatCount(contract.videoCount)} ویدیو
+                    </Badge>
+                  ) : null}
+                  {contract.posterCount ? (
+                    <Badge variant="secondary" className="font-normal tabular-nums">
+                      {formatCount(contract.posterCount)} پوستر
+                    </Badge>
+                  ) : null}
                   {sections.map((key) => {
                     const { label, icon: Icon } = SECTION_META[key];
                     return (

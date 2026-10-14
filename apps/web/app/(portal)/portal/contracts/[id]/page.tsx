@@ -18,6 +18,7 @@ import { CompanyProfileView } from "@/components/contract-content/company-profil
 import { ContractAssetsGrid } from "@/components/contract-content/asset-card";
 import { CalendarTable } from "@/components/contract-content/calendar-table";
 import { CalendarPdfCard } from "@/components/contract-content/calendar-pdf-card";
+import { PortalContractOverview } from "@/components/contract-content/portal-contract-overview";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,16 +101,14 @@ export default function PortalContractPage({ params }: { params: Promise<{ id: s
             {data.code}
           </Badge>
         </div>
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="min-w-0 space-y-1">
-            <h1 className="break-words text-xl font-bold tracking-tight sm:text-2xl">{data.title}</h1>
-            {data.startDate || data.endDate ? (
-              <p className="text-sm text-muted-foreground">
-                مدت قرارداد: {data.startDate ? formatDate(data.startDate) : "—"} تا{" "}
-                {data.endDate ? formatDate(data.endDate) : "—"}
-              </p>
-            ) : null}
-          </div>
+        <h1 className="break-words text-xl font-bold tracking-tight sm:text-2xl">{data.title}</h1>
+      </section>
+
+      <PortalContractOverview contract={data} />
+
+      <section className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <h2 className="text-base font-bold">محتوای ارسال‌شده</h2>
           {tabs.length ? (
             <div
               role="tablist"
@@ -141,12 +140,7 @@ export default function PortalContractPage({ params }: { params: Promise<{ id: s
             </div>
           ) : null}
         </div>
-      </section>
-
-      <section
-        role="tabpanel"
-        className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-6"
-      >
+        <div role="tabpanel" className="space-y-4">
         {active === "company" && data.company ? (
           <>
             <SharedAt value={data.shares.company?.sharedAt} />
@@ -187,9 +181,17 @@ export default function PortalContractPage({ params }: { params: Promise<{ id: s
               );
             })}
           </div>
+        ) : data.requestedByCustomer ? (
+          <div className="space-y-1 py-8 text-center">
+            <p className="text-sm font-medium">قرارداد شما ثبت شد.</p>
+            <p className="text-xs text-muted-foreground">
+              اطلاعات شرکت، دارایی‌ها و تقویم محتوایی پس از ارسال توسط تیم اپکس اینجا نمایش داده می‌شود.
+            </p>
+          </div>
         ) : (
           <p className="py-8 text-center text-sm text-muted-foreground">هنوز محتوایی ارسال نشده.</p>
         )}
+        </div>
       </section>
     </div>
   );

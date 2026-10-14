@@ -67,9 +67,12 @@ export function serializePortalAsset(asset) {
 }
 
 export function serializePortalProjectSummary(project) {
-  const budget = project.finance
+  const price = project.finance
     ? Number(project.finance.finalProjectPrice)
     : null;
+  // Contract videos are usually unpriced; their price lives on the contract.
+  const budget =
+    project.kind === "CHILD" && !(price > 0) ? null : price;
   const progress = buildProjectProgress({
     status: project.status,
     customerFacingStatus: project.customerFacingStatus,

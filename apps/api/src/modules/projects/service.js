@@ -151,20 +151,39 @@ function contractPeriodIsValid({ startDate, endDate }) {
 
 const CONTRACT_PERIOD_MESSAGE = 'تاریخ ختم قرارداد نمی‌تواند قبل از تاریخ شروع باشد';
 
+const contractCustomerFields = {
+  idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
+  personName: z.string().trim().min(1).max(200),
+  jobTitle: z.string().trim().min(1).max(200),
+  companyName: z.string().trim().min(1).max(200),
+  phone: z.string().trim().min(5).max(40),
+  whatsapp: z.string().trim().min(5).max(40),
+  address: z.string().trim().min(1).max(500),
+  email: optionalEmail,
+  website: optionalWebsite,
+};
+
 const createContractSchema = z
   .object({
     crmCustomerId: z.string().min(1),
-    idempotencyKey: z.string().trim().min(8).max(80).optional().nullable(),
-    personName: z.string().trim().min(1).max(200),
-    jobTitle: z.string().trim().min(1).max(200),
-    companyName: z.string().trim().min(1).max(200),
-    phone: z.string().trim().min(5).max(40),
-    whatsapp: z.string().trim().min(5).max(40),
-    address: z.string().trim().min(1).max(500),
-    email: optionalEmail,
-    website: optionalWebsite,
+    ...contractCustomerFields,
     ...contractScopeFields,
     posterCount: contractScopeFields.posterCount.optional().default(0),
+  })
+  .refine(contractPeriodIsValid, { message: CONTRACT_PERIOD_MESSAGE, path: ['endDate'] });
+
+/** Customer-requested contract: scope only — the manager sets price and terms later. */
+const portalContractSchema = z
+  .object({
+    opportunityId: z
+      .string({ required_error: 'سفارش تأییدشده‌ای برای این قرارداد یافت نشد' })
+      .trim()
+      .min(1, 'سفارش تأییدشده‌ای برای این قرارداد یافت نشد'),
+    ...contractCustomerFields,
+    videoCount: contractScopeFields.videoCount,
+    posterCount: contractScopeFields.posterCount.optional().default(0),
+    startDate: contractScopeFields.startDate,
+    endDate: contractScopeFields.endDate,
   })
   .refine(contractPeriodIsValid, { message: CONTRACT_PERIOD_MESSAGE, path: ['endDate'] });
 
@@ -1712,6 +1731,270 @@ export const projectService = {
         if (isIdempotencyUniqueConflict(err)) {
           const replayed = await replay();
           if (replayed) return this.get(replayed.id, auth);
+        }
+        throw err;
+      }
+    });
+  },
+
+  /**
+   * Customer portal: open a multi-video contract on a confirmed order (opportunity).
+   * Any price already agreed on the order is kept; otherwise the manager adds price
+   * and terms from the contract page. Child videos are created by the team.
+   */
+  async createPortalContract(body, auth, req) {
+    if (auth?.audience !== 'PORTAL' || !auth.customerId) {
+      throw new AppError('دسترسی ندارید', 403, 'FORBIDDEN');
+    }
+    const parsed = portalContractSchema.safeParse(body || {});
+    if (!parsed.success) {
+      throw new AppError(
+        parsed.error.issues?.[0]?.message || 'اطلاعات قرارداد ناقص یا نامعتبر است',
+        400,
+        'VALIDATION',
+      );
+    }
+    const input = parsed.data;
+    const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
+    const toResult = (project) => ({
+      id: project.id,
+      code: project.code,
+      title: project.title,
+      kind: project.kind,
+    });
+
+    const replay = async () => {
+      const byKey = await findProjectByCreateKey(prisma, idempotencyKey, auth.customerId);
+      if (byKey) return byKey;
+      const byOpp = await findProjectForOpportunity(prisma, input.opportunityId);
+      return byOpp && byOpp.crmCustomerId === auth.customerId ? byOpp : null;
+    };
+
+    const existing = await replay();
+    if (existing) return toResult(existing);
+
+    return withProjectCreateLock(idempotencyKey, async () => {
+      const lockedExisting = await replay();
+      if (lockedExisting) return toResult(lockedExisting);
+
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          await lockOpportunityRow(tx, input.opportunityId);
+          const opportunity = await tx.opportunity.findFirst({
+            where: {
+              id: input.opportunityId,
+              crmCustomerId: auth.customerId,
+              deletedAt: null,
+            },
+            include: { crmCustomer: { include: { portalAccount: true } } },
+          });
+          if (!opportunity) throw new AppError('سفارش یافت نشد', 404, 'NOT_FOUND');
+          if (opportunity.projectId) {
+            const linked = await tx.project.findFirst({
+              where: { id: opportunity.projectId, deletedAt: null },
+            });
+            if (linked) return { project: linked, replayed: true };
+          }
+          if (['LOST_CANCELED', 'DELIVERED'].includes(opportunity.pipelineStage)) {
+            throw new AppError('این سفارش دیگر فعال نیست', 400, 'VALIDATION');
+          }
+
+          const manager = await tx.user.findFirst({
+            where: { role: { code: 'MANAGER' }, isActive: true, deletedAt: null },
+          });
+          if (!manager) throw new AppError('مدیر سیستم تعریف نشده', 500, 'NO_MANAGER');
+
+          const customer = opportunity.crmCustomer;
+          await syncCustomerWhatsappFromBrief(tx, customer, input.whatsapp);
+
+          const brief = {
+            personName: input.personName,
+            jobTitle: input.jobTitle,
+            companyName: input.companyName,
+            phone: input.phone,
+            whatsapp: input.whatsapp,
+            address: input.address,
+            email: input.email || undefined,
+            website: input.website || undefined,
+            createdBy: 'PORTAL',
+            createdByPortalAccountId: auth.portalAccountId || undefined,
+          };
+          for (const key of Object.keys(brief)) {
+            if (brief[key] === undefined) delete brief[key];
+          }
+
+          const year = new Date().getFullYear();
+          const count = await tx.project.count();
+          const code = `APX-${year}-${String(count + 1).padStart(4, '0')}`;
+          const project = await tx.project.create({
+            data: {
+              code,
+              title: contractTitleFor(input),
+              status: 'NEW_MANAGER_REVIEW',
+              customerFacingStatus: 'INFO_RECEIVED',
+              crmCustomerId: customer.id,
+              portalAccountId: auth.portalAccountId || customer.portalAccount?.id || null,
+              managerId: manager.id,
+              kind: 'CONTRACT',
+              brief,
+              platforms: [],
+              contractVideoCount: input.videoCount,
+              contractPosterCount: input.posterCount,
+              contractStartDate: input.startDate,
+              contractEndDate: input.endDate,
+            },
+          });
+
+          if (idempotencyKey) {
+            await tx.$executeRaw`
+              UPDATE "projects"
+              SET "createIdempotencyKey" = ${idempotencyKey}
+              WHERE id = ${project.id}
+            `;
+          }
+
+          const agreed = resolveAgreedPrice(opportunity, null);
+          const snap = await buildProjectFinanceSnapshot(tx, {
+            crmCustomerId: customer.id,
+            opportunityId: opportunity.id,
+            agreedPrice: agreed,
+          });
+          const opportunityUpdate = {
+            projectId: project.id,
+            videoCount: input.videoCount,
+            advancePayment: snap.totalPaid,
+          };
+          if (agreed > 0 && opportunity.agreedPrice == null) {
+            opportunityUpdate.agreedPrice = agreed;
+          }
+          await tx.opportunity.update({
+            where: { id: opportunity.id },
+            data: opportunityUpdate,
+          });
+          await tx.projectFinance.create({
+            data: {
+              projectId: project.id,
+              basePrice: agreed,
+              agreedPrice: agreed,
+              discount: 0,
+              finalProjectPrice: snap.projectTotal,
+              received: snap.totalPaid,
+            },
+          });
+          await tx.invoice.updateMany({
+            where: { opportunityId: opportunity.id },
+            data: { projectId: project.id },
+          });
+
+          await tx.projectAssignment.create({
+            data: { projectId: project.id, role: 'MANAGER', userId: manager.id },
+          });
+
+          await tx.projectTimelineEvent.create({
+            data: {
+              projectId: project.id,
+              type: 'CREATED',
+              title: 'قرارداد چندویدیویی توسط مشتری ثبت شد',
+              body:
+                agreed > 0
+                  ? 'مشتری جزئیات قرارداد را از پورتال ثبت کرد. ویدیوها جداگانه ساخته می‌شوند.'
+                  : 'مشتری جزئیات قرارداد را از پورتال ثبت کرد. قیمت و شرایط قرارداد را تکمیل کنید.',
+              actorId: auth.portalAccountId || null,
+            },
+          });
+
+          await rebuildProjectContext(project.id, tx);
+
+          const otherProjects = await tx.project.count({
+            where: { crmCustomerId: customer.id, deletedAt: null, id: { not: project.id } },
+          });
+          const { applyCrmEvent } = await import('../crm/sync.js');
+          const { CRM_EVENTS } = await import('../crm/pipeline.js');
+          await applyCrmEvent(tx, {
+            customerId: customer.id,
+            opportunityId: opportunity.id,
+            event: CRM_EVENTS.PROJECT_CREATED,
+            source: 'PORTAL',
+            relatedType: 'Project',
+            relatedId: project.id,
+            isRepeat: otherProjects > 0,
+            title: 'قرارداد چندویدیویی توسط مشتری ثبت شد',
+          });
+
+          const customerName =
+            getCustomerPersonName({
+              personName: input.personName,
+              companyName: input.companyName,
+            }) ||
+            getCustomerPersonName(customer) ||
+            'مشتری';
+
+          await notifyManagersOnce(
+            {
+              eventKey: `contract.created:${project.id}`,
+              title: 'درخواست قرارداد چندویدیویی از پورتال مشتری',
+              body:
+                agreed > 0
+                  ? `${customerName} — ${project.title} (${project.code})`
+                  : `${customerName} — ${project.title} (${project.code}) · قیمت و شرایط را تکمیل کنید`,
+              link: `/projects/${project.id}`,
+              meta: {
+                type: 'CONTRACT_CREATED',
+                projectId: project.id,
+                projectCode: project.code,
+                projectName: project.title,
+              },
+            },
+            tx,
+          );
+
+          const portalAccountId = auth.portalAccountId || customer.portalAccount?.id || null;
+          if (portalAccountId) {
+            await createNotificationOnce(
+              {
+                portalAccountId,
+                audience: 'PORTAL',
+                eventKey: `contract.created.portal:${project.id}`,
+                title: 'قرارداد چندویدیویی ثبت شد',
+                body: `${project.title} (${project.code}) برای بررسی به تیم اپکس ارسال شد.`,
+                link: `/portal/contracts/${project.id}`,
+                meta: {
+                  type: 'CONTRACT_CREATED',
+                  projectId: project.id,
+                  projectCode: project.code,
+                  projectName: project.title,
+                },
+              },
+              tx,
+            );
+          }
+
+          return { project, replayed: false };
+        });
+        if (result.replayed) return toResult(result.project);
+        const created = result.project;
+
+        await writeAudit({
+          action: 'PROJECT_AUTO_CREATE',
+          entityType: 'Project',
+          entityId: created.id,
+          after: {
+            code: created.code,
+            kind: 'CONTRACT',
+            opportunityId: input.opportunityId,
+            videoCount: input.videoCount,
+            posterCount: input.posterCount,
+            startDate: input.startDate,
+            endDate: input.endDate,
+          },
+          req,
+        });
+
+        return toResult(created);
+      } catch (err) {
+        if (isIdempotencyUniqueConflict(err)) {
+          const replayed = await replay();
+          if (replayed) return toResult(replayed);
         }
         throw err;
       }

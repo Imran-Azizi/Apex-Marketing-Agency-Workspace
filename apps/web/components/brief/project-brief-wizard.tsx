@@ -1118,6 +1118,7 @@ export function ProjectBriefWizard({
                   deletePath={assetsDeletePath}
                   kinds={assetKinds}
                   library={assetLibrary}
+                  sessionOnly={mode === "portal"}
                 />
               </CardContent>
             </Card>

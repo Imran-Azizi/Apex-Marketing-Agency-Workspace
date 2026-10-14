@@ -189,6 +189,8 @@ type ClientAssetsUploaderProps = {
    * upload sections then only show files uploaded in this session.
    */
   library?: AssetLibrary;
+  /** Only list files uploaded in this session; previously saved files stay hidden. */
+  sessionOnly?: boolean;
 };
 
 function kindIcon(kind: string, mime?: string | null) {
@@ -451,8 +453,10 @@ export function ClientAssetsUploader({
   notice = "create",
   kinds,
   library,
+  sessionOnly = false,
 }: ClientAssetsUploaderProps) {
   const [sessionIds, setSessionIds] = useState<string[]>([]);
+  const onlySessionUploads = sessionOnly || Boolean(library);
   const slots = useMemo(
     () => (kinds ? SLOTS.filter((slot) => kinds.includes(slot.kind)) : SLOTS),
     [kinds],
@@ -516,13 +520,14 @@ export function ClientAssetsUploader({
     map.REFERENCE = [];
     map.OTHER = [];
     for (const a of assets) {
+      if (onlySessionUploads && !sessionIds.includes(a.id)) continue;
       if (map[a.kind]) map[a.kind].push(a);
       else if (a.kind === "CATALOG") map.BRANDBOOK.push(a);
       else if (a.kind === "AUDIO") map.PRONUNCIATION.push(a);
       else map.OTHER.push(a);
     }
     return map;
-  }, [assets]);
+  }, [assets, onlySessionUploads, sessionIds]);
 
   const toggleSelected = useCallback(
     (id: string, checked: boolean) => {
@@ -698,11 +703,8 @@ export function ClientAssetsUploader({
     setPending((prev) => prev.filter((x) => x.id !== id));
   }
 
-  function renderAssetList(allAssets: ClientAssetItem[]) {
+  function renderAssetList(list: ClientAssetItem[]) {
     if (!showExistingAssets) return null;
-    const list = library
-      ? allAssets.filter((a) => sessionIds.includes(a.id))
-      : allAssets;
     if (!list.length) {
       return (
         <p className="text-xs text-muted-foreground">

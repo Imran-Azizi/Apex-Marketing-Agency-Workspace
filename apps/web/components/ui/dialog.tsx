@@ -27,7 +27,7 @@ function isNestedOverlayMenu(target: EventTarget | null) {
   return target instanceof Element
     ? Boolean(
         target.closest(
-          "[data-phone-country-menu],[data-radix-dropdown-menu-content],[data-radix-select-content],[data-radix-popover-content],[data-radix-popper-content-wrapper]",
+          "[data-phone-country-menu],[data-afghan-date-calendar],[data-radix-dropdown-menu-content],[data-radix-select-content],[data-radix-popover-content],[data-radix-popper-content-wrapper]",
         ),
       )
     : false;

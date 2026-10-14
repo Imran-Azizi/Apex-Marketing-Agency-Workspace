@@ -34,6 +34,9 @@ import {
 import {
   syncProjectFinanceFromPayments,
   hydrateProjectsFinanceFromOpportunities,
+  paymentsWhere,
+  roundMoney,
+  sumActivePayments,
 } from "../crm/paymentFinance.js";
 import {
   buildProjectFinanceSnapshot,
@@ -250,15 +253,24 @@ export const portalService = {
     const where = customerProjectWhere(auth);
     const recentTake = 8;
 
-    const [statusGroups, financeRows, recentProjects, invoices, pendingBriefsCount, pendingApprovals] =
+    const [
+      statusGroups,
+      financeRows,
+      recentProjects,
+      invoices,
+      pendingBriefsCount,
+      pendingApprovals,
+      lastPayment,
+    ] =
       await Promise.all([
         prisma.project.groupBy({
           by: ["customerFacingStatus"],
           where,
           _count: { _all: true },
         }),
+        // Finance covers every priced project, including multi-video contracts.
         prisma.project.findMany({
-          where,
+          where: { crmCustomerId: auth.customerId, deletedAt: null },
           select: {
             id: true,
             finance: {
@@ -272,6 +284,7 @@ export const portalService = {
             id: true,
             code: true,
             title: true,
+            kind: true,
             status: true,
             customerFacingStatus: true,
             createdAt: true,
@@ -313,7 +326,29 @@ export const portalService = {
           },
           take: 10,
         }),
+        prisma.payment.findFirst({
+          where: paymentsWhere({ crmCustomerId: auth.customerId }),
+          orderBy: { paidAt: "desc" },
+          select: { paidAt: true },
+        }),
       ]);
+
+    // Customer-wide totals must count each approved payment once. Per-project
+    // `received` is not additive: direct (invoice-less) payments match every
+    // cycle of the customer, e.g. a contract and its unpriced videos.
+    const [customerPaid, unlinkedOpportunities] = await Promise.all([
+      sumActivePayments(prisma, { crmCustomerId: auth.customerId }),
+      prisma.opportunity.findMany({
+        where: {
+          crmCustomerId: auth.customerId,
+          deletedAt: null,
+          projectId: null,
+          pipelineStage: { not: "LOST_CANCELED" },
+          agreedPrice: { gt: 0 },
+        },
+        select: { agreedPrice: true },
+      }),
+    ]);
 
     const stats = {
       total: 0,
@@ -366,14 +401,17 @@ export const portalService = {
     }
 
     const summaries = recentProjects.map(serializePortalProjectSummary);
-    const totalProjectValue = financeRows.reduce(
-      (sum, p) => sum + Number(p.finance?.finalProjectPrice || 0),
-      0,
+    const totalProjectValue = roundMoney(
+      financeRows.reduce(
+        (sum, p) => sum + Number(p.finance?.finalProjectPrice || 0),
+        0,
+      ) +
+        unlinkedOpportunities.reduce(
+          (sum, opp) => sum + Number(opp.agreedPrice || 0),
+          0,
+        ),
     );
-    const projectReceived = financeRows.reduce(
-      (sum, p) => sum + Number(p.finance?.received || 0),
-      0,
-    );
+    const projectReceived = roundMoney(customerPaid);
     const pendingInvoices = invoices.filter(
       (i) => !["PAID", "CANCELED"].includes(i.status),
     ).length;
@@ -383,9 +421,9 @@ export const portalService = {
       financial: {
         totalProjectValue,
         totalPaid: projectReceived,
-        remainingBalance: Math.max(0, totalProjectValue - projectReceived),
+        remainingBalance: roundMoney(Math.max(0, totalProjectValue - projectReceived)),
         pendingInvoices,
-        lastPaymentDate,
+        lastPaymentDate: lastPayment?.paidAt || lastPaymentDate,
       },
       canCreateProject: pendingBriefsCount > 0,
       pendingBriefsCount,
@@ -755,13 +793,16 @@ export const portalService = {
         status: i.status,
         dueAt: i.dueAt,
       })),
-      finance: project.finance
-        ? {
-            finalProjectPrice: project.finance.finalProjectPrice,
-            received: project.finance.received,
-            balance,
-          }
-        : null,
+      // Unpriced contract videos are billed on the contract, not per video.
+      finance:
+        project.finance &&
+        !(project.kind === "CHILD" && !(Number(project.finance.finalProjectPrice) > 0))
+          ? {
+              finalProjectPrice: project.finance.finalProjectPrice,
+              received: project.finance.received,
+              balance: Math.max(0, balance),
+            }
+          : null,
       cleanDownloadAvailable: snap.cleanDownloadAvailable,
       paymentStatus: snap.paymentStatus,
       deliveryStatus: snap.deliveryStatus,
