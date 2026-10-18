@@ -79,7 +79,7 @@ const SheetContent = React.forwardRef<
           const target = event.target as Element | null;
           if (
             target?.closest?.(
-              "[data-phone-country-menu],[data-radix-dropdown-menu-content],[data-radix-select-content]",
+              "[data-phone-country-menu],[data-afghan-date-calendar],[data-radix-dropdown-menu-content],[data-radix-select-content]",
             )
           ) {
             event.preventDefault();
@@ -90,7 +90,7 @@ const SheetContent = React.forwardRef<
           const target = event.target as Element | null;
           if (
             target?.closest?.(
-              "[data-phone-country-menu],[data-radix-dropdown-menu-content],[data-radix-select-content]",
+              "[data-phone-country-menu],[data-afghan-date-calendar],[data-radix-dropdown-menu-content],[data-radix-select-content]",
             )
           ) {
             event.preventDefault();

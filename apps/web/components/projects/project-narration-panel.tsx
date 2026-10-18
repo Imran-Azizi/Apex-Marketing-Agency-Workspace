@@ -20,9 +20,9 @@ import {
   CurrencyField,
   validateCurrencyInput,
 } from "@/components/shared/currency-field";
+import { AfghanDateTimeField } from "@/components/shared/afghan-datetime-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -591,11 +591,11 @@ export function ProjectNarrationPanel({
                   <div className="col-span-2 space-y-1.5 border-t border-border/50 pt-3 sm:col-span-1 sm:pt-1">
                     <Label htmlFor="deadline-edit">به‌روزرسانی مهلت</Label>
                     <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-                      <Input
+                      <AfghanDateTimeField
                         id="deadline-edit"
-                        type="datetime-local"
+                        aria-label="به‌روزرسانی مهلت"
                         value={deadline}
-                        onChange={(e) => setDeadline(e.target.value)}
+                        onChange={setDeadline}
                         className="min-w-0 flex-1"
                       />
                       <Button
@@ -845,11 +845,11 @@ export function ProjectNarrationPanel({
             ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="assign-deadline">مهلت (اختیاری)</Label>
-              <Input
+              <AfghanDateTimeField
                 id="assign-deadline"
-                type="datetime-local"
+                aria-label="مهلت"
                 value={deadline}
-                onChange={(e) => setDeadline(e.target.value)}
+                onChange={setDeadline}
               />
             </div>
           </div>

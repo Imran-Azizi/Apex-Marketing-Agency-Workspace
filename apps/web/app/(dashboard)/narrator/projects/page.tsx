@@ -24,6 +24,7 @@ import {
   narrationStatusVariant,
   type NarratorTaskSummary,
 } from "@/lib/narrator";
+import { AfghanDateField } from "@/components/shared/afghan-date-field";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
@@ -299,24 +300,24 @@ export default function NarratorProjectsPage() {
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="from-date">از تاریخ</Label>
-          <Input
+          <AfghanDateField
             id="from-date"
-            type="date"
+            aria-label="از تاریخ"
             value={from}
-            onChange={(e) => {
-              setFrom(e.target.value);
+            onChange={(value) => {
+              setFrom(value);
               setPage(1);
             }}
           />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="to-date">تا تاریخ</Label>
-          <Input
+          <AfghanDateField
             id="to-date"
-            type="date"
+            aria-label="تا تاریخ"
             value={to}
-            onChange={(e) => {
-              setTo(e.target.value);
+            onChange={(value) => {
+              setTo(value);
               setPage(1);
             }}
           />

@@ -6,7 +6,9 @@ import { apiGet, apiPost, apiPut, ApiError } from "@/lib/api";
 import { invalidateFinanceQueries } from "@/lib/finance-queries";
 import { CUSTOMER_PAYMENT_METHODS } from "@/lib/payment-methods";
 import { useHasPermission } from "@/lib/permissions";
+import { AfghanDateField } from "@/components/shared/afghan-date-field";
 import { PageHeader } from "@/components/shared/page-header";
+import { localTodayGregorian } from "@/lib/afghan-calendar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { Badge } from "@/components/ui/badge";
@@ -66,9 +68,11 @@ export default function FinanceSalariesPage() {
   const [compOpen, setCompOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("CASH");
-  const [paidAt, setPaidAt] = useState(() =>
-    new Date().toISOString().slice(0, 10),
-  );
+  const [paidAt, setPaidAt] = useState(() => {
+    const today = localTodayGregorian();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${today.gy}-${pad(today.gm)}-${pad(today.gd)}`;
+  });
   const [notes, setNotes] = useState("");
   const [compType, setCompType] = useState<"FIXED" | "PROJECT_SHARE">(
     "PROJECT_SHARE",
@@ -637,13 +641,12 @@ function PayFields({
           </Select>
         </div>
         <div className="space-y-1">
-          <Label>تاریخ</Label>
-          <Input
-            type="date"
-            dir="ltr"
-            className="text-start"
+          <Label htmlFor="salary-paid-at">تاریخ</Label>
+          <AfghanDateField
+            id="salary-paid-at"
+            aria-label="تاریخ پرداخت"
             value={paidAt}
-            onChange={(e) => setPaidAt(e.target.value)}
+            onChange={setPaidAt}
           />
         </div>
       </div>

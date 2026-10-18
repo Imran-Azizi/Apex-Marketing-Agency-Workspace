@@ -9,8 +9,8 @@ import {
   CurrencyField,
   validateCurrencyInput,
 } from "@/components/shared/currency-field";
+import { AfghanDateTimeField } from "@/components/shared/afghan-datetime-field";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -544,13 +544,12 @@ export function ProjectProductionPanel({
               />
             ) : null}
             <div className="space-y-2">
-              <Label>مهلت ادیت</Label>
-              <Input
-                type="datetime-local"
-                dir="ltr"
-                className="text-start"
+              <Label htmlFor="editing-deadline">مهلت ادیت</Label>
+              <AfghanDateTimeField
+                id="editing-deadline"
+                aria-label="مهلت ادیت"
                 value={deadline}
-                onChange={(e) => setDeadline(e.target.value)}
+                onChange={setDeadline}
               />
             </div>
             <div className="space-y-2">

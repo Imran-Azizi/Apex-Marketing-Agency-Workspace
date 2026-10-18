@@ -29,6 +29,10 @@ import {
   galleryImageGuide,
   widescreenImageGuide,
 } from "@/lib/landing-image-guide";
+import {
+  AfghanDateTimeField,
+  toLocalDateTimeInputValue,
+} from "@/components/shared/afghan-datetime-field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -981,15 +985,15 @@ export function ElementSettingsForm({
         <>
           <PanelSection title="شمارش معکوس">
             <Field label="تاریخ و زمان هدف">
-              <Input
-                type="datetime-local"
-                dir="ltr"
-                className="text-start"
-                value={str(element.content.targetDate).slice(0, 16)}
-                onChange={(e) => {
-                  if (!e.target.value) return;
+              <AfghanDateTimeField
+                aria-label="تاریخ و زمان هدف"
+                value={toLocalDateTimeInputValue(
+                  str(element.content.targetDate),
+                )}
+                onChange={(value) => {
+                  if (!value) return;
                   setContent({
-                    targetDate: new Date(e.target.value).toISOString(),
+                    targetDate: new Date(value).toISOString(),
                   });
                 }}
               />

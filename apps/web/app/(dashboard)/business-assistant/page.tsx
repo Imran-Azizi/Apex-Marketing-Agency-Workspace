@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { apiGet } from "@/lib/api";
+import { formatDateTime } from "@/lib/utils";
 import { PageHeader } from "@/components/shared/page-header";
 import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,6 @@ const PerformanceChart = dynamic(
 );
 import {
   formatCount,
-  formatDateTimeEn,
   formatMoneyEn,
   withEnglishDigits,
 } from "./_components/display";
@@ -452,7 +452,7 @@ export default function BusinessAssistantPage() {
               ? "تحلیل با داده‌های زنده سیستم تولید شد"
               : "تحلیل بر اساس قوانین داده سیستم تولید شد. برای روایت هوشمندتر، اتصال هوش مصنوعی را بررسی کنید."}
             {data.generatedAt
-              ? ` · ${formatDateTimeEn(data.generatedAt)}`
+              ? ` · ${formatDateTime(data.generatedAt)}`
               : ""}
           </p>
         </>

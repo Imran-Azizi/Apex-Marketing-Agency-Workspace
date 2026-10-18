@@ -46,7 +46,7 @@ export function parseNumberInput(value: string): number | null {
   return Number.isFinite(n) ? n : NaN;
 }
 
-/** `YYYY-MM-DD` for `<input type="date">` from a stored ISO date. */
+/** `YYYY-MM-DD` civil date for the Afghan date field, from a stored ISO date. */
 export function toDateInputValue(value: string | null | undefined): string {
   if (!value) return "";
   const date = new Date(value);

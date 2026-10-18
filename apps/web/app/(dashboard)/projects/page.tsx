@@ -12,7 +12,9 @@ import { apiGet, apiDelete } from "@/lib/api";
 import { toEnglishDigits } from "@/lib/utils";
 import { getMe } from "@/lib/auth";
 import { hasPermission } from "@/lib/rbac";
+import { AfghanDateField } from "@/components/shared/afghan-date-field";
 import { PageHeader } from "@/components/shared/page-header";
+import { formatStoredDateAsAfghan } from "@/lib/afghan-calendar";
 import { HorizontalScroll } from "@/components/shared/horizontal-scroll";
 import { LoadingTable } from "@/components/shared/loading-table";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -400,8 +402,10 @@ export default function ProjectsPage() {
     if (createdPreset !== ALL) {
       let dateLabel = selectedDatePreset?.label || "تاریخ";
       if (createdPreset === "custom") {
-        const fromLabel = createdFrom || "…";
-        const toLabel = createdTo || "…";
+        const fromLabel = createdFrom
+          ? formatStoredDateAsAfghan(createdFrom)
+          : "…";
+        const toLabel = createdTo ? formatStoredDateAsAfghan(createdTo) : "…";
         dateLabel = `از ${fromLabel} تا ${toLabel}`;
       }
       chips.push({
@@ -603,33 +607,29 @@ export default function ProjectsPage() {
               {renderCreatedPresetSelect("h-10 w-full")}
             </div>
             {createdPreset === "custom" ? (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
                   <p className="text-sm font-medium">از</p>
-                  <Input
-                    type="date"
+                  <AfghanDateField
+                    aria-label="از تاریخ"
                     value={createdFrom}
-                    onChange={(e) => {
-                      setCreatedFrom(e.target.value);
+                    onChange={(value) => {
+                      setCreatedFrom(value);
                       setPage(1);
                     }}
-                    className="h-10 w-full"
-                    dir="ltr"
-                    aria-label="از تاریخ"
+                    className="w-full"
                   />
                 </div>
                 <div className="space-y-2">
                   <p className="text-sm font-medium">تا</p>
-                  <Input
-                    type="date"
+                  <AfghanDateField
+                    aria-label="تا تاریخ"
                     value={createdTo}
-                    onChange={(e) => {
-                      setCreatedTo(e.target.value);
+                    onChange={(value) => {
+                      setCreatedTo(value);
                       setPage(1);
                     }}
-                    className="h-10 w-full"
-                    dir="ltr"
-                    aria-label="تا تاریخ"
+                    className="w-full"
                   />
                 </div>
               </div>
@@ -731,27 +731,23 @@ export default function ProjectsPage() {
             {renderCreatedPresetSelect()}
             {createdPreset === "custom" ? (
               <>
-                <Input
-                  type="date"
-                  value={createdFrom}
-                  onChange={(e) => {
-                    setCreatedFrom(e.target.value);
-                    setPage(1);
-                  }}
-                  className="h-10 w-[9.5rem] shrink-0"
-                  dir="ltr"
+                <AfghanDateField
                   aria-label="از تاریخ"
-                />
-                <Input
-                  type="date"
-                  value={createdTo}
-                  onChange={(e) => {
-                    setCreatedTo(e.target.value);
+                  value={createdFrom}
+                  onChange={(value) => {
+                    setCreatedFrom(value);
                     setPage(1);
                   }}
-                  className="h-10 w-[9.5rem] shrink-0"
-                  dir="ltr"
+                  className="w-[13.5rem] shrink-0"
+                />
+                <AfghanDateField
                   aria-label="تا تاریخ"
+                  value={createdTo}
+                  onChange={(value) => {
+                    setCreatedTo(value);
+                    setPage(1);
+                  }}
+                  className="w-[13.5rem] shrink-0"
                 />
               </>
             ) : null}
