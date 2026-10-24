@@ -20,6 +20,9 @@ const PRIVATE_PREFIXES = [
   "/sales",
   "/sales-assistant",
   "/business-assistant",
+  "/tasks",
+  "/knowledge",
+  "/policies",
   "/api",
 ];
 
@@ -47,6 +50,9 @@ const STATIC_SLUGS = new Set([
   "sales",
   "sales-assistant",
   "business-assistant",
+  "tasks",
+  "knowledge",
+  "policies",
   "sitemap.xml",
   "robots.txt",
   "favicon.ico",
@@ -57,6 +63,8 @@ const STATIC_SLUGS = new Set([
 ]);
 
 const LOOKUP_TTL_MS = 60_000;
+/** Keep middleware slug checks short — hanging here blocks the whole navigation. */
+const LOOKUP_TIMEOUT_MS = 2_500;
 const lookupCache = new Map<string, { ok: boolean; exp: number }>();
 
 function isPrivatePath(pathname: string) {
@@ -71,7 +79,19 @@ function apiBase() {
   ).replace(/\/+$/, "");
 }
 
-/** True when the public API has this item. On network failure, allow the request. */
+function lookupAbortSignal(ms: number): AbortSignal {
+  if (
+    typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function"
+  ) {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+/** True when the public API has this item. On network failure/timeout, allow the request. */
 async function publicItemExists(kind: "landing-pages" | "portfolio", slug: string) {
   const key = `${kind}:${slug}`;
   const hit = lookupCache.get(key);
@@ -79,7 +99,10 @@ async function publicItemExists(kind: "landing-pages" | "portfolio", slug: strin
   try {
     const res = await fetch(
       `${apiBase()}/public/${kind}/${encodeURIComponent(slug)}`,
-      { cache: "no-store" },
+      {
+        cache: "no-store",
+        signal: lookupAbortSignal(LOOKUP_TIMEOUT_MS),
+      },
     );
     const ok = res.ok;
     lookupCache.set(key, { ok, exp: Date.now() + LOOKUP_TTL_MS });

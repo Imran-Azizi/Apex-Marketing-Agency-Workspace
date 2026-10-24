@@ -145,10 +145,15 @@ export function getCsrfToken(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+/** Normal JSON reads/writes — fail fast on weak networks instead of hanging. */
+export const API_DEFAULT_TIMEOUT_MS = 45_000;
+/** Multipart uploads and large blob downloads (video, CV, etc.). */
+export const API_TRANSFER_TIMEOUT_MS = 20 * 60 * 1000;
+
 export const api = axios.create({
   baseURL: API_BASE,
   withCredentials: true,
-  timeout: 20 * 60 * 1000,
+  timeout: API_DEFAULT_TIMEOUT_MS,
   maxBodyLength: Infinity,
   maxContentLength: Infinity,
   headers: {
@@ -156,10 +161,39 @@ export const api = axios.create({
   },
 });
 
+function isLongTransferRequest(config: InternalAxiosRequestConfig): boolean {
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    return true;
+  }
+  const responseType = String(config.responseType || "");
+  if (responseType === "blob" || responseType === "arraybuffer") {
+    return true;
+  }
+  const url = String(config.url || "");
+  // File transfers + long-running AI / assistant jobs (can exceed 45s).
+  return (
+    /\/files\/upload\b|\/files\/raw\b|\/files\/media\b/i.test(url) ||
+    /\/ai\/[^/]+\/(generate|regenerate)\b/i.test(url) ||
+    /\/ai\/[^/]+\/versions\/(edit|manual)\b/i.test(url) ||
+    /\/landing-pages\/ai\//i.test(url) ||
+    /\/business-assistant\//i.test(url) ||
+    /\/sales-assistant\/run\b/i.test(url) ||
+    /\/backup\//i.test(url)
+  );
+}
+
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const panel = resolveClientAuthPanel();
   if (panel) {
     config.headers.set(AUTH_PANEL_HEADER, panel);
+  }
+
+  // Preserve an explicit per-call timeout; otherwise extend only for transfers.
+  if (
+    isLongTransferRequest(config) &&
+    (config.timeout == null || config.timeout === API_DEFAULT_TIMEOUT_MS)
+  ) {
+    config.timeout = API_TRANSFER_TIMEOUT_MS;
   }
 
   const method = config.method?.toUpperCase();

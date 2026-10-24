@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
 import { requireCsrf } from '../../middleware/csrf.js';
-import { ok } from '../../utils/response.js';
+import { ok, AppError } from '../../utils/response.js';
 import { prisma } from '../../db/prisma.js';
 import {
   recipientWhere,
@@ -12,9 +12,23 @@ import {
   NARRATION_NOTIFICATION_TYPES,
   serializeNarratorNotification,
 } from '../narration/narratorView.js';
+import {
+  countPushSubscriptions,
+  deletePushSubscription,
+  getVapidPublicKey,
+  isWebPushConfigured,
+  upsertPushSubscription,
+} from '../../services/web-push.js';
 
 const router = Router();
 router.use(requireAuth);
+
+function pushRecipient(auth) {
+  if (auth?.audience === 'PORTAL') {
+    return { portalAccountId: auth.portalAccountId || null, userId: null };
+  }
+  return { userId: auth?.userId || null, portalAccountId: null };
+}
 
 function serializeNotification(n, auth) {
   const meta = n.meta && typeof n.meta === 'object' ? n.meta : {};
@@ -126,6 +140,110 @@ async function sendUnseenCount(req, res, next) {
 
 router.get('/unseen-count', sendUnseenCount);
 router.get('/unread-count', sendUnseenCount);
+
+router.get('/push/vapid-public-key', async (req, res, next) => {
+  try {
+    ok(res, {
+      configured: isWebPushConfigured(),
+      publicKey: getVapidPublicKey(),
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get('/push/status', async (req, res, next) => {
+  try {
+    const recipient = pushRecipient(req.auth);
+    const deviceCount = await countPushSubscriptions(recipient);
+    ok(res, {
+      configured: isWebPushConfigured(),
+      subscribed: deviceCount > 0,
+      deviceCount,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/push/subscribe', requireCsrf, async (req, res, next) => {
+  try {
+    if (!isWebPushConfigured()) {
+      throw new AppError(
+        'اعلان خارج از برنامه هنوز روی سرور پیکربندی نشده است',
+        503,
+        'WEB_PUSH_NOT_CONFIGURED',
+      );
+    }
+
+    const endpoint = String(req.body?.endpoint || '').trim();
+    const p256dh = String(req.body?.keys?.p256dh || req.body?.p256dh || '').trim();
+    const auth = String(req.body?.keys?.auth || req.body?.auth || '').trim();
+    const userAgent =
+      String(req.body?.userAgent || req.get('user-agent') || '').slice(0, 500) ||
+      null;
+
+    if (!endpoint || !p256dh || !auth) {
+      throw new AppError('اشتراک Push نامعتبر است', 400, 'VALIDATION');
+    }
+
+    const recipient = pushRecipient(req.auth);
+    if (!recipient.userId && !recipient.portalAccountId) {
+      throw new AppError('نشست معتبر نیست', 401, 'UNAUTHORIZED');
+    }
+
+    const row = await upsertPushSubscription({
+      ...recipient,
+      endpoint,
+      p256dh,
+      auth,
+      userAgent,
+    });
+
+    ok(res, {
+      id: row.id,
+      subscribed: true,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/push/unsubscribe', requireCsrf, async (req, res, next) => {
+  try {
+    const endpoint = String(req.body?.endpoint || '').trim();
+    if (!endpoint) {
+      throw new AppError('endpoint الزامی است', 400, 'VALIDATION');
+    }
+
+    const recipient = pushRecipient(req.auth);
+    const deleted = await deletePushSubscription({
+      ...recipient,
+      endpoint,
+    });
+    ok(res, { deleted });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.delete('/push/subscribe', requireCsrf, async (req, res, next) => {
+  try {
+    const endpoint = String(req.body?.endpoint || req.query?.endpoint || '').trim();
+    if (!endpoint) {
+      throw new AppError('endpoint الزامی است', 400, 'VALIDATION');
+    }
+
+    const recipient = pushRecipient(req.auth);
+    const deleted = await deletePushSubscription({
+      ...recipient,
+      endpoint,
+    });
+    ok(res, { deleted });
+  } catch (e) {
+    next(e);
+  }
+});
 
 router.patch('/:id/read', requireCsrf, async (req, res, next) => {
   try {

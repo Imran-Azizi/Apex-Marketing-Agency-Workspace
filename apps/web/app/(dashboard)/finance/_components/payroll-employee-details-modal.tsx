@@ -2,7 +2,6 @@
 
 import { formatDate, cn } from "@/lib/utils";
 import { getCustomerPersonName } from "@/lib/crm-customer-name";
-import { paymentMethodLabel } from "@/lib/payment-methods";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PayrollPaymentMethodCard } from "./payroll-payment-method-card";
 import {
   formatMoney,
   type PayrollEmployee,
@@ -366,7 +366,9 @@ export function PayrollEmployeeDetailsModal({
                     <TableRow className="bg-muted/40 hover:bg-muted/40">
                       <TableHead className="text-start text-xs">تاریخ</TableHead>
                       <TableHead className="text-start text-xs">مبلغ</TableHead>
-                      <TableHead className="text-start text-xs">روش</TableHead>
+                      <TableHead className="min-w-[10rem] text-start text-xs">
+                        روش
+                      </TableHead>
                       <TableHead className="text-start text-xs">توضیح</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -379,8 +381,14 @@ export function PayrollEmployeeDetailsModal({
                         <TableCell className="whitespace-nowrap text-start text-sm font-semibold tabular-nums">
                           {formatMoney(p.amount)}
                         </TableCell>
-                        <TableCell className="text-start text-sm">
-                          {paymentMethodLabel(p.method)}
+                        <TableCell className="text-start align-middle">
+                          <PayrollPaymentMethodCard
+                            method={p.method}
+                            methodLabel={p.methodLabel}
+                            metaRows={p.paymentMethodMetaRows}
+                            showAmount={false}
+                            className="w-full max-w-[16rem]"
+                          />
                         </TableCell>
                         <TableCell className="max-w-[12rem] truncate text-start text-sm text-muted-foreground">
                           {p.notes || "—"}

@@ -182,20 +182,11 @@ export async function resolvePaymentContext(db, payment) {
       : null);
 
   let opportunity = null;
-  if (payment.invoice?.opportunityId) {
+  const linkedOpportunityId =
+    payment.opportunityId || payment.invoice?.opportunityId || null;
+  if (linkedOpportunityId) {
     opportunity = await db.opportunity.findFirst({
-      where: { id: payment.invoice.opportunityId, deletedAt: null },
-      select: {
-        id: true,
-        title: true,
-        projectId: true,
-        project: { select: { id: true, code: true, title: true } },
-      },
-    });
-  } else if (payment.crmCustomerId) {
-    opportunity = await db.opportunity.findFirst({
-      where: { crmCustomerId: payment.crmCustomerId, deletedAt: null },
-      orderBy: { updatedAt: 'desc' },
+      where: { id: linkedOpportunityId, deletedAt: null },
       select: {
         id: true,
         title: true,

@@ -24,6 +24,7 @@ export const UPLOAD_PURPOSE = Object.freeze({
   VIDEO_STORAGE: "video-storage",
   VIDEO_STORAGE_THUMBNAIL: "video-storage-thumbnail",
   CHAT_ATTACHMENT: "chat-attachment",
+  KNOWLEDGE_ATTACHMENT: "knowledge-attachment",
   GENERIC: "generic",
 });
 
@@ -399,6 +400,19 @@ export function resolveMediaPlacement(context, fileInfo = {}) {
     return {
       folderPath: `${MEDIA_ROOTS.UPLOADS}/chat/${conv}/${uid}`,
       category,
+      purpose,
+    };
+  }
+
+  if (purpose === UPLOAD_PURPOSE.KNOWLEDGE_ATTACHMENT) {
+    const entry = context.entryId || "draft";
+    const uid = context.userId || "user";
+    return {
+      folderPath: `${MEDIA_ROOTS.DOCUMENTS}/knowledge/${entry}/${uid}`,
+      category:
+        category === MEDIA_ROOTS.VIDEOS || category === MEDIA_ROOTS.IMAGES
+          ? category
+          : MEDIA_ROOTS.DOCUMENTS,
       purpose,
     };
   }

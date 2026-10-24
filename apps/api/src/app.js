@@ -39,6 +39,8 @@ import financeRoutes from "./modules/finance/index.js";
 import chatRoutes from "./modules/chat/index.js";
 import salesAssistantRoutes from "./modules/sales-assistant/index.js";
 import businessAssistantRoutes from "./modules/business-assistant/index.js";
+import taskRoutes from "./modules/tasks/index.js";
+import knowledgeRoutes from "./modules/knowledge/index.js";
 import { storage } from "./services/storage.js";
 import {
   isCleanFinalStorageKey,
@@ -302,6 +304,8 @@ export function createApp() {
   app.use("/api/v1/chat", chatRoutes);
   app.use("/api/v1/sales-assistant", salesAssistantRoutes);
   app.use("/api/v1/business-assistant", businessAssistantRoutes);
+  app.use("/api/v1/tasks", taskRoutes);
+  app.use("/api/v1/knowledge", knowledgeRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

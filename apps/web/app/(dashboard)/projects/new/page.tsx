@@ -512,6 +512,16 @@ export default function NewProjectPage() {
             profile={profile}
             formats={formats}
             assets={assetsQuery.data}
+            initialOpportunityId={attachableOpp?.id || ""}
+            initialAgreedPrice={(() => {
+              const fromOpp = Number(
+                attachableOpp?.agreedPrice ||
+                  attachableOpp?.proposedPrice ||
+                  attachableOpp?.finance?.projectTotal ||
+                  0,
+              );
+              return Number.isFinite(fromOpp) && fromOpp > 0 ? fromOpp : null;
+            })()}
             onRefreshAssets={() => {
               void assetsQuery.refetch();
             }}
@@ -522,6 +532,7 @@ export default function NewProjectPage() {
             onSubmit={async (payload: ProjectBriefSubmitPayload) => {
               return apiPost<{ id: string }>("/projects", {
                 crmCustomerId: selectedCustomerId,
+                // Only an open CRM cycle — never a prior project's opportunity.
                 opportunityId: attachableOpp?.id || undefined,
                 ...payload,
               });

@@ -186,8 +186,8 @@ export function NewPaymentDialog({
       setPaymentError("لطفاً یک مبلغ معتبر و مثبت وارد کنید.");
       return;
     }
-    if (finance.projectTotal <= 0 || !contractLocked) {
-      setPaymentError("ابتدا قیمت و شرایط قرارداد را ذخیره کنید.");
+    if (finance.projectTotal <= 0) {
+      setPaymentError("ابتدا قیمت توافقی این پروژه را ثبت کنید.");
       return;
     }
     if (amt > (finance.availableToRecord ?? finance.remainingBalance) + 0.009) {
@@ -468,12 +468,16 @@ export function NewPaymentButton({
 
   if (!canCreate) return null;
 
-  const disabled = !opportunityId || !contractLocked;
+  // Payments need a positive agreed price; lock is preferred but not required
+  // (single-video create may already have price on ProjectFinance).
+  const commercialsReady =
+    contractLocked || Number(finance?.projectTotal || 0) > 0;
+  const disabled = !opportunityId || !commercialsReady;
   const title = !opportunityId
-    ? "قرارداد این پروژه یافت نشد"
-    : contractLocked
+    ? "فرصت فروش این پروژه یافت نشد"
+    : commercialsReady
       ? "ثبت پرداخت جدید"
-      : "ابتدا قرارداد را ذخیره کنید";
+      : "ابتدا قیمت توافقی پروژه را ثبت کنید";
 
   return (
     <>

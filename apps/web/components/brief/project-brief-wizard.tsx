@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
+import { cn, toEnglishDigits } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -109,6 +109,11 @@ export type ProjectBriefWizardProps = {
   onSuccess: (project: { id: string }) => void;
   /** Child videos reuse the saved contract customer and skip the contact step. */
   inheritCustomer?: boolean;
+  /**
+   * Prefill agreed price for internal single-project create
+   * (e.g. from a CRM-prepared open cycle). Never from a prior linked project.
+   */
+  initialAgreedPrice?: number | null;
 };
 
 const PLATFORMS: { id: string; label: string }[] = [
@@ -398,10 +403,12 @@ export function ProjectBriefWizard({
   onSubmit,
   onSuccess,
   inheritCustomer = false,
+  initialAgreedPrice = null,
 }: ProjectBriefWizardProps) {
   const steps = inheritCustomer
     ? ALL_WIZARD_STEPS.filter((step) => step.id !== "contact")
     : ALL_WIZARD_STEPS;
+  const requiresAgreedPrice = mode === "internal" && !inheritCustomer;
   const [stepIndex, setStepIndex] = useState(0);
   const [highestReached, setHighestReached] = useState(0);
   const [stepError, setStepError] = useState<string | null>(null);
@@ -414,6 +421,11 @@ export function ProjectBriefWizard({
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
   const [website, setWebsite] = useState("");
+  const [agreedPrice, setAgreedPrice] = useState(() =>
+    initialAgreedPrice != null && Number(initialAgreedPrice) > 0
+      ? String(Number(initialAgreedPrice))
+      : "",
+  );
   const [productName, setProductName] = useState("");
   const [productDescription, setProductDescription] = useState("");
   const [featureInput, setFeatureInput] = useState("");
@@ -449,11 +461,26 @@ export function ProjectBriefWizard({
   }, [initialOpportunityId]);
 
   useEffect(() => {
+    if (!requiresAgreedPrice) return;
+    if (initialAgreedPrice != null && Number(initialAgreedPrice) > 0) {
+      setAgreedPrice(String(Number(initialAgreedPrice)));
+    }
+  }, [requiresAgreedPrice, initialAgreedPrice]);
+
+  useEffect(() => {
     if (mode !== "portal") return;
     if (!opportunityId && pendingOrders?.length) {
       setOpportunityId(pendingOrders[0].id);
     }
   }, [mode, pendingOrders, opportunityId]);
+
+  const parseAgreedPriceInput = () => {
+    const raw = toEnglishDigits(agreedPrice).replace(/,/g, "").trim();
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return value;
+  };
 
   useEffect(() => {
     if (!profile) return;
@@ -519,6 +546,9 @@ export function ProjectBriefWizard({
       const trimmedEmail = email.trim();
       if (trimmedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
         return "ایمیل معتبر نیست. یا خالی بگذارید یا مثل name@example.com وارد کنید.";
+      }
+      if (requiresAgreedPrice && parseAgreedPriceInput() == null) {
+        return "مبلغ توافق‌شده این پروژه الزامی و باید بیشتر از صفر باشد.";
       }
       return null;
     }
@@ -610,6 +640,10 @@ export function ProjectBriefWizard({
     if (customAspectRatio && !/^\d{1,3}:\d{1,3}$/.test(customAspectRatio)) {
       throw new Error("نسبت تصویر سفارشی معتبر نیست.");
     }
+    const parsedPrice = requiresAgreedPrice ? parseAgreedPriceInput() : null;
+    if (requiresAgreedPrice && parsedPrice == null) {
+      throw new Error("مبلغ توافق‌شده این پروژه الزامی و باید بیشتر از صفر باشد.");
+    }
 
     const payload: ProjectBriefSubmitPayload & { opportunityId?: string } = {
       personName: personName.trim(),
@@ -646,6 +680,9 @@ export function ProjectBriefWizard({
 
     if (mode === "internal") {
       payload.notes = notes.trim() || null;
+      if (parsedPrice != null) {
+        payload.agreedPrice = parsedPrice;
+      }
     }
 
     return payload;
@@ -869,6 +906,25 @@ export function ProjectBriefWizard({
                     onChange={(e) => setWebsite(e.target.value)}
                   />
                 </Field>
+                {requiresAgreedPrice ? (
+                  <Field className="sm:col-span-2">
+                    <FieldLabel htmlFor="agreedPrice" required>
+                      مبلغ توافق‌شده این پروژه (افغانی)
+                    </FieldLabel>
+                    <Input
+                      id="agreedPrice"
+                      inputMode="decimal"
+                      dir="rtl"
+                      className="text-start"
+                      placeholder="مثال: 15000"
+                      value={agreedPrice}
+                      onChange={(e) => {
+                        setAgreedPrice(e.target.value);
+                        setStepError(null);
+                      }}
+                    />
+                  </Field>
+                ) : null}
               </CardContent>
             </Card>
           )}

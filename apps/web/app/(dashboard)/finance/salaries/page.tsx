@@ -4,10 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiGet, apiPost, apiPut, ApiError } from "@/lib/api";
 import { invalidateFinanceQueries } from "@/lib/finance-queries";
-import { CUSTOMER_PAYMENT_METHODS } from "@/lib/payment-methods";
+import {
+  CUSTOMER_PAYMENT_METHODS,
+  paymentMethodLabel,
+  type CustomerPaymentMethod,
+} from "@/lib/payment-methods";
 import { useHasPermission } from "@/lib/permissions";
 import { AfghanDateField } from "@/components/shared/afghan-date-field";
 import { PageHeader } from "@/components/shared/page-header";
+import { WhatsAppContactButton } from "@/components/shared/whatsapp-contact-button";
 import { localTodayGregorian } from "@/lib/afghan-calendar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { LoadingTable } from "@/components/shared/loading-table";
@@ -15,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -39,7 +45,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { formatMoney, type PayrollEmployee } from "../_components/types";
 import {
   PayrollEmployeeDetailsModal,
@@ -47,6 +53,7 @@ import {
   payrollKindLabel,
   payrollPaymentStatus,
 } from "../_components/payroll-employee-details-modal";
+import { PayrollPaymentMethodCard } from "../_components/payroll-payment-method-card";
 
 type PayrollResponse = {
   fixed: PayrollEmployee[];
@@ -67,7 +74,14 @@ export default function FinanceSalariesPage() {
   const [advanceOpen, setAdvanceOpen] = useState(false);
   const [compOpen, setCompOpen] = useState(false);
   const [amount, setAmount] = useState("");
-  const [method, setMethod] = useState("CASH");
+  const [method, setMethod] = useState<CustomerPaymentMethod | null>(null);
+  const [hesabPayAccount, setHesabPayAccount] = useState("");
+  const [officeAddress, setOfficeAddress] = useState("");
+  const [responsiblePhone, setResponsiblePhone] = useState("");
+  const [bankCardNumber, setBankCardNumber] = useState("");
+  const [bankInfo, setBankInfo] = useState("");
+  const [methodError, setMethodError] = useState("");
+  const [metaError, setMetaError] = useState("");
   const [paidAt, setPaidAt] = useState(() => {
     const today = localTodayGregorian();
     const pad = (n: number) => String(n).padStart(2, "0");
@@ -132,20 +146,83 @@ export default function FinanceSalariesPage() {
     setDetailsOpen(true);
   }
 
+  function resetPayForm() {
+    setAmount("");
+    setMethod(null);
+    setHesabPayAccount("");
+    setOfficeAddress("");
+    setResponsiblePhone("");
+    setBankCardNumber("");
+    setBankInfo("");
+    setMethodError("");
+    setMetaError("");
+    setNotes("");
+  }
+
+  function buildPaymentMethodPayload() {
+    if (!method) {
+      setMethodError("لطفاً روش پرداخت را انتخاب کنید.");
+      return null;
+    }
+    setMethodError("");
+    setMetaError("");
+
+    if (method === "HESAB_PAY" && !hesabPayAccount.trim()) {
+      setMetaError("شماره حساب پی الزامی است.");
+      return null;
+    }
+    if (method === "CASH") {
+      if (!officeAddress.trim()) {
+        setMetaError("آدرس دفتر الزامی است.");
+        return null;
+      }
+      if (!responsiblePhone.trim()) {
+        setMetaError("شماره تماس مسئول دفتر الزامی است.");
+        return null;
+      }
+    }
+    if (method === "BANK_TRANSFER" && !bankCardNumber.trim()) {
+      setMetaError("شماره کارت بانکی الزامی است.");
+      return null;
+    }
+
+    const amt = Number(amount);
+    if (!amount.trim() || Number.isNaN(amt) || amt <= 0) {
+      setMetaError("لطفاً یک مبلغ معتبر و مثبت وارد کنید.");
+      return null;
+    }
+
+    return {
+      method,
+      amount: amt,
+      paymentMethodMeta: {
+        hesabPayAccount: hesabPayAccount.trim() || undefined,
+        officeAddress: officeAddress.trim() || undefined,
+        responsiblePhone: responsiblePhone.trim() || undefined,
+        bankCardNumber: bankCardNumber.trim() || undefined,
+        bankInfo: bankInfo.trim() || undefined,
+      },
+    };
+  }
+
   const payMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: {
+      method: CustomerPaymentMethod;
+      amount: number;
+      paymentMethodMeta: Record<string, string | undefined>;
+    }) =>
       apiPost("/finance/payroll/payments", {
         teamProfileId: selected!.teamProfileId,
-        amount: Number(amount),
-        method,
+        amount: payload.amount,
+        method: payload.method,
+        paymentMethodMeta: payload.paymentMethodMeta,
         paidAt,
         notes: notes || null,
       }),
     onSuccess: () => {
       toast.success("پرداخت معاش ثبت شد");
       setPayOpen(false);
-      setAmount("");
-      setNotes("");
+      resetPayForm();
       queryClient.invalidateQueries({ queryKey: ["finance-payroll"] });
       void invalidateFinanceQueries(queryClient);
     },
@@ -157,19 +234,23 @@ export default function FinanceSalariesPage() {
   });
 
   const advanceMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: {
+      method: CustomerPaymentMethod;
+      amount: number;
+      paymentMethodMeta: Record<string, string | undefined>;
+    }) =>
       apiPost("/finance/payroll/advances", {
         teamProfileId: selected!.teamProfileId,
-        amount: Number(amount),
-        method,
+        amount: payload.amount,
+        method: payload.method,
+        paymentMethodMeta: payload.paymentMethodMeta,
         paidAt,
         notes: notes || null,
       }),
     onSuccess: () => {
       toast.success("پیش‌پرداخت ثبت شد");
       setAdvanceOpen(false);
-      setAmount("");
-      setNotes("");
+      resetPayForm();
       queryClient.invalidateQueries({ queryKey: ["finance-payroll"] });
       void invalidateFinanceQueries(queryClient);
     },
@@ -259,7 +340,7 @@ export default function FinanceSalariesPage() {
 
         <TabsContent value="PROJECT_SHARE" className="mt-0 space-y-3">
           {query.isLoading ? (
-            <LoadingTable rows={6} columns={6} />
+            <LoadingTable rows={6} columns={8} />
           ) : (query.data?.projectShare.length ?? 0) === 0 ? (
             <EmptyState
               title="کارمند پروژه‌ای یافت نشد"
@@ -275,7 +356,7 @@ export default function FinanceSalariesPage() {
 
         <TabsContent value="FIXED" className="mt-0 space-y-3">
           {query.isLoading ? (
-            <LoadingTable rows={6} columns={7} />
+            <LoadingTable rows={6} columns={9} />
           ) : (query.data?.fixed.length ?? 0) === 0 ? (
             <EmptyState
               title="کارمند معاش ثابت یافت نشد"
@@ -307,7 +388,14 @@ export default function FinanceSalariesPage() {
         settlePending={settleMutation.isPending}
       />
 
-      <Dialog open={payOpen} onOpenChange={setPayOpen}>
+      <Dialog
+        open={payOpen}
+        onOpenChange={(open) => {
+          if (payMutation.isPending) return;
+          setPayOpen(open);
+          if (!open) resetPayForm();
+        }}
+      >
         <DialogContent className="text-start sm:max-w-md" dir="rtl">
           <DialogHeader className="text-start">
             <DialogTitle className="text-start">
@@ -318,19 +406,60 @@ export default function FinanceSalariesPage() {
             amount={amount}
             setAmount={setAmount}
             method={method}
-            setMethod={setMethod}
+            setMethod={(value) => {
+              setMethod(value);
+              setMethodError("");
+              setMetaError("");
+            }}
+            hesabPayAccount={hesabPayAccount}
+            setHesabPayAccount={(value) => {
+              setHesabPayAccount(value);
+              setMetaError("");
+            }}
+            officeAddress={officeAddress}
+            setOfficeAddress={(value) => {
+              setOfficeAddress(value);
+              setMetaError("");
+            }}
+            responsiblePhone={responsiblePhone}
+            setResponsiblePhone={(value) => {
+              setResponsiblePhone(value);
+              setMetaError("");
+            }}
+            bankCardNumber={bankCardNumber}
+            setBankCardNumber={(value) => {
+              setBankCardNumber(value);
+              setMetaError("");
+            }}
+            bankInfo={bankInfo}
+            setBankInfo={(value) => {
+              setBankInfo(value);
+              setMetaError("");
+            }}
+            methodError={methodError}
+            metaError={metaError}
             paidAt={paidAt}
             setPaidAt={setPaidAt}
             notes={notes}
             setNotes={setNotes}
+            disabled={payMutation.isPending}
+            fieldIdPrefix="salary-pay"
           />
           <DialogFooter className="gap-2 sm:justify-start">
-            <Button variant="outline" onClick={() => setPayOpen(false)}>
+            <Button
+              variant="outline"
+              disabled={payMutation.isPending}
+              onClick={() => setPayOpen(false)}
+            >
               انصراف
             </Button>
             <Button
               disabled={payMutation.isPending}
-              onClick={() => payMutation.mutate()}
+              onClick={() => {
+                const payload = buildPaymentMethodPayload();
+                if (!payload) return;
+                payMutation.mutate(payload);
+              }}
             >
               ذخیره
             </Button>
@@ -338,7 +467,14 @@ export default function FinanceSalariesPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={advanceOpen} onOpenChange={setAdvanceOpen}>
+      <Dialog
+        open={advanceOpen}
+        onOpenChange={(open) => {
+          if (advanceMutation.isPending) return;
+          setAdvanceOpen(open);
+          if (!open) resetPayForm();
+        }}
+      >
         <DialogContent className="text-start sm:max-w-md" dir="rtl">
           <DialogHeader className="text-start">
             <DialogTitle className="text-start">
@@ -349,19 +485,60 @@ export default function FinanceSalariesPage() {
             amount={amount}
             setAmount={setAmount}
             method={method}
-            setMethod={setMethod}
+            setMethod={(value) => {
+              setMethod(value);
+              setMethodError("");
+              setMetaError("");
+            }}
+            hesabPayAccount={hesabPayAccount}
+            setHesabPayAccount={(value) => {
+              setHesabPayAccount(value);
+              setMetaError("");
+            }}
+            officeAddress={officeAddress}
+            setOfficeAddress={(value) => {
+              setOfficeAddress(value);
+              setMetaError("");
+            }}
+            responsiblePhone={responsiblePhone}
+            setResponsiblePhone={(value) => {
+              setResponsiblePhone(value);
+              setMetaError("");
+            }}
+            bankCardNumber={bankCardNumber}
+            setBankCardNumber={(value) => {
+              setBankCardNumber(value);
+              setMetaError("");
+            }}
+            bankInfo={bankInfo}
+            setBankInfo={(value) => {
+              setBankInfo(value);
+              setMetaError("");
+            }}
+            methodError={methodError}
+            metaError={metaError}
             paidAt={paidAt}
             setPaidAt={setPaidAt}
             notes={notes}
             setNotes={setNotes}
+            disabled={advanceMutation.isPending}
+            fieldIdPrefix="salary-advance"
           />
           <DialogFooter className="gap-2 sm:justify-start">
-            <Button variant="outline" onClick={() => setAdvanceOpen(false)}>
+            <Button
+              variant="outline"
+              disabled={advanceMutation.isPending}
+              onClick={() => setAdvanceOpen(false)}
+            >
               انصراف
             </Button>
             <Button
               disabled={advanceMutation.isPending}
-              onClick={() => advanceMutation.mutate()}
+              onClick={() => {
+                const payload = buildPaymentMethodPayload();
+                if (!payload) return;
+                advanceMutation.mutate(payload);
+              }}
             >
               ذخیره
             </Button>
@@ -441,6 +618,8 @@ function ProjectShareTable({
         <TableHeader>
           <TableRow className="bg-muted/40 hover:bg-muted/40">
             <TableHead className="text-start">نام</TableHead>
+            <TableHead className="w-[4.5rem] text-center">واتساپ</TableHead>
+            <TableHead className="min-w-[9.5rem] text-start">روش پرداخت</TableHead>
             <TableHead className="text-start">نقش</TableHead>
             <TableHead className="text-start">تعداد پروژه‌ها</TableHead>
             <TableHead className="text-start">مبلغ قابل پرداخت</TableHead>
@@ -460,6 +639,16 @@ function ProjectShareTable({
                 <div className="text-[11px] text-muted-foreground">
                   {compensationTypeLabel(row.compensation.type)}
                 </div>
+              </TableCell>
+              <TableCell
+                className="text-center"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <WhatsAppContactButton phone={row.phone} stopPropagation />
+              </TableCell>
+              <TableCell className="text-start">
+                <PaymentMethodCell row={row} />
               </TableCell>
               <TableCell className="text-start">
                 {payrollKindLabel(row.kind)}
@@ -511,6 +700,8 @@ function FixedSalaryTable({
         <TableHeader>
           <TableRow className="bg-muted/40 hover:bg-muted/40">
             <TableHead className="text-start">نام</TableHead>
+            <TableHead className="w-[4.5rem] text-center">واتساپ</TableHead>
+            <TableHead className="min-w-[9.5rem] text-start">روش پرداخت</TableHead>
             <TableHead className="text-start">نقش</TableHead>
             <TableHead className="text-start">معاش ثابت</TableHead>
             <TableHead className="text-start">پرداخت‌شده</TableHead>
@@ -537,6 +728,16 @@ function FixedSalaryTable({
                       پیش‌پرداخت: {formatMoney(row.openAdvances)}
                     </div>
                   ) : null}
+                </TableCell>
+                <TableCell
+                  className="text-center"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <WhatsAppContactButton phone={row.phone} stopPropagation />
+                </TableCell>
+                <TableCell className="text-start">
+                  <PaymentMethodCell row={row} />
                 </TableCell>
                 <TableCell className="text-start">
                   {payrollKindLabel(row.kind)}
@@ -579,6 +780,42 @@ function FixedSalaryTable({
   );
 }
 
+function pickLatestPayment(row: PayrollEmployee) {
+  const list = row.payments;
+  if (!list?.length) return null;
+  return [...list].sort((a, b) => {
+    const paidDiff =
+      new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime();
+    if (paidDiff !== 0) return paidDiff;
+    return String(b.id).localeCompare(String(a.id));
+  })[0];
+}
+
+function PaymentMethodCell({ row }: { row: PayrollEmployee }) {
+  const latest = pickLatestPayment(row);
+  const method = row.lastPaymentMethod ?? latest?.method ?? null;
+  const amount =
+    row.lastPaymentAmount ?? (latest != null ? latest.amount : null);
+  const methodLabel =
+    row.lastPaymentMethodLabel ||
+    latest?.methodLabel ||
+    (method ? paymentMethodLabel(method) : null);
+  const metaRows = row.lastPaymentMethodMetaRows?.length
+    ? row.lastPaymentMethodMetaRows
+    : latest?.paymentMethodMetaRows || [];
+
+  return (
+    <PayrollPaymentMethodCard
+      method={method}
+      methodLabel={methodLabel}
+      amount={amount}
+      metaRows={metaRows}
+      showAmount
+      compact
+    />
+  );
+}
+
 function SummaryCard({ label, value }: { label: string; value: number }) {
   return (
     <div
@@ -598,61 +835,214 @@ function PayFields({
   setAmount,
   method,
   setMethod,
+  hesabPayAccount,
+  setHesabPayAccount,
+  officeAddress,
+  setOfficeAddress,
+  responsiblePhone,
+  setResponsiblePhone,
+  bankCardNumber,
+  setBankCardNumber,
+  bankInfo,
+  setBankInfo,
+  methodError,
+  metaError,
   paidAt,
   setPaidAt,
   notes,
   setNotes,
+  disabled = false,
+  fieldIdPrefix,
 }: {
   amount: string;
   setAmount: (v: string) => void;
-  method: string;
-  setMethod: (v: string) => void;
+  method: CustomerPaymentMethod | null;
+  setMethod: (v: CustomerPaymentMethod) => void;
+  hesabPayAccount: string;
+  setHesabPayAccount: (v: string) => void;
+  officeAddress: string;
+  setOfficeAddress: (v: string) => void;
+  responsiblePhone: string;
+  setResponsiblePhone: (v: string) => void;
+  bankCardNumber: string;
+  setBankCardNumber: (v: string) => void;
+  bankInfo: string;
+  setBankInfo: (v: string) => void;
+  methodError: string;
+  metaError: string;
   paidAt: string;
   setPaidAt: (v: string) => void;
   notes: string;
   setNotes: (v: string) => void;
+  disabled?: boolean;
+  fieldIdPrefix: string;
 }) {
+  const methodErrorId = `${fieldIdPrefix}-method-error`;
   return (
     <div className="grid gap-3 py-2 text-start" dir="rtl">
       <div className="space-y-1">
-        <Label>مبلغ</Label>
+        <Label htmlFor={`${fieldIdPrefix}-amount`}>مبلغ</Label>
         <Input
+          id={`${fieldIdPrefix}-amount`}
           type="number"
           dir="ltr"
-          className="text-start"
+          disabled={disabled}
+          className="h-11 rounded-xl text-start"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
         />
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <Label>روش</Label>
-          <Select dir="rtl" value={method} onValueChange={setMethod}>
-            <SelectTrigger dir="rtl">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent dir="rtl">
-              {CUSTOMER_PAYMENT_METHODS.map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {m.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-foreground">
+          روش پرداخت <span className="text-destructive">*</span>
+        </legend>
+        <div
+          role="radiogroup"
+          aria-label="روش پرداخت"
+          aria-invalid={!!methodError}
+          aria-describedby={methodError ? methodErrorId : undefined}
+          className="grid grid-cols-2 gap-1.5 rounded-xl border border-border/70 bg-muted/30 p-1.5 sm:grid-cols-4"
+        >
+          {CUSTOMER_PAYMENT_METHODS.map((option) => {
+            const selected = method === option.value;
+            return (
+              <label
+                key={option.value}
+                className={cn(
+                  "relative flex min-h-10 cursor-pointer items-center justify-center rounded-lg px-2 text-sm font-semibold transition-all",
+                  "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background",
+                  selected
+                    ? "bg-card text-brand shadow-sm ring-1 ring-brand/25"
+                    : "text-muted-foreground hover:bg-card/60 hover:text-foreground",
+                  disabled && "pointer-events-none opacity-60",
+                )}
+              >
+                <input
+                  type="radio"
+                  name={`${fieldIdPrefix}-payment-method`}
+                  value={option.value}
+                  checked={selected}
+                  disabled={disabled}
+                  onChange={() => setMethod(option.value)}
+                  className="sr-only"
+                />
+                {option.label}
+              </label>
+            );
+          })}
         </div>
-        <div className="space-y-1">
-          <Label htmlFor="salary-paid-at">تاریخ</Label>
-          <AfghanDateField
-            id="salary-paid-at"
-            aria-label="تاریخ پرداخت"
-            value={paidAt}
-            onChange={setPaidAt}
+        {methodError ? (
+          <p id={methodErrorId} className="text-xs text-destructive" role="alert">
+            {methodError}
+          </p>
+        ) : null}
+      </fieldset>
+
+      {method === "HESAB_PAY" ? (
+        <div className="space-y-1.5">
+          <Label htmlFor={`${fieldIdPrefix}-hesab`} className="text-xs">
+            شماره حساب پی <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id={`${fieldIdPrefix}-hesab`}
+            dir="ltr"
+            disabled={disabled}
+            className="h-11 rounded-xl text-end"
+            value={hesabPayAccount}
+            onChange={(e) => setHesabPayAccount(e.target.value)}
           />
         </div>
+      ) : null}
+
+      {method === "CASH" ? (
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor={`${fieldIdPrefix}-office`} className="text-xs">
+              آدرس دفتر <span className="text-destructive">*</span>
+            </Label>
+            <Textarea
+              id={`${fieldIdPrefix}-office`}
+              disabled={disabled}
+              className="min-h-[4rem] resize-none rounded-xl"
+              value={officeAddress}
+              onChange={(e) => setOfficeAddress(e.target.value)}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`${fieldIdPrefix}-rep-phone`} className="text-xs">
+              شماره تماس مسئول دفتر{" "}
+              <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id={`${fieldIdPrefix}-rep-phone`}
+              dir="ltr"
+              disabled={disabled}
+              className="h-11 rounded-xl text-end"
+              value={responsiblePhone}
+              onChange={(e) => setResponsiblePhone(e.target.value)}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {method === "BANK_TRANSFER" ? (
+        <div className="space-y-1.5">
+          <Label htmlFor={`${fieldIdPrefix}-card`} className="text-xs">
+            شماره کارت بانکی <span className="text-destructive">*</span>
+          </Label>
+          <Input
+            id={`${fieldIdPrefix}-card`}
+            dir="ltr"
+            disabled={disabled}
+            className="h-11 rounded-xl text-end"
+            value={bankCardNumber}
+            onChange={(e) => setBankCardNumber(e.target.value)}
+          />
+        </div>
+      ) : null}
+
+      {method === "HAWALA" ? (
+        <div className="space-y-1.5">
+          <Label htmlFor={`${fieldIdPrefix}-hawala`} className="text-xs">
+            جزئیات حواله
+          </Label>
+          <Textarea
+            id={`${fieldIdPrefix}-hawala`}
+            disabled={disabled}
+            className="min-h-[4rem] resize-none rounded-xl"
+            placeholder="نام صرافی، شماره حواله یا سایر جزئیات"
+            value={bankInfo}
+            onChange={(e) => setBankInfo(e.target.value)}
+            rows={2}
+          />
+        </div>
+      ) : null}
+
+      {metaError ? (
+        <p className="text-xs text-destructive" role="alert">
+          {metaError}
+        </p>
+      ) : null}
+
+      <div className="space-y-1">
+        <Label htmlFor={`${fieldIdPrefix}-paid-at`}>تاریخ</Label>
+        <AfghanDateField
+          id={`${fieldIdPrefix}-paid-at`}
+          aria-label="تاریخ پرداخت"
+          value={paidAt}
+          onChange={setPaidAt}
+        />
       </div>
       <div className="space-y-1">
-        <Label>توضیح</Label>
-        <Input value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <Label htmlFor={`${fieldIdPrefix}-notes`}>توضیح</Label>
+        <Input
+          id={`${fieldIdPrefix}-notes`}
+          disabled={disabled}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
       </div>
     </div>
   );

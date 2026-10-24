@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { FloatingChatLauncher } from "@/components/chat/floating-chat";
 import { AppBootLoader } from "@/components/loading/app-boot-loader";
+import { WebPushBootstrap } from "@/components/notifications/web-push-bootstrap";
 
 export default function DashboardLayout({
   children,
@@ -126,6 +127,7 @@ export default function DashboardLayout({
     <div className="flex h-dvh max-h-dvh overflow-hidden">
       <AppBootLoader />
       <SessionKeepAlive />
+      <WebPushBootstrap />
       <DashboardSidebar
         role={me.role}
         permissions={me.permissions}

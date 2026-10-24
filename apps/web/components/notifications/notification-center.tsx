@@ -27,6 +27,7 @@ import {
   UserRound,
   X,
   Bot,
+  ListTodo,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, apiDelete, apiGet, apiPost, type ApiEnvelope } from "@/lib/api";
@@ -45,6 +46,7 @@ import { cn, formatDateTime } from "@/lib/utils";
 import { openChatDrawer } from "@/lib/chat-launcher";
 import { NotificationListSkeleton } from "@/components/loading/skeletons";
 import { ErrorState } from "@/components/loading/error-state";
+import { WebPushControls } from "@/components/notifications/web-push-controls";
 
 export type NotificationMeta = {
   type: string | null;
@@ -185,6 +187,16 @@ function NotificationIcon({ type }: { type: string | null }) {
     return <BriefcaseBusiness className="h-4 w-4" />;
   if (type === "CONTACT_MESSAGE") return <Mail className="h-4 w-4" />;
   if (type === "PROJECT_CREATED") return <FolderKanban className="h-4 w-4" />;
+  if (
+    type === "TASK_ASSIGNED" ||
+    type === "TASK_STATUS_UPDATED" ||
+    type === "TASK_UPDATED" ||
+    type === "TASK_DEADLINE_REMINDER" ||
+    type === "TASK_OVERDUE" ||
+    type === "TASK_COMPLETION_REJECTED"
+  ) {
+    return <ListTodo className="h-4 w-4" />;
+  }
   if (type === "CONTENT_SENT_FOR_APPROVAL") return <Send className="h-4 w-4" />;
   if (type === "CONTENT_APPROVED_BY_CUSTOMER")
     return <CheckCircle2 className="h-4 w-4" />;
@@ -372,7 +384,8 @@ export function NotificationCenter({ className }: { className?: string }) {
     queryKey: UNSEEN_COUNT_QUERY_KEY,
     queryFn: fetchUnseenCount,
     staleTime: 8_000,
-    refetchInterval: open ? 8_000 : 30_000,
+    // Closed panel: poll slowly so weak connections keep bandwidth for UI.
+    refetchInterval: open ? 8_000 : 60_000,
     refetchOnWindowFocus: false,
   });
 
@@ -623,6 +636,10 @@ export function NotificationCenter({ className }: { className?: string }) {
             </Button>
           </div>
         </SheetHeader>
+
+        <div className="border-b px-3 py-3 sm:px-4">
+          <WebPushControls />
+        </div>
 
         <div className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3 sm:space-y-3 sm:px-4 sm:py-4">
           {query.isLoading && <NotificationListSkeleton count={6} />}

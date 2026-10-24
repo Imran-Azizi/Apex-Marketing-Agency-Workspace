@@ -37,11 +37,19 @@ import { cn } from "@/lib/utils";
 interface Opportunity {
   id: string;
   title: string;
+  createdAt?: string;
   proposedPrice: string | null;
   agreedPrice: string | null;
   advancePayment?: string | null;
   agreedTerms: string | null;
   projectId: string | null;
+  project?: {
+    id: string;
+    code: string;
+    title: string;
+    status: string;
+    kind: string;
+  } | null;
   contractLocked?: boolean | null;
   contractLockedAt?: string | null;
   finance?: {
@@ -83,14 +91,30 @@ interface CrmCustomerDetail {
     amount: string;
     verification: string;
     invoiceId: string | null;
+    opportunityId?: string | null;
     createdAt: string;
     paidAt?: string;
     reference?: string | null;
     method?: string | null;
     methodLabel?: string | null;
     recordedBy?: { id: string; fullName: string } | null;
-    invoice?: { id: string; invoiceNumber: string } | null;
+    invoice?: {
+      id: string;
+      invoiceNumber: string;
+      opportunityId?: string | null;
+      projectId?: string | null;
+    } | null;
   }>;
+}
+
+/** Payment belongs to the selected project/contract cycle only. */
+function paymentBelongsToOpportunity(
+  payment: CrmCustomerDetail["payments"][number],
+  opportunityId: string,
+) {
+  if (payment.opportunityId === opportunityId) return true;
+  if (payment.invoice?.opportunityId === opportunityId) return true;
+  return false;
 }
 
 interface InviteEligibility {
@@ -163,21 +187,19 @@ export default function CrmDetailPage({
 
   const [selectedOppId, setSelectedOppId] = useState<string | null>(null);
 
+  // Every opportunity is its own commercial cycle (one price per project).
+  // Prefer an open sales cycle, otherwise the newest opportunity.
   const oppChoices = useMemo(() => {
     const opportunities = data?.opportunities ?? [];
     if (!opportunities.length) return [];
-    const contractOpps = opportunities
-      .filter((o) => o.contract)
-      .sort(
-        (a, b) =>
-          new Date(b.contract!.createdAt).getTime() -
-          new Date(a.contract!.createdAt).getTime(),
-      );
-    const salesOpp =
-      opportunities.find((o) => !o.projectId) || opportunities[0];
-    return contractOpps.some((o) => o.id === salesOpp.id)
-      ? contractOpps
-      : [...contractOpps, salesOpp];
+    return [...opportunities].sort((a, b) => {
+      const aOpen = a.projectId ? 1 : 0;
+      const bOpen = b.projectId ? 1 : 0;
+      if (aOpen !== bOpen) return aOpen - bOpen;
+      const aTime = new Date(a.createdAt || 0).getTime();
+      const bTime = new Date(b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
   }, [data]);
 
   const opp = useMemo(
@@ -185,6 +207,31 @@ export default function CrmDetailPage({
       oppChoices.find((o) => o.id === selectedOppId) ?? oppChoices[0] ?? null,
     [oppChoices, selectedOppId],
   );
+
+  useEffect(() => {
+    if (!oppChoices.length) {
+      setSelectedOppId(null);
+      return;
+    }
+    if (selectedOppId && oppChoices.some((o) => o.id === selectedOppId)) {
+      return;
+    }
+    setSelectedOppId(oppChoices[0]?.id ?? null);
+  }, [oppChoices, selectedOppId]);
+
+  const cyclePayments = useMemo(() => {
+    if (!opp?.id) return [];
+    return (data?.payments ?? []).filter((p) =>
+      paymentBelongsToOpportunity(p, opp.id),
+    );
+  }, [data?.payments, opp?.id]);
+
+  const cycleInvoices = useMemo(() => {
+    if (!opp?.id) return [];
+    return (data?.invoices ?? []).filter(
+      (inv) => inv.opportunityId === opp.id,
+    );
+  }, [data?.invoices, opp?.id]);
 
   const { data: eligibility } = useQuery({
     queryKey: ["invite-eligibility", opp?.id],
@@ -313,11 +360,20 @@ export default function CrmDetailPage({
         {oppChoices.length > 1 && opp ? (
           <div
             role="radiogroup"
-            aria-label="انتخاب قرارداد"
+            aria-label="انتخاب پروژه یا قرارداد"
             className="flex flex-wrap items-center gap-2"
           >
             {oppChoices.map((choice) => {
               const active = choice.id === opp.id;
+              const code =
+                choice.contract?.code || choice.project?.code || null;
+              const kindLabel = choice.contract
+                ? "قرارداد"
+                : choice.project
+                  ? "پروژه"
+                  : choice.projectId
+                    ? "پروژه متصل"
+                    : "فرصت فروش";
               return (
                 <button
                   key={choice.id}
@@ -332,16 +388,20 @@ export default function CrmDetailPage({
                       : "border-border/80 bg-card text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {choice.contract ? (
+                  {kindLabel}
+                  {code ? (
                     <>
-                      قرارداد{" "}
+                      {" "}
                       <span dir="ltr" className="tabular-nums">
-                        {choice.contract.code}
+                        {code}
                       </span>
                     </>
-                  ) : (
-                    "فرصت فروش"
-                  )}
+                  ) : !choice.projectId ? (
+                    <span className="text-[10px] font-medium opacity-80">
+                      {" "}
+                      (بدون پروژه)
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -355,7 +415,7 @@ export default function CrmDetailPage({
           {opp ? (
             <CustomerDetailsForm
               opportunity={opp}
-              paymentCount={data.payments?.length ?? 0}
+              paymentCount={cyclePayments.length}
               onSaved={invalidate}
               onPaymentCreated={handlePaymentCreated}
             />
@@ -370,8 +430,8 @@ export default function CrmDetailPage({
         >
           {opp ? (
             <PaymentHistoryPanel
-              invoices={data.invoices}
-              payments={data.payments}
+              invoices={cycleInvoices}
+              payments={cyclePayments}
               onChanged={invalidate}
               initialReceiptPaymentId={receiptPaymentId}
               onInitialReceiptHandled={clearReceiptHandoff}

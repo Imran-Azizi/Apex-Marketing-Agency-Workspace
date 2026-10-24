@@ -212,6 +212,15 @@ export const env = {
   cookieSecure,
   cookieSameSite,
   csrfSecret: required("CSRF_SECRET", "dev-csrf-secret-min-32-characters-xxxx"),
+  /**
+   * Web Push (VAPID). When unset, push is disabled and subscribe endpoints
+   * return a clear “not configured” response — the rest of the app still works.
+   */
+  vapidPublicKey: trimEnv(process.env.VAPID_PUBLIC_KEY),
+  vapidPrivateKey: trimEnv(process.env.VAPID_PRIVATE_KEY),
+  vapidSubject:
+    trimEnv(process.env.VAPID_SUBJECT) ||
+    "mailto:admin@localhost",
   storageDriver: (trimEnv(process.env.STORAGE_DRIVER) || "bunny").toLowerCase(),
   storagePublicBase: (
     trimEnv(process.env.STORAGE_PUBLIC_BASE) ||

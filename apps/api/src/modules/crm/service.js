@@ -32,11 +32,13 @@ import {
   invoiceStatusLabel,
 } from "./invoiceDocumentHtml.js";
 import { allocateCustomerCode } from "./customerCode.js";
+import { purgeProjectOperationalSideEffects } from "../projects/purgeSideEffects.js";
 import {
   applyCrmEvent,
   maybeAutoConvertAfterFirstVerifiedPayment,
 } from "./sync.js";
 import {
+  detachOpportunityFromDeletedProject,
   openFreshCycleOpportunity,
   snapshotCustomerProfile,
 } from "./repeatCycle.js";
@@ -516,12 +518,24 @@ export const crmService = {
         opportunities: {
           where: { deletedAt: null },
           orderBy: { createdAt: "desc" },
+          include: {
+            project: {
+              select: {
+                id: true,
+                code: true,
+                title: true,
+                status: true,
+                kind: true,
+                deletedAt: true,
+              },
+            },
+          },
         },
         portalAccount: true,
         clientAssets: { where: { deletedAt: null } },
         projects: {
           where: { deletedAt: null },
-          select: { id: true, code: true, status: true, title: true },
+          select: { id: true, code: true, status: true, title: true, kind: true },
         },
         invoices: {
           where: {
@@ -555,7 +569,14 @@ export const crmService = {
             ],
           },
           include: {
-            invoice: { select: { id: true, invoiceNumber: true } },
+            invoice: {
+              select: {
+                id: true,
+                invoiceNumber: true,
+                opportunityId: true,
+                projectId: true,
+              },
+            },
           },
           orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
           take: 100,
@@ -615,8 +636,20 @@ export const crmService = {
     const opportunities = customer.opportunities.map((opp) => {
       const finance =
         financeByOpp.get(opp.id) || computeFinanceSnapshot(opp.agreedPrice, 0);
+      const liveProject =
+        opp.project && !opp.project.deletedAt
+          ? {
+              id: opp.project.id,
+              code: opp.project.code,
+              title: opp.project.title,
+              status: opp.project.status,
+              kind: opp.project.kind,
+            }
+          : null;
       return {
         ...opp,
+        project: liveProject,
+        projectId: liveProject?.id ?? opp.projectId,
         advancePayment: finance.totalPaid,
         finance,
         contract: contractByOpportunityId.get(opp.id) || null,
@@ -1667,6 +1700,8 @@ export const crmService = {
       const created = await tx.payment.create({
         data: {
           crmCustomerId,
+          // Bind payment to this project/opportunity cycle only.
+          opportunityId: resolvedOpportunityId || null,
           invoiceId: resolvedInvoiceId,
           amount: amt,
           paidAt,
@@ -1689,6 +1724,7 @@ export const crmService = {
               projectId: true,
             },
           },
+          opportunity: { select: { id: true, projectId: true } },
           crmCustomer: {
             select: { id: true, personName: true, companyName: true },
           },
@@ -1860,14 +1896,9 @@ export const crmService = {
     }
 
     const opportunityId =
+      existing.opportunityId ||
       existing.invoice?.opportunityId ||
-      (
-        await prisma.opportunity.findFirst({
-          where: { crmCustomerId: existing.crmCustomerId, deletedAt: null },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true },
-        })
-      )?.id;
+      null;
 
     if (opportunityId && existing.verification !== "REJECTED") {
       const available = await getAvailableRemaining(prisma, {
@@ -1940,7 +1971,8 @@ export const crmService = {
       logTag: "crm-payment",
     });
 
-    const opportunityId = existing.invoice?.opportunityId || null;
+    const opportunityId =
+      existing.opportunityId || existing.invoice?.opportunityId || null;
 
     const result = await prisma.$transaction(async (tx) => {
       await tx.payment.delete({ where: { id: paymentId } });
@@ -2993,15 +3025,17 @@ export const crmService = {
           where: { projectId: { in: projectIds } },
         });
 
-        // Detach opportunities before soft-deleting projects
+        // Detach + clear commercials so later projects cannot inherit prices
         for (const project of projects) {
           if (project.opportunity) {
-            await tx.opportunity.update({
-              where: { id: project.opportunity.id },
-              data: { projectId: null },
-            });
+            await detachOpportunityFromDeletedProject(
+              tx,
+              project.opportunity.id,
+            );
           }
         }
+
+        await purgeProjectOperationalSideEffects(tx, projectIds);
 
         await tx.project.updateMany({
           where: { id: { in: projectIds } },

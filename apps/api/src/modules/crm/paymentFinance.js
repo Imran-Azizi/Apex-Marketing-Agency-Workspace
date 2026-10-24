@@ -48,7 +48,13 @@ export function computeFinanceSnapshot(agreedPrice, totalPaid, extras = {}) {
 
 /**
  * Prisma where-clause for payments that belong to a contract/opportunity.
- * Direct CRM payments (no invoice) + invoice payments for this opportunity.
+ *
+ * When opportunityId is set: only payments linked to THAT cycle
+ * (Payment.opportunityId or Invoice.opportunityId). Never include bare
+ * customer-level direct payments — that caused multi-project bleed.
+ *
+ * When opportunityId is omitted: customer-level financial payments
+ * (explicit opportunity, or invoice linked to opportunity/project).
  */
 export function paymentsWhere({
   crmCustomerId,
@@ -59,20 +65,39 @@ export function paymentsWhere({
   const where = {
     crmCustomerId,
     verification: { in: [...verifications] },
-    OR: [
-      { invoiceId: null },
-      ...(opportunityId
-        ? [{ invoice: { opportunityId } }]
-        : [
-            { invoice: { opportunityId: { not: null } } },
-            { invoice: { projectId: { not: null } } },
-          ]),
-    ],
   };
+
+  if (opportunityId) {
+    where.OR = [
+      { opportunityId },
+      { invoice: { opportunityId } },
+    ];
+  } else {
+    where.OR = [
+      { opportunityId: { not: null } },
+      { invoice: { opportunityId: { not: null } } },
+      { invoice: { projectId: { not: null } } },
+    ];
+  }
+
   if (excludePaymentId) {
     where.id = { not: excludePaymentId };
   }
   return where;
+}
+
+/**
+ * Whether a loaded payment row belongs to a specific opportunity.
+ * Direct payments must carry opportunityId; invoice payments match via invoice.
+ */
+export function paymentMatchesOpportunity(payment, opportunity) {
+  if (!payment || !opportunity) return false;
+  if (payment.crmCustomerId !== opportunity.crmCustomerId) return false;
+  if (payment.opportunityId) return payment.opportunityId === opportunity.id;
+  if (payment.invoice?.opportunityId) {
+    return payment.invoice.opportunityId === opportunity.id;
+  }
+  return false;
 }
 
 /** @deprecated Prefer paymentsWhere with APPROVED statuses. */
@@ -219,26 +244,27 @@ export async function syncProjectFinanceFromPayments(db, projectId, { persist = 
     return syncOpportunityFinance(db, opportunity.id, { persist });
   }
 
-  // Fallback: project invoices + direct customer payments
+  // Fallback: only payments tied to this project's invoices / opportunity
   const project = await db.project.findFirst({
     where: { id: projectId, deletedAt: null },
     select: {
       id: true,
       crmCustomerId: true,
       finance: true,
+      opportunity: { select: { id: true } },
     },
   });
   if (!project?.finance) return null;
 
+  const oppId = project.opportunity?.id || null;
   const agg = await db.payment.aggregate({
     where: {
       verification: { in: [...APPROVED_PAYMENT_VERIFICATIONS] },
       OR: [
         { invoice: { projectId } },
-        {
-          invoiceId: null,
-          crmCustomerId: project.crmCustomerId,
-        },
+        ...(oppId
+          ? [{ opportunityId: oppId }, { invoice: { opportunityId: oppId } }]
+          : []),
       ],
     },
     _sum: { amount: true },
@@ -290,12 +316,13 @@ export async function batchOpportunityFinanceSnapshots(db, opportunities) {
   const paymentSelect = {
     amount: true,
     crmCustomerId: true,
+    opportunityId: true,
     invoiceId: true,
     verification: true,
     invoice: { select: { opportunityId: true } },
   };
   const paymentOr = [
-    { invoiceId: null },
+    { opportunityId: { in: oppIds } },
     { invoice: { opportunityId: { in: oppIds } } },
   ];
 
@@ -310,17 +337,11 @@ export async function batchOpportunityFinanceSnapshots(db, opportunities) {
 
   const approvedSet = new Set(APPROVED_PAYMENT_VERIFICATIONS);
 
-  function paymentMatchesOpp(payment, opp) {
-    if (payment.crmCustomerId !== opp.crmCustomerId) return false;
-    if (!payment.invoiceId) return true;
-    return payment.invoice?.opportunityId === opp.id;
-  }
-
   for (const opp of opportunities) {
     let totalPaid = 0;
     let reservedPaid = 0;
     for (const p of reservedRows) {
-      if (!paymentMatchesOpp(p, opp)) continue;
+      if (!paymentMatchesOpportunity(p, opp)) continue;
       const amt = Number(p.amount) || 0;
       reservedPaid += amt;
       if (approvedSet.has(p.verification)) totalPaid += amt;

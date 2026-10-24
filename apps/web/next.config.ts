@@ -28,6 +28,8 @@ const nextConfig: NextConfig = {
       "@radix-ui/react-checkbox",
       "@radix-ui/react-label",
       "@radix-ui/react-slot",
+      "date-fns",
+      "react-phone-number-input",
     ],
   },
   async redirects() {
@@ -113,6 +115,8 @@ const nextConfig: NextConfig = {
       `media-src 'self' blob: data: https: ${[...mediaOrigins].join(" ")}`,
       "font-src 'self' data:",
       `connect-src 'self' ${apiOrigin} ${wsOrigin} https: wss:`,
+      // Service worker + Web Push run same-origin; keep worker-src explicit.
+      "worker-src 'self'",
     ].join("; ");
 
     return [
@@ -151,8 +155,10 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=(), payment=()",
+            value:
+              "camera=(), microphone=(), geolocation=(), payment=(), notifications=(self)",
           },
+
           { key: "Content-Security-Policy", value: csp },
         ],
       },

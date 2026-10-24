@@ -31,6 +31,10 @@ import {
   canSendFinalVideos,
 } from "../../services/permissions/effective.js";
 import {
+  assertProjectAccess,
+  canAccessProject,
+} from "../../services/projectAccess.js";
+import {
   VIDEO_TYPE_LABELS,
   asMeta,
   buildFinalFileMeta,
@@ -310,7 +314,8 @@ async function nextFinalVersion(projectId, tx = prisma) {
 }
 
 function assertCanAssignProjectEditor(auth) {
-  if (auth?.roleCode === "EDITOR") {
+  // Plain editors cannot reassign; elevated project leads may assign like managers.
+  if (auth?.roleCode === "EDITOR" && !auth?.projectLeadElevated) {
     throw new AppError(
       "ادیتور اجازه تغییر یا ارجاع ادیتور پروژه را ندارد",
       403,
@@ -369,8 +374,12 @@ export const productionService = {
     }
     const where =
       auth.roleCode === "EDITOR"
-        ? { editorUserId: auth.userId, status: { in: ACTIVE_EDITING } }
-        : { status: { in: ACTIVE_EDITING } };
+        ? {
+            editorUserId: auth.userId,
+            status: { in: ACTIVE_EDITING },
+            project: { deletedAt: null },
+          }
+        : { status: { in: ACTIVE_EDITING }, project: { deletedAt: null } };
 
     const tasks = await prisma.editingTask.findMany({
       where,
@@ -390,7 +399,10 @@ export const productionService = {
     }
 
     const tasks = await prisma.editingTask.findMany({
-      where: { editorUserId: auth.userId },
+      where: {
+        editorUserId: auth.userId,
+        project: { deletedAt: null },
+      },
       orderBy: [{ updatedAt: "desc" }],
       include: editorTaskInclude,
     });
@@ -473,6 +485,7 @@ export const productionService = {
     const tasks = await prisma.editingTask.findMany({
       where: {
         editorUserId: auth.userId,
+        project: { deletedAt: null },
         ...(status ? { status } : {}),
       },
       orderBy: [{ updatedAt: "desc" }],
@@ -523,6 +536,17 @@ export const productionService = {
             user: { select: { id: true, fullName: true, email: true } },
             teamProfile: {
               select: { id: true, displayName: true, userId: true },
+            },
+          },
+        },
+        parentProject: {
+          select: {
+            id: true,
+            kind: true,
+            deletedAt: true,
+            assignments: {
+              where: { isActive: true, role: "PROJECT_LEAD" },
+              include: { teamProfile: { select: { userId: true } } },
             },
           },
         },
@@ -585,15 +609,24 @@ export const productionService = {
     });
     if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
 
-    if (auth.roleCode === "EDITOR") {
+    // Assigned editors, project leads (incl. editor-as-lead), and managers.
+    // Plain editors without EDITOR assignment (and without lead) stay blocked.
+    if (auth.roleCode === "MANAGER" || auth.roleCode === "ADMIN") {
+      // unrestricted
+    } else if (auth.projectLeadElevated || auth.roleCode !== "EDITOR") {
+      if (!canAccessProject(project, auth)) {
+        throw new AppError("دسترسی به این پروژه ندارید", 403, "FORBIDDEN");
+      }
+    } else {
       const assigned = project.assignments.some(
         (a) =>
           a.role === "EDITOR" &&
           a.isActive &&
           (a.userId === auth.userId || a.teamProfile?.userId === auth.userId),
       );
-      if (!assigned)
+      if (!assigned) {
         throw new AppError("دسترسی به این پروژه ندارید", 403, "FORBIDDEN");
+      }
     }
 
     let task = await prisma.editingTask.findFirst({
@@ -802,6 +835,7 @@ export const productionService = {
     req,
   ) {
     assertCanAssignProjectEditor(auth);
+    await assertProjectAccess(projectId, auth);
     if (!editorProfileId)
       throw new AppError("انتخاب ادیتور الزامی است", 400, "EDITOR_REQUIRED");
 
@@ -1579,22 +1613,41 @@ export const productionService = {
         code: true,
         title: true,
         status: true,
+        kind: true,
         portalAccountId: true,
         assignments: {
-          where: { role: "EDITOR", isActive: true },
+          where: { isActive: true, role: { in: ["EDITOR", "PROJECT_LEAD"] } },
           include: { teamProfile: { select: { userId: true } } },
+        },
+        parentProject: {
+          select: {
+            id: true,
+            kind: true,
+            deletedAt: true,
+            assignments: {
+              where: { isActive: true, role: "PROJECT_LEAD" },
+              include: { teamProfile: { select: { userId: true } } },
+            },
+          },
         },
       },
     });
     if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
 
-    if (auth.roleCode === "EDITOR") {
+    if (auth.roleCode === "MANAGER" || auth.roleCode === "ADMIN") {
+      // ok
+    } else if (auth.projectLeadElevated) {
+      if (!canAccessProject(project, auth)) {
+        throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
+      }
+    } else if (auth.roleCode === "EDITOR") {
       const assigned = project.assignments.some(
         (a) =>
-          a.userId === auth.userId || a.teamProfile?.userId === auth.userId,
+          a.role === "EDITOR" &&
+          (a.userId === auth.userId || a.teamProfile?.userId === auth.userId),
       );
       if (!assigned) throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
-    } else if (auth.roleCode !== "MANAGER" && auth.roleCode !== "ADMIN") {
+    } else {
       throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
     }
 

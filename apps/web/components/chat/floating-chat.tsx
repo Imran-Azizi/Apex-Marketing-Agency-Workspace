@@ -31,15 +31,53 @@ function FloatingChatLauncherInner() {
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  /** Defer badge polling so first paint / auth are not competing on weak links. */
+  const [badgeReady, setBadgeReady] = useState(false);
 
   const canChat = hasPermission(me?.permissions, "chat.view", me?.role);
+
+  useEffect(() => {
+    if (!canChat) {
+      setBadgeReady(false);
+      return;
+    }
+    let cancelled = false;
+    const arm = () => {
+      if (!cancelled) setBadgeReady(true);
+    };
+    let idleId: number | undefined;
+    let timeoutId: number | undefined;
+    const ric = (
+      window as Window & {
+        requestIdleCallback?: (
+          cb: () => void,
+          opts?: { timeout: number },
+        ) => number;
+        cancelIdleCallback?: (id: number) => void;
+      }
+    ).requestIdleCallback;
+    if (typeof ric === "function") {
+      idleId = ric(arm, { timeout: 4_000 });
+    } else {
+      timeoutId = window.setTimeout(arm, 3_000);
+    }
+    return () => {
+      cancelled = true;
+      if (idleId != null) {
+        (
+          window as Window & { cancelIdleCallback?: (id: number) => void }
+        ).cancelIdleCallback?.(idleId);
+      }
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+    };
+  }, [canChat]);
 
   const conversationsQ = useQuery({
     queryKey: ["chat-conversations", ""],
     queryFn: () => chatApi.conversations(),
-    enabled: canChat,
+    enabled: canChat && (open || badgeReady),
     staleTime: 20_000,
-    refetchInterval: open ? 45_000 : 90_000,
+    refetchInterval: open ? 45_000 : 180_000,
     refetchOnWindowFocus: false,
   });
 
@@ -48,10 +86,11 @@ function FloatingChatLauncherInner() {
     return list.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
   }, [conversationsQ.data]);
 
+  // Socket only while the drawer is open — avoids a persistent WS on every dashboard load.
   useEffect(() => {
-    if (!canChat) return;
+    if (!canChat || !open) return;
     return retainChatSocket();
-  }, [canChat]);
+  }, [canChat, open]);
 
   useEffect(() => {
     return subscribeChatOpen((id) => {

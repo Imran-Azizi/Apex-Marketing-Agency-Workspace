@@ -24,13 +24,13 @@ export function financialInvoiceWhere() {
 
 /**
  * Payments that may affect revenue, received totals, P&L, and CRM "our customers".
- * Direct payments (no invoice) and payments on contract/project invoices.
- * Excludes payments attached to CRM sample invoices.
+ * Must be linked to an opportunity/project cycle (directly or via invoice).
+ * Excludes CRM sample-invoice payments and unscoped orphan rows.
  */
 export function financialPaymentWhere() {
   return {
     OR: [
-      { invoiceId: null },
+      { opportunityId: { not: null } },
       { invoice: { opportunityId: { not: null } } },
       { invoice: { projectId: { not: null } } },
     ],

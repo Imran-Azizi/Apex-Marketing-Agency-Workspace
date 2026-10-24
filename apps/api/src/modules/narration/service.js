@@ -28,6 +28,7 @@ import {
   assertNarrationAudioFile,
   assertNarrationAudioStorageKey,
 } from './audio.js';
+import { assertProjectAccess } from '../../services/projectAccess.js';
 
 const taskInclude = {
   narratorUser: { select: { id: true, fullName: true, email: true } },
@@ -277,7 +278,10 @@ export const narrationService = {
 
   async listMyTasks(auth) {
     const tasks = await prisma.narrationTask.findMany({
-      where: { narratorUserId: auth.userId },
+      where: {
+        narratorUserId: auth.userId,
+        project: { deletedAt: null },
+      },
       orderBy: [{ status: 'asc' }, { deadline: 'asc' }, { updatedAt: 'desc' }],
       include: taskInclude,
     });
@@ -302,7 +306,10 @@ export const narrationService = {
     }
 
     const tasks = await prisma.narrationTask.findMany({
-      where: { narratorUserId: auth.userId },
+      where: {
+        narratorUserId: auth.userId,
+        project: { deletedAt: null },
+      },
       orderBy: [{ updatedAt: 'desc' }],
       include: taskInclude,
     });
@@ -386,6 +393,7 @@ export const narrationService = {
     const tasks = await prisma.narrationTask.findMany({
       where: {
         narratorUserId: auth.userId,
+        project: { deletedAt: null },
         ...(status ? { status } : {}),
       },
       orderBy: [{ updatedAt: 'desc' }],
@@ -434,19 +442,23 @@ export const narrationService = {
   },
 
   async getProjectTask(projectId, auth) {
+    const liveProject = await prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
+      select: { id: true, status: true },
+    });
+    if (!liveProject) {
+      throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
+    }
+
     let task = await prisma.narrationTask.findFirst({
-      where: { projectId },
+      where: { projectId, project: { deletedAt: null } },
       orderBy: { createdAt: 'desc' },
       include: taskInclude,
     });
 
     // Managers may auto-create shell tasks; narrators only see manually sent work.
     if (!task && auth.roleCode !== 'NARRATOR') {
-      const project = await prisma.project.findFirst({
-        where: { id: projectId, deletedAt: null },
-        select: { id: true, status: true },
-      });
-      if (project?.status === 'NARRATION_RECORDING') {
+      if (liveProject.status === 'NARRATION_RECORDING') {
         task = await this.ensureTaskForProject(projectId, { assignedById: auth.userId || null });
       }
     }
@@ -550,6 +562,7 @@ export const narrationService = {
     auth,
     req,
   ) {
+    await assertProjectAccess(projectId, auth);
     if (!narratorProfileId) {
       throw new AppError('انتخاب نریتور الزامی است', 400, 'VALIDATION');
     }

@@ -22,6 +22,9 @@ import {
   TrendingUp,
   Bot,
   Film,
+  ListTodo,
+  BookOpen,
+  Shield,
 } from "lucide-react";
 
 export type InternalRole =
@@ -92,6 +95,9 @@ const MANAGER_NAV: NavItem[] = [
   { href: "/crm", label: "مدیریت مشتریان", icon: Users },
   { href: "/projects", label: "پروژه‌ها", icon: FolderKanban },
   { href: "/manager/video-storage", label: "مدیریت ویدیوها", icon: Film },
+  { href: "/tasks", label: "وظایف", icon: ListTodo },
+  { href: "/knowledge", label: "دانش", icon: BookOpen },
+  { href: "/policies", label: "پالیسی‌های شرکت", icon: Shield },
   {
     href: "group:public-website",
     label: "مدیریت وبسایت عمومی",
@@ -137,6 +143,9 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
     { href: "/crm-sales", label: "CRM و فروش", icon: Kanban },
     { href: "/crm", label: "مدیریت مشتریان", icon: Users },
     { href: "/sales/messages", label: "پیام‌های تماس", icon: Inbox },
+    { href: "/tasks", label: "وظایف من", icon: ListTodo },
+    { href: "/knowledge", label: "دانش", icon: BookOpen },
+    { href: "/policies", label: "پالیسی‌های شرکت", icon: Shield },
   ],
   FINANCE: [
     { href: "/finance", label: "داشبورد مالی", icon: Wallet },
@@ -144,6 +153,9 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
     { href: "/finance/expenses", label: "مصارف شرکت", icon: Receipt },
     { href: "/finance/salaries", label: "معاشات کارمندان", icon: Banknote },
     { href: "/finance/pnl", label: "سود و زیان", icon: TrendingUp },
+    { href: "/tasks", label: "وظایف من", icon: ListTodo },
+    { href: "/knowledge", label: "دانش", icon: BookOpen },
+    { href: "/policies", label: "پالیسی‌های شرکت", icon: Shield },
   ],
   EDITOR: [
     {
@@ -152,6 +164,9 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
       icon: LayoutDashboard,
     },
     { href: "/editor/projects", label: "همه پروژه ها", icon: Clapperboard },
+    { href: "/tasks", label: "وظایف من", icon: ListTodo },
+    { href: "/knowledge", label: "دانش", icon: BookOpen },
+    { href: "/policies", label: "پالیسی‌های شرکت", icon: Shield },
   ],
   NARRATOR: [
     {
@@ -160,6 +175,9 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
       icon: LayoutDashboard,
     },
     { href: "/narrator/projects", label: "همه پروژه‌های", icon: Mic2 },
+    { href: "/tasks", label: "وظایف من", icon: ListTodo },
+    { href: "/knowledge", label: "دانش", icon: BookOpen },
+    { href: "/policies", label: "پالیسی‌های شرکت", icon: Shield },
   ],
   PROJECT_MANAGER: [
     {
@@ -168,6 +186,9 @@ export const ROLE_NAV: Record<InternalRole, NavItem[]> = {
       icon: LayoutDashboard,
     },
     { href: "/projects", label: "پروژه‌ها", icon: FolderKanban },
+    { href: "/tasks", label: "وظایف", icon: ListTodo },
+    { href: "/knowledge", label: "دانش", icon: BookOpen },
+    { href: "/policies", label: "پالیسی‌های شرکت", icon: Shield },
   ],
 };
 
@@ -284,6 +305,9 @@ const ROUTE_PERMISSIONS: Array<{ prefix: string; permission: string }> = [
   { prefix: "/narrator", permission: "narration.view" },
   { prefix: "/project-manager", permission: "dashboard.view" },
   { prefix: "/employees", permission: "employees.view" },
+  { prefix: "/tasks", permission: "tasks.view" },
+  { prefix: "/knowledge", permission: "knowledge.view" },
+  { prefix: "/policies", permission: "knowledge.view" },
   { prefix: "/catalog/services", permission: "services.view" },
   { prefix: "/backup", permission: "backup.view" },
   { prefix: "/settings", permission: "settings.view" },
@@ -361,6 +385,24 @@ const EXTRA_NAV: Array<NavItem & { permission: string }> = [
     label: "مدیریت کارمندان",
     icon: UserCog,
     permission: "employees.view",
+  },
+  {
+    href: "/tasks",
+    label: "وظایف",
+    icon: ListTodo,
+    permission: "tasks.view",
+  },
+  {
+    href: "/knowledge",
+    label: "دانش",
+    icon: BookOpen,
+    permission: "knowledge.view",
+  },
+  {
+    href: "/policies",
+    label: "پالیسی‌های شرکت",
+    icon: Shield,
+    permission: "knowledge.view",
   },
   {
     href: "/catalog/services",

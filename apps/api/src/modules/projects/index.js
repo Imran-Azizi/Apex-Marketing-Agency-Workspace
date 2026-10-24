@@ -115,6 +115,22 @@ router.patch(
   },
 );
 
+router.patch(
+  "/:id/brief",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await projectService.updateBrief(req.params.id, req.body, req.auth, req),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 // ─── Contract workspace: company info, assets, content calendar ───
 
 router.get(

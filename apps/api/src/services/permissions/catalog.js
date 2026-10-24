@@ -362,6 +362,70 @@ export const PERMISSION_CATALOG = [
     ],
   },
   {
+    id: "tasks",
+    label: "مدیریت وظایف",
+    description: "ایجاد، تخصیص و پیگیری وظایف کارمندان",
+    actions: [
+      {
+        code: "tasks.view",
+        label: "مشاهده",
+        description: "مشاهده وظایف محول‌شده (کارمند) یا همه وظایف (مدیر)",
+      },
+      {
+        code: "tasks.create",
+        label: "ایجاد و تخصیص",
+        description: "ایجاد وظیفه و تخصیص به کارمند",
+      },
+      {
+        code: "tasks.edit",
+        label: "ویرایش",
+        description: "ویرایش، تغییر مسئول، اولویت و مهلت",
+      },
+      {
+        code: "tasks.manage",
+        label: "تأیید / نظارت",
+        description: "تأیید یا رد تکمیل وظیفه و نظارت مدیریتی",
+      },
+      {
+        code: "tasks.delete",
+        label: "حذف",
+        description: "حذف نرم وظیفه",
+      },
+    ],
+  },
+  {
+    id: "knowledge",
+    label: "دانش",
+    description: "اشتراک تجربه کاری و پالیسی‌های رسمی شرکت بر اساس نقش",
+    actions: [
+      {
+        code: "knowledge.view",
+        label: "مشاهده",
+        description: "مشاهده تجربیات و پالیسی‌های مرتبط با نقش",
+      },
+      {
+        code: "knowledge.create",
+        label: "ثبت تجربه",
+        description: "ایجاد و انتشار تجربه کاری",
+      },
+      {
+        code: "knowledge.edit",
+        label: "ویرایش",
+        description: "ویرایش تجربیات خود",
+      },
+      {
+        code: "knowledge.manage",
+        label: "مدیریت پالیسی",
+        description: "ایجاد و انتشار پالیسی‌های رسمی شرکت برای هر نقش",
+      },
+      {
+        code: "knowledge.delete",
+        label: "حذف",
+        description: "حذف نرم دانش و پالیسی",
+      },
+    ],
+  },
+  {
     id: "backup",
     label: "بک اپ گیری",
     description: "تهیه، بازیابی و زمان‌بندی نسخه بک اپ",
@@ -732,6 +796,10 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "sales_assistant.view",
     "sales_assistant.act",
     "sales_assistant.manage",
+    "tasks.view",
+    "knowledge.view",
+    "knowledge.create",
+    "knowledge.edit",
   ],
   EDITOR: [
     "dashboard.view",
@@ -743,6 +811,10 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "chat.view",
     "chat.send",
     "chat.upload",
+    "tasks.view",
+    "knowledge.view",
+    "knowledge.create",
+    "knowledge.edit",
   ],
   NARRATOR: [
     "dashboard.view",
@@ -751,6 +823,10 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "chat.view",
     "chat.send",
     "chat.upload",
+    "tasks.view",
+    "knowledge.view",
+    "knowledge.create",
+    "knowledge.edit",
   ],
   FINANCE: [
     "dashboard.view",
@@ -765,6 +841,10 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "chat.view",
     "chat.send",
     "chat.upload",
+    "tasks.view",
+    "knowledge.view",
+    "knowledge.create",
+    "knowledge.edit",
   ],
   PROJECT_MANAGER: [
     "dashboard.view",
@@ -781,6 +861,12 @@ export const ROLE_DEFAULT_PERMISSIONS = {
     "chat.view",
     "chat.send",
     "chat.upload",
+    // Tasks / knowledge / policies: same baseline as other staff.
+    // Create-task and company-policy manage are granted per-user from Settings.
+    "tasks.view",
+    "knowledge.view",
+    "knowledge.create",
+    "knowledge.edit",
   ],
   CUSTOMER: ["dashboard.view", "finance.view"],
   AI_SERVICE: ["projects.view", "content.view", "content.generate"],

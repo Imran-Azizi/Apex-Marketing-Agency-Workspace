@@ -11,6 +11,7 @@ import {
   CustomerSidebarMobileTrigger,
 } from "@/components/portal/customer-sidebar";
 import { NotificationCenter } from "@/components/notifications/notification-center";
+import { WebPushBootstrap } from "@/components/notifications/web-push-bootstrap";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { SessionKeepAlive } from "@/components/auth/session-keep-alive";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -85,6 +86,7 @@ export default function PortalLayout({
   return (
     <div className="flex min-h-screen bg-background">
       <SessionKeepAlive />
+      <WebPushBootstrap />
 
       <div className="sticky top-0 z-30 hidden h-screen shrink-0 lg:flex">
         <CustomerSidebar collapsed={collapsed} />

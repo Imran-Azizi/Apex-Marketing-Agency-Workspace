@@ -36,15 +36,6 @@ import {
 
 export { resolvePaymentProjectId } from "./kpis.js";
 
-const PAYMENT_METHODS = [
-  "CASH",
-  "BANK_TRANSFER",
-  "HAWALA",
-  "HESAB_PAY",
-  "CARD",
-  "OTHER",
-];
-
 function dec(v) {
   return roundMoney(v);
 }
@@ -129,7 +120,8 @@ async function resolveExpenseCreator(auth) {
 export const salaryPaymentSchema = z.object({
   teamProfileId: z.string().min(1),
   amount: z.coerce.number().positive(),
-  method: z.enum(PAYMENT_METHODS),
+  method: z.enum(CUSTOMER_PAYMENT_METHODS),
+  paymentMethodMeta: expensePaymentMethodMetaSchema,
   paidAt: z.coerce.date().optional(),
   notes: z.string().trim().optional().nullable(),
 });
@@ -137,7 +129,8 @@ export const salaryPaymentSchema = z.object({
 export const salaryAdvanceSchema = z.object({
   teamProfileId: z.string().min(1),
   amount: z.coerce.number().positive(),
-  method: z.enum(PAYMENT_METHODS).optional().nullable(),
+  method: z.enum(CUSTOMER_PAYMENT_METHODS).optional().nullable(),
+  paymentMethodMeta: expensePaymentMethodMetaSchema,
   paidAt: z.coerce.date().optional(),
   notes: z.string().trim().optional().nullable(),
 });
@@ -415,9 +408,13 @@ async function sumEmployeeMoneyPaid({ from = null, to = null } = {}) {
 }
 
 async function buildEmployeeSalaryRows({ lean = false } = {}) {
+  const liveProjectPayable = {
+    status: { in: ["ESTIMATED", "CONFIRMED", "PAID"] },
+    project: { deletedAt: null },
+  };
   const payableInclude = lean
     ? {
-        where: { status: { in: ["ESTIMATED", "CONFIRMED", "PAID"] } },
+        where: liveProjectPayable,
         select: {
           id: true,
           projectId: true,
@@ -426,12 +423,12 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
           roleLabel: true,
           paidAt: true,
           paymentMethod: true,
-          project: { select: { status: true } },
+          project: { select: { status: true, deletedAt: true } },
         },
         orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
       }
     : {
-        where: { status: { in: ["ESTIMATED", "CONFIRMED", "PAID"] } },
+        where: liveProjectPayable,
         include: {
           project: {
             select: {
@@ -439,6 +436,7 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
               code: true,
               title: true,
               status: true,
+              deletedAt: true,
               completedAt: true,
               createdAt: true,
               crmCustomer: {
@@ -467,16 +465,46 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
     where: { deletedAt: null, status: { not: "INACTIVE" } },
     include: {
       user: {
-        select: { id: true, fullName: true, email: true, isActive: true },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          isActive: true,
+        },
       },
       compensationProfile: true,
       employeePayables: payableInclude,
       salaryPayments: lean
-        ? { select: { id: true, amount: true, paidAt: true, method: true, notes: true }, orderBy: { paidAt: "desc" } }
-        : { orderBy: { paidAt: "desc" } },
+        ? {
+            select: {
+              id: true,
+              amount: true,
+              paidAt: true,
+              createdAt: true,
+              method: true,
+              paymentMethodMeta: true,
+              notes: true,
+            },
+            orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+          }
+        : { orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }] },
       salaryAdvances: lean
-        ? { select: { id: true, amount: true, paidAt: true, method: true, status: true, notes: true, settledAt: true }, orderBy: { paidAt: "desc" } }
-        : { orderBy: { paidAt: "desc" } },
+        ? {
+            select: {
+              id: true,
+              amount: true,
+              paidAt: true,
+              createdAt: true,
+              method: true,
+              paymentMethodMeta: true,
+              status: true,
+              notes: true,
+              settledAt: true,
+            },
+            orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+          }
+        : { orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }] },
     },
     orderBy: { displayName: "asc" },
   });
@@ -489,6 +517,10 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
         : "FIXED");
     const fixedMonthly = dec(p.compensationProfile?.fixedMonthlyAmount || 0);
 
+    // Newest payment first — paidAt can repeat for same-day entries, so createdAt breaks ties.
+    const salaryPayments = sortSalaryMoneyNewestFirst(p.salaryPayments);
+    const salaryAdvances = sortSalaryMoneyNewestFirst(p.salaryAdvances);
+
     const unpaidPayables = p.employeePayables.filter(
       (x) => x.status !== "PAID",
     );
@@ -496,11 +528,11 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
       (s, x) => s + dec(x.amount),
       0,
     );
-    const salaryPaidTotal = p.salaryPayments.reduce(
+    const salaryPaidTotal = salaryPayments.reduce(
       (s, x) => s + dec(x.amount),
       0,
     );
-    const openAdvances = p.salaryAdvances
+    const openAdvances = salaryAdvances
       .filter((a) => a.status === "OPEN")
       .reduce((s, x) => s + dec(x.amount), 0);
 
@@ -567,13 +599,22 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
       payableStatus: row.status,
     }));
 
-    const lastPaymentAt = p.salaryPayments[0]?.paidAt || null;
+    const lastPayment = salaryPayments[0] || null;
+    const lastPaymentAt = lastPayment?.paidAt || null;
+    const lastPaymentMeta =
+      lastPayment?.method && lastPayment?.paymentMethodMeta
+        ? sanitizePaymentMethodMeta(
+            lastPayment.method,
+            lastPayment.paymentMethodMeta,
+          )
+        : null;
 
     return {
       teamProfileId: p.id,
       displayName: p.displayName,
       realName: p.realName,
       kind: p.kind,
+      phone: p.user?.phone || null,
       user: p.user,
       compensation: {
         type: compensationType,
@@ -601,24 +642,60 @@ async function buildEmployeeSalaryRows({ lean = false } = {}) {
       netPayable: compensationType === "FIXED" ? fixedNet : projectShareNet,
       remaining: compensationType === "FIXED" ? fixedNet : projectShareNet,
       lastPaymentAt,
-      payments: p.salaryPayments.map((pay) => ({
-        id: pay.id,
-        amount: dec(pay.amount),
-        paidAt: pay.paidAt,
-        method: pay.method,
-        notes: pay.notes,
-      })),
-      advances: p.salaryAdvances.map((adv) => ({
-        id: adv.id,
-        amount: dec(adv.amount),
-        paidAt: adv.paidAt,
-        method: adv.method,
+      lastPaymentMethod: lastPayment?.method || null,
+      lastPaymentAmount: lastPayment ? dec(lastPayment.amount) : null,
+      lastPaymentMethodLabel: lastPayment
+        ? formatPaymentMethod(lastPayment.method)
+        : null,
+      lastPaymentMethodMeta: lastPaymentMeta,
+      lastPaymentMethodMetaRows: lastPayment?.method
+        ? formatPaymentMethodMetaRows(
+            lastPayment.method,
+            lastPaymentMeta || {},
+          )
+        : [],
+      payments: salaryPayments.map((pay) => serializeSalaryMoneyRow(pay)),
+      advances: salaryAdvances.map((adv) => ({
+        ...serializeSalaryMoneyRow(adv),
         status: adv.status,
-        notes: adv.notes,
         settledAt: adv.settledAt,
       })),
     };
   });
+}
+
+/** Newest salary payment / advance first (paidAt, then createdAt). */
+function sortSalaryMoneyNewestFirst(rows = []) {
+  return [...rows].sort((a, b) => {
+    const paidDiff =
+      new Date(b.paidAt || 0).getTime() - new Date(a.paidAt || 0).getTime();
+    if (paidDiff !== 0) return paidDiff;
+    const createdDiff =
+      new Date(b.createdAt || 0).getTime() -
+      new Date(a.createdAt || 0).getTime();
+    if (createdDiff !== 0) return createdDiff;
+    return String(b.id || "").localeCompare(String(a.id || ""));
+  });
+}
+
+function serializeSalaryMoneyRow(row) {
+  const method = row.method || null;
+  const paymentMethodMeta =
+    method && row.paymentMethodMeta
+      ? sanitizePaymentMethodMeta(method, row.paymentMethodMeta)
+      : null;
+  return {
+    id: row.id,
+    amount: dec(row.amount),
+    paidAt: row.paidAt,
+    method,
+    methodLabel: formatPaymentMethod(method),
+    paymentMethodMeta,
+    paymentMethodMetaRows: method
+      ? formatPaymentMethodMetaRows(method, paymentMethodMeta || {})
+      : [],
+    notes: row.notes,
+  };
 }
 
 export const financeService = {
@@ -943,6 +1020,10 @@ export const financeService = {
 
     const amount = dec(body.amount);
     const paidAt = body.paidAt || new Date();
+    const paymentMethodMeta = assertPaymentMethodMeta(
+      body.method,
+      body.paymentMethodMeta || {},
+    );
 
     const result = await prisma.$transaction(async (tx) => {
       const payment = await tx.salaryPayment.create({
@@ -950,6 +1031,7 @@ export const financeService = {
           teamProfileId: body.teamProfileId,
           amount,
           method: body.method,
+          paymentMethodMeta,
           paidAt,
           notes: body.notes || null,
           recordedById: auth?.userId || null,
@@ -991,14 +1073,7 @@ export const financeService = {
       return payment;
     });
 
-    return {
-      id: result.id,
-      teamProfileId: result.teamProfileId,
-      amount: dec(result.amount),
-      paidAt: result.paidAt,
-      method: result.method,
-      notes: result.notes,
-    };
+    return serializeSalaryMoneyRow(result);
   },
 
   async recordSalaryAdvance(body, auth) {
@@ -1008,11 +1083,17 @@ export const financeService = {
     });
     if (!profile) throw new AppError("کارمند یافت نشد", 404, "NOT_FOUND");
 
+    const method = body.method || null;
+    const paymentMethodMeta = method
+      ? assertPaymentMethodMeta(method, body.paymentMethodMeta || {})
+      : null;
+
     const row = await prisma.salaryAdvance.create({
       data: {
         teamProfileId: body.teamProfileId,
         amount: body.amount,
-        method: body.method || null,
+        method,
+        paymentMethodMeta,
         paidAt: body.paidAt || new Date(),
         notes: body.notes || null,
         status: "OPEN",
@@ -1020,13 +1101,8 @@ export const financeService = {
       },
     });
     return {
-      id: row.id,
-      teamProfileId: row.teamProfileId,
-      amount: dec(row.amount),
-      paidAt: row.paidAt,
-      method: row.method,
+      ...serializeSalaryMoneyRow(row),
       status: row.status,
-      notes: row.notes,
     };
   },
 

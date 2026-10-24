@@ -204,6 +204,13 @@ export function CustomerDetailsForm({
   onPaymentCreated,
 }: CustomerDetailsFormProps) {
   const locked = !!opportunity.contractLocked;
+  const persistedPrice = Math.max(
+    0,
+    Number(opportunity.finance?.projectTotal ?? opportunity.agreedPrice) || 0,
+  );
+  // Single-video projects may already have an agreed price from create without
+  // an extra CRM «ذخیره» click — allow payments when price exists in DB.
+  const canRecordPayment = locked || persistedPrice > 0;
   const baseline = useMemo(() => toFormState(opportunity), [opportunity]);
   const [form, setForm] = useState<FormState>(baseline);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -244,7 +251,7 @@ export function CustomerDetailsForm({
   const handleSave = () => {
     const errors: { agreedPrice?: string; agreedTerms?: string } = {};
     if (!form.agreedPrice.trim() || !isValidMoneyInput(form.agreedPrice) || parseMoney(form.agreedPrice) <= 0) {
-      errors.agreedPrice = "قیمت مجموعی پروژه الزامی و باید بیشتر از صفر باشد.";
+      errors.agreedPrice = "قیمت این پروژه الزامی و باید بیشتر از صفر باشد.";
     }
     if (!form.agreedTerms.trim()) {
       errors.agreedTerms = "شرایط توافق‌شده الزامی است.";
@@ -296,11 +303,11 @@ export function CustomerDetailsForm({
                   </Badge>
                 )}
               </div>
-              <p className="mt-1.5 hidden max-w-xl text-[13px] leading-relaxed text-muted-foreground sm:block">
-                {opportunity.contract
-                  ? opportunity.contract.title
-                  : "قیمت پروژه و شرایط تجاری را مدیریت کنید"}
-              </p>
+              {opportunity.contract ? (
+                <p className="mt-1.5 hidden max-w-xl text-[13px] leading-relaxed text-muted-foreground sm:block">
+                  {opportunity.contract.title}
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -308,11 +315,11 @@ export function CustomerDetailsForm({
             type="button"
             variant="brand"
             onClick={openPaymentModal}
-            disabled={!locked}
+            disabled={!canRecordPayment}
             title={
-              locked
+              canRecordPayment
                 ? "ثبت پرداخت جدید"
-                : "ابتدا قرارداد را ذخیره کنید"
+                : "ابتدا قیمت توافقی پروژه را ثبت کنید"
             }
             className="w-full rounded-xl shadow-md shadow-brand/20 transition-all hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0 sm:w-auto"
           >
@@ -346,9 +353,9 @@ export function CustomerDetailsForm({
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {locked ? (
               <FinanceMetricCard
-                label="قیمت مجموعی پروژه"
+                label="قیمت این پروژه"
                 value={formatCurrency(finance.projectTotal)}
-                hint="مبلغ کل قرارداد — پس از ذخیره قابل تغییر نیست"
+                hint="مبلغ کل همین قرارداد/پروژه — پس از ذخیره قابل تغییر نیست"
                 icon={BadgeCheck}
                 tone="default"
               />
@@ -356,7 +363,7 @@ export function CustomerDetailsForm({
               <div className="rounded-2xl border border-border/90 bg-card p-4 transition-shadow hover:shadow-md dark:hover:shadow-black/40">
                 <CrmCurrencyField
                   id="agreed-price"
-                  label="قیمت مجموعی پروژه *"
+                  label="قیمت این پروژه *"
                   value={form.agreedPrice}
                   onChange={(v) => {
                     setForm((prev) => ({ ...prev, agreedPrice: v }));
@@ -367,7 +374,7 @@ export function CustomerDetailsForm({
                       }));
                     }
                   }}
-                  hint="مبلغ کل قرارداد / پروژه"
+                  hint="مبلغ کل همین پروژه"
                 />
                 {fieldErrors.agreedPrice && (
                   <p className="mt-1.5 text-xs text-destructive text-start">
@@ -488,7 +495,7 @@ export function CustomerDetailsForm({
         onOpenChange={setPaymentOpen}
         opportunityId={opportunity.id}
         finance={finance}
-        contractLocked={locked}
+        contractLocked={canRecordPayment}
         paymentCount={paymentCount}
         onCreated={async (payment) => {
           if (onPaymentCreated) {

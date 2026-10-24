@@ -1,5 +1,6 @@
 import { prisma } from '../db/prisma.js';
 import { formatFaDateTime } from '../modules/portal/helpers.js';
+import { scheduleWebPushForNotification } from './web-push.js';
 
 /** In-process gate so concurrent identical eventKeys cannot double-insert. */
 const inFlightByKey = new Map();
@@ -62,12 +63,34 @@ export async function createNotificationOnce(
       },
     });
 
-    return { created: true, id: row.id };
+    return {
+      created: true,
+      id: row.id,
+      _push: {
+        userId,
+        portalAccountId,
+        title,
+        body,
+        link,
+      },
+    };
   })();
 
   inFlightByKey.set(lockKey, work);
   try {
-    return await work;
+    const result = await work;
+    if (result?.created && result._push) {
+      scheduleWebPushForNotification({
+        userId: result._push.userId,
+        portalAccountId: result._push.portalAccountId,
+        title: result._push.title,
+        body: result._push.body,
+        link: result._push.link,
+        notificationId: result.id,
+      });
+    }
+    // Keep the public return shape stable for callers/tests.
+    return { created: result.created, id: result.id };
   } finally {
     if (inFlightByKey.get(lockKey) === work) {
       inFlightByKey.delete(lockKey);

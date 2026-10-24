@@ -88,10 +88,20 @@ export const BACKUP_TABLES = [
   'SalaryAdvance',
   'FinancePnlTarget',
 
+  // Staff task management
+  'ManagementTask',
+  'ManagementTaskActivity',
+
+  // Peer knowledge / experiences
+  'KnowledgeEntry',
+  'KnowledgeStep',
+  'KnowledgeAttachment',
+
   // Downloads / notifications / audit
   'DownloadPermission',
   'DownloadHistory',
   'Notification',
+  'PushSubscription',
   'AuditLog',
 
   // Internal chat
@@ -141,6 +151,7 @@ export const MEDIA_KEY_FIELDS = {
   ShowcaseCustomer: ['imageKey'],
   ChatAttachment: ['storageKey'],
   CompanyVideo: ['storageKey', 'thumbnailKey'],
+  KnowledgeAttachment: ['storageKey'],
 };
 
 export function listPrismaModelNames() {

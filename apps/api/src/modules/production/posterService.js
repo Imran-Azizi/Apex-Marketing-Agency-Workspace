@@ -17,6 +17,10 @@ import {
   hasAnyPermission,
 } from "../../services/permissions/effective.js";
 import {
+  canAccessProject,
+  hasActiveProjectLeadAssignment,
+} from "../../services/projectAccess.js";
+import {
   isAcceptedPosterMime,
   markLatestFlags,
   serializePoster,
@@ -37,11 +41,26 @@ async function loadProjectForPosters(projectId) {
       code: true,
       title: true,
       status: true,
+      kind: true,
       crmCustomerId: true,
       portalAccountId: true,
       assignments: {
-        where: { role: "EDITOR", isActive: true },
+        where: {
+          isActive: true,
+          role: { in: ["EDITOR", "PROJECT_LEAD"] },
+        },
         include: { teamProfile: { select: { userId: true } } },
+      },
+      parentProject: {
+        select: {
+          id: true,
+          kind: true,
+          deletedAt: true,
+          assignments: {
+            where: { isActive: true, role: "PROJECT_LEAD" },
+            include: { teamProfile: { select: { userId: true } } },
+          },
+        },
       },
     },
   });
@@ -53,13 +72,16 @@ function isAssignedEditor(project, auth) {
   if (auth.roleCode !== "EDITOR") return false;
   return (project.assignments || []).some(
     (a) =>
-      a.userId === auth.userId || a.teamProfile?.userId === auth.userId,
+      a.role === "EDITOR" &&
+      (a.userId === auth.userId || a.teamProfile?.userId === auth.userId),
   );
 }
 
 function canViewPosters(project, auth) {
   if (auth.roleCode === "MANAGER" || auth.roleCode === "ADMIN") return true;
   if (isAssignedEditor(project, auth)) return true;
+  if (auth.projectLeadElevated && canAccessProject(project, auth)) return true;
+  if (hasActiveProjectLeadAssignment(project, auth.userId)) return true;
   return hasAnyPermission(auth.permissions, ["poster.view"], auth.roleCode);
 }
 
@@ -117,14 +139,12 @@ export const posterService = {
     }
 
     const project = await loadProjectForPosters(projectId);
-    if (auth.roleCode === "EDITOR" && !isAssignedEditor(project, auth)) {
-      throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
-    }
-    if (
-      auth.roleCode !== "EDITOR" &&
-      auth.roleCode !== "MANAGER" &&
-      auth.roleCode !== "ADMIN"
-    ) {
+    const canUpload =
+      auth.roleCode === "MANAGER" ||
+      auth.roleCode === "ADMIN" ||
+      isAssignedEditor(project, auth) ||
+      (auth.projectLeadElevated && canAccessProject(project, auth));
+    if (!canUpload) {
       throw new AppError("دسترسی ندارید", 403, "FORBIDDEN");
     }
 

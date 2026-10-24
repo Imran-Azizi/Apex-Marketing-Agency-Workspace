@@ -57,7 +57,11 @@ function authFetchHeaders(): HeadersInit {
 
 /**
  * Fetch a stored file as a Blob via the authenticated API client
- * (sends X-APEX-Panel + cookies, retries after silent refresh).
+ * (cookies + X-APEX-Panel; silent refresh on 401).
+ *
+ * Important: do not add custom headers here (e.g. X-Requested-With) unless they
+ * are listed in the API CORS allowedHeaders — otherwise the browser aborts the
+ * preflight and axios surfaces it as a fake "connection lost" network error.
  */
 async function fetchRawFileBlob(storageKey: string): Promise<Blob> {
   const panel = resolveClientAuthPanel();
@@ -207,6 +211,27 @@ function typedFileBlob(
 }
 
 /**
+ * Always fetch via authenticated /files/raw and return the Blob.
+ * Required for PDF iframe preview — CDN URLs are often blocked by
+ * X-Frame-Options when embedded cross-origin.
+ */
+export async function fetchAuthenticatedFileBlob(
+  storageKey: string,
+  mimeType?: string | null,
+): Promise<Blob | null> {
+  if (!storageKey || storageKey.startsWith("ref://")) return null;
+  try {
+    return typedFileBlob(
+      await fetchRawFileBlob(storageKey),
+      mimeType,
+      storageKey,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Always fetch via authenticated /files/raw and return a blob: URL.
  * Required for PDF iframe preview — CDN URLs are often blocked by
  * X-Frame-Options when embedded cross-origin.
@@ -215,17 +240,22 @@ export async function fetchAuthenticatedFileBlobUrl(
   storageKey: string,
   mimeType?: string | null,
 ): Promise<string | null> {
-  if (!storageKey || storageKey.startsWith("ref://")) return null;
-  try {
-    const blob = typedFileBlob(
-      await fetchRawFileBlob(storageKey),
-      mimeType,
-      storageKey,
-    );
-    return URL.createObjectURL(blob);
-  } catch {
-    return null;
-  }
+  const blob = await fetchAuthenticatedFileBlob(storageKey, mimeType);
+  if (!blob) return null;
+  return URL.createObjectURL(blob);
+}
+
+/** Trigger a browser download from an in-memory Blob (no extra network call). */
+export function downloadBlob(blob: Blob, filename?: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename?.trim() || "download";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoke after the browser has a chance to start the download.
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 export async function fetchAuthenticatedPreview(

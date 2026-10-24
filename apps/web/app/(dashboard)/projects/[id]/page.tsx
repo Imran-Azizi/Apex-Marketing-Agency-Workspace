@@ -724,13 +724,10 @@ export default function ProjectDetailPage({
                     ...data,
                     assets: tab === "assets" ? clientAssets : undefined,
                   }}
+                  canEdit={canEditProject}
                   assetManagement={{
                     projectId: id,
-                    canManage: hasPermission(
-                      permissions,
-                      "projects.edit",
-                      role,
-                    ),
+                    canManage: canEditProject,
                   }}
                 />
               )}

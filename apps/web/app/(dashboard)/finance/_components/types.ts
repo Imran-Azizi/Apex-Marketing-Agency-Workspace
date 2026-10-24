@@ -164,6 +164,8 @@ export type PayrollEmployee = {
   teamProfileId: string;
   displayName: string;
   kind: string;
+  /** Employee phone from linked user account (for WhatsApp). */
+  phone?: string | null;
   compensation: {
     type: "FIXED" | "PROJECT_SHARE";
     fixedMonthlyAmount: number;
@@ -186,11 +188,43 @@ export type PayrollEmployee = {
   netPayable: number;
   remaining?: number;
   lastPaymentAt?: string | null;
+  /** Most recent salary payment method (CASH, HAWALA, …). */
+  lastPaymentMethod?: string | null;
+  /** Amount of the most recent salary payment. */
+  lastPaymentAmount?: number | null;
+  lastPaymentMethodLabel?: string | null;
+  lastPaymentMethodMeta?: {
+    hesabPayAccount?: string;
+    officeAddress?: string;
+    responsibleName?: string;
+    responsiblePhone?: string;
+    bankInfo?: string;
+    bankCardNumber?: string;
+  } | null;
+  lastPaymentMethodMetaRows?: Array<{
+    label: string;
+    value: string;
+    ltr?: boolean;
+  }>;
   payments: Array<{
     id: string;
     amount: number;
     paidAt: string;
     method: string;
+    methodLabel?: string | null;
+    paymentMethodMeta?: {
+      hesabPayAccount?: string;
+      officeAddress?: string;
+      responsibleName?: string;
+      responsiblePhone?: string;
+      bankInfo?: string;
+      bankCardNumber?: string;
+    } | null;
+    paymentMethodMetaRows?: Array<{
+      label: string;
+      value: string;
+      ltr?: boolean;
+    }>;
     notes: string | null;
   }>;
   advances: Array<{
@@ -198,6 +232,20 @@ export type PayrollEmployee = {
     amount: number;
     paidAt: string;
     method: string | null;
+    methodLabel?: string | null;
+    paymentMethodMeta?: {
+      hesabPayAccount?: string;
+      officeAddress?: string;
+      responsibleName?: string;
+      responsiblePhone?: string;
+      bankInfo?: string;
+      bankCardNumber?: string;
+    } | null;
+    paymentMethodMetaRows?: Array<{
+      label: string;
+      value: string;
+      ltr?: boolean;
+    }>;
     status: string;
     notes: string | null;
   }>;

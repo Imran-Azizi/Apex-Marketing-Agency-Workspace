@@ -66,10 +66,16 @@ export async function findAttachableOpportunity(tx, crmCustomerId) {
 /**
  * Resolve which opportunity a new project should attach to.
  *
+ * One opportunity = one project = one price.
+ *
  * Priority:
- * 1. Explicit opportunityId (must belong to customer, no project yet)
- * 2. Existing open opportunity with contract/payment data
+ * 1. Explicit opportunityId (must belong to customer)
+ * 2. Existing open opportunity with contract/payment data (only when not forcing fresh)
  * 3. Fresh blank cycle opportunity
+ *
+ * For a customer that already has projects, callers should pass
+ * alwaysCreateFresh=true unless they intentionally supply opportunityId
+ * (e.g. CRM-prepared open cycle / portal brief).
  */
 export async function resolveOpportunityForProjectCreate(
   tx,
@@ -91,6 +97,19 @@ export async function resolveOpportunityForProjectCreate(
       include: { service: true },
     });
     if (!opp) throw new AppError('فرصت یافت نشد', 404, 'NOT_FOUND');
+    if (opp.projectId) {
+      const linked = await tx.project.findFirst({
+        where: { id: opp.projectId, deletedAt: null },
+        select: { id: true },
+      });
+      if (linked) {
+        throw new AppError(
+          'این فرصت فروش قبلاً به پروژه دیگری متصل است؛ برای پروژه جدید فرصت جداگانه لازم است',
+          409,
+          'OPPORTUNITY_IN_USE',
+        );
+      }
+    }
     return { opportunity: opp, created: false };
   }
 
@@ -260,10 +279,21 @@ export async function createProjectGraph(tx, {
     projectId: p.id,
     advancePayment: snap.totalPaid,
   };
-  // Persist contract price onto opportunity when missing (internal create / fresh cycle)
+  // Persist contract price onto opportunity when missing (internal create / fresh cycle).
+  // Lock commercials when a positive price is confirmed — same as monthly contracts —
+  // so «پرداخت جدید» is available without a second CRM save step.
   if (agreed > 0) {
     if (opportunity.agreedPrice == null) opportunityUpdate.agreedPrice = agreed;
     if (opportunity.proposedPrice == null) opportunityUpdate.proposedPrice = agreed;
+    if (!opportunity.contractLocked) {
+      opportunityUpdate.contractLocked = true;
+      opportunityUpdate.contractLockedAt = new Date();
+      opportunityUpdate.contractLockedById = actorId || null;
+    }
+    if (!trimOrNull(opportunity.agreedTerms)) {
+      opportunityUpdate.agreedTerms =
+        'شرایط تجاری هنگام ایجاد پروژه تأیید شد.';
+    }
   }
   if (serviceId && !opportunity.serviceId) {
     opportunityUpdate.serviceId = serviceId;

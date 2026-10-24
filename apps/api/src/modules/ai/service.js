@@ -718,8 +718,8 @@ export const aiService = {
     await this.ensureAgentsSeeded();
     const [project, lastWorkflow, versions, running, feedback, approvals] =
       await Promise.all([
-        prisma.project.findUnique({
-          where: { id: projectId },
+        prisma.project.findFirst({
+          where: { id: projectId, deletedAt: null },
           select: { id: true, language: true, tone: true, title: true },
         }),
         prisma.aiWorkflowExecution.findFirst({

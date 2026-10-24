@@ -7,6 +7,7 @@ import {
 } from "./config/env.js";
 import { startBackupScheduler } from "./services/backupScheduler.js";
 import { startSalesAssistantScheduler } from "./modules/sales-assistant/scheduler.js";
+import { startTaskDeadlineScheduler } from "./modules/tasks/scheduler.js";
 import { attachChatRealtime } from "./realtime/chatSocket.js";
 
 try {
@@ -91,6 +92,9 @@ const server = app.listen(env.port, env.host, () => {
   );
   startSalesAssistantScheduler().catch((err) =>
     console.error("[boot] sales assistant scheduler:", err?.message || err),
+  );
+  startTaskDeadlineScheduler().catch((err) =>
+    console.error("[boot] task deadline scheduler:", err?.message || err),
   );
 });
 

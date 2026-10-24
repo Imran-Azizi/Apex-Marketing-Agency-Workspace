@@ -34,17 +34,22 @@ import {
   assertProjectAccess,
   canAccessProject,
   PROJECT_LEAD_CANDIDATE_ROLES,
+  inheritProjectLeadsFromParent,
   projectLeadScopeWhere,
   resolveProjectLead,
 } from '../../services/projectAccess.js';
 import { createNotificationOnce, notifyManagersOnce } from '../../services/notifications.js';
 import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
 import { customerSearchCondition } from '../crm/visibility.js';
-import { openFreshCycleOpportunity } from '../crm/repeatCycle.js';
+import {
+  detachOpportunityFromDeletedProject,
+  openFreshCycleOpportunity,
+} from '../crm/repeatCycle.js';
 import {
   contractProgressPayload,
   summarizeContractVideos,
 } from './contractVideoStats.js';
+import { purgeProjectOperationalSideEffects } from './purgeSideEffects.js';
 import { z } from 'zod';
 import { storage } from '../../services/storage.js';
 import { serializePortalAsset } from '../portal/helpers.js';
@@ -206,6 +211,67 @@ const updateContractSchema = z
   })
   .refine(contractPeriodIsValid, { message: CONTRACT_PERIOD_MESSAGE, path: ['endDate'] });
 
+/** Partial update for project customer snapshot + creative brief (SINGLE/CHILD). */
+const updateProjectBriefSchema = z.object({
+  // Customer contact snapshot (stored in project.brief)
+  personName: z.string().trim().max(200).optional().nullable(),
+  jobTitle: z.string().trim().max(200).optional().nullable(),
+  companyName: z.string().trim().max(200).optional().nullable(),
+  phone: z.string().trim().max(40).optional().nullable(),
+  whatsapp: z.string().trim().max(40).optional().nullable(),
+  address: z.string().trim().max(500).optional().nullable(),
+  email: optionalEmail,
+  website: optionalWebsite,
+  city: z.string().trim().max(120).optional().nullable(),
+  // Creative brief
+  productName: z.string().trim().max(200).optional().nullable(),
+  productDescription: z.string().trim().max(4000).optional().nullable(),
+  features: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
+  audience: z.string().trim().max(400).optional().nullable(),
+  goal: z.string().trim().max(400).optional().nullable(),
+  mainMessage: z.string().trim().max(1000).optional().nullable(),
+  cta: z.string().trim().max(200).optional().nullable(),
+  allowedClaims: z.string().trim().max(4000).optional().nullable(),
+  mandatoryTexts: z.string().trim().max(4000).optional().nullable(),
+  brandLimits: z.string().trim().max(4000).optional().nullable(),
+  notes: z.string().trim().max(4000).optional().nullable(),
+  customAspectRatio: z.preprocess(
+    (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+    z
+      .string()
+      .trim()
+      .regex(/^\d{1,3}:\d{1,3}$/, 'نسبت تصویر باید مثل 9:16 باشد')
+      .optional()
+      .nullable(),
+  ),
+  // Project columns mirrored in brief when useful
+  title: z.string().trim().min(2).max(200).optional(),
+  serviceId: z.string().trim().min(1).optional().nullable(),
+  formatId: z.string().trim().min(1).optional().nullable(),
+  durationSec: z.coerce.number().int().positive().max(30 * 60).optional().nullable(),
+  language: z.string().trim().max(16).optional().nullable(),
+  tone: z.string().trim().max(80).optional().nullable(),
+  platforms: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+});
+
+function applyBriefPatch(brief, input, keys) {
+  for (const key of keys) {
+    if (input[key] === undefined) continue;
+    const value = input[key];
+    if (value == null) {
+      delete brief[key];
+      continue;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) delete brief[key];
+      else brief[key] = trimmed;
+      continue;
+    }
+    brief[key] = value;
+  }
+}
+
 const PROJECT_CLIENT_ASSET_KINDS = new Set([
   'LOGO',
   'PRODUCT_IMAGE',
@@ -352,9 +418,17 @@ function withContractPresentation(project, videoStats) {
 
 const FINANCE_HIDDEN_ROLES = ['EDITOR', 'NARRATOR', 'SALES', 'PROJECT_MANAGER'];
 
-function stripFinanceForRole(project, roleCode) {
-  if (FINANCE_HIDDEN_ROLES.includes(roleCode)) {
-    const { finance, invoices, payables, ...rest } = project;
+/** Project leads manage work but must not see contract/payment finance. */
+function shouldHideProjectFinance(auth) {
+  const role = String(auth?.roleCode || auth || '').toUpperCase();
+  if (role === 'MANAGER' || role === 'ADMIN') return false;
+  if (auth && typeof auth === 'object' && auth.projectLeadElevated) return true;
+  return FINANCE_HIDDEN_ROLES.includes(role);
+}
+
+function stripFinanceForRole(project, auth) {
+  if (shouldHideProjectFinance(auth)) {
+    const { finance, invoices, payables, paymentFinance, ...rest } = project;
     return rest;
   }
   return project;
@@ -444,19 +518,25 @@ function buildListWhere(auth, query = {}) {
   const editorId = String(query.editorId || '').trim();
   const deliveryStatus = String(query.deliveryStatus || '').trim();
   const wantsTopLevel = query.topLevel === '1' || query.topLevel === 'true';
+  const leadScoped = shouldScopeToProjectLead(auth);
   const assignmentScoped =
-    shouldScopeToProjectLead(auth) ||
+    leadScoped ||
     auth.roleCode === 'EDITOR' ||
     auth.roleCode === 'NARRATOR';
 
   const where = { deletedAt: null };
   const and = [];
 
-  // Managers see contracts and single videos. Child videos live inside the contract.
-  // Assignment-scoped staff still see the videos they are responsible for.
-  // Editor / delivery filters switch to the matching video rows.
+  // Managers + project leads see contracts/singles at top level; child videos
+  // live inside the monthly contract dashboard. Editor/narrator assignment lists
+  // still surface the specific CHILD rows they work on.
+  // Editor / delivery / status filters switch to the matching video rows.
   const hideChildRows =
-    wantsTopLevel && !assignmentScoped && !editorId && !deliveryStatus && !status;
+    wantsTopLevel &&
+    !editorId &&
+    !deliveryStatus &&
+    !status &&
+    (leadScoped || !assignmentScoped);
   if (hideChildRows) and.push({ kind: { not: 'CHILD' } });
   if (wantsTopLevel && !assignmentScoped && !hideChildRows) {
     and.push({ kind: { not: 'CONTRACT' } });
@@ -565,10 +645,10 @@ async function presentProjectDetail(result, auth) {
     },
   });
   const videos = await attachProjectProgressMany(
-    children.map((child) => withProjectLead(stripFinanceForRole(child, auth.roleCode))),
+    children.map((child) => withProjectLead(stripFinanceForRole(child, auth))),
     'internal',
   );
-  const canSeeCommercials = !FINANCE_HIDDEN_ROLES.includes(auth.roleCode);
+  const canSeeCommercials = !shouldHideProjectFinance(auth);
   const commercials = canSeeCommercials
     ? await prisma.opportunity.findFirst({
         where: { projectId: result.id, deletedAt: null },
@@ -643,7 +723,7 @@ export const projectService = {
     }
 
     const items = (await attachProjectProgressMany(
-      rows.map((p) => withProjectLead(stripFinanceForRole(p, auth.roleCode))),
+      rows.map((p) => withProjectLead(stripFinanceForRole(p, auth))),
       'internal',
     )).map((project) =>
       withContractPresentation(project, statsByParent.get(project.id)),
@@ -767,6 +847,17 @@ export const projectService = {
             contractLocked: true,
           },
         },
+        parentProject: {
+          select: {
+            id: true,
+            kind: true,
+            deletedAt: true,
+            assignments: {
+              where: { isActive: true, role: 'PROJECT_LEAD' },
+              include: { teamProfile: { select: { userId: true } } },
+            },
+          },
+        },
       },
     });
     if (!project) throw new AppError('پروژه یافت نشد', 404, 'NOT_FOUND');
@@ -784,8 +875,8 @@ export const projectService = {
       };
     }
 
-    let result = withProjectLead(stripFinanceForRole(project, auth.roleCode));
-    if (result.finance && ['MANAGER', 'ADMIN', 'FINANCE'].includes(auth.roleCode)) {
+    let result = withProjectLead(stripFinanceForRole(project, auth));
+    if (result.finance && !shouldHideProjectFinance(auth)) {
       const calc = computeFinanceFields(result.finance);
       result = { ...result, finance: { ...result.finance, ...calc } };
     }
@@ -1063,11 +1154,14 @@ export const projectService = {
         data: { deletedAt },
       });
 
-      // Detach opportunity and restore pre-project CRM stage
+      // Drop editor/narrator tasks, assignments, finance row, and notifications
+      const operational = await purgeProjectOperationalSideEffects(tx, [id]);
+
+      // Detach opportunity and clear commercials so the next project
+      // for this customer cannot inherit this cycle's price.
       if (project.opportunity) {
-        await tx.opportunity.update({
-          where: { id: project.opportunity.id },
-          data: { projectId: null, pipelineStage: 'DEPOSIT_CONFIRMED' },
+        await detachOpportunityFromDeletedProject(tx, project.opportunity.id, {
+          pipelineStage: 'DEPOSIT_CONFIRMED',
         });
       }
 
@@ -1090,7 +1184,7 @@ export const projectService = {
       // Soft-delete the project itself (retains code for audit / uniqueness)
       const deleted = await tx.project.update({
         where: { id },
-        data: { deletedAt },
+        data: { deletedAt, portalAccountId: null },
       });
 
       return {
@@ -1101,6 +1195,9 @@ export const projectService = {
           expenses: expensesDeleted,
           payables: payablesDeleted,
           portfolioItems: portfolioUpdated.count,
+          assignments: operational.assignments,
+          narrationTasks: operational.narrationTasks,
+          editingTasks: operational.editingTasks,
         },
       };
     });
@@ -1299,8 +1396,48 @@ export const projectService = {
       }),
     ]);
 
+    // Open CRM cycles (priced / locked) that a new project may attach to —
+    // never reuse a linked opportunity from a prior project.
+    const customerIds = customers.map((c) => c.id);
+    const openCycles = customerIds.length
+      ? await prisma.opportunity.findMany({
+          where: {
+            crmCustomerId: { in: customerIds },
+            deletedAt: null,
+            projectId: null,
+            pipelineStage: { not: 'LOST_CANCELED' },
+            OR: [
+              { agreedPrice: { not: null } },
+              { proposedPrice: { not: null } },
+              { contractLocked: true },
+              { invoices: { some: {} } },
+            ],
+          },
+          orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+          select: {
+            id: true,
+            crmCustomerId: true,
+            agreedPrice: true,
+            proposedPrice: true,
+          },
+        })
+      : [];
+    const openCycleByCustomer = new Map();
+    for (const opp of openCycles) {
+      if (!openCycleByCustomer.has(opp.crmCustomerId)) {
+        const price = Number(opp.agreedPrice || opp.proposedPrice || 0);
+        openCycleByCustomer.set(opp.crmCustomerId, {
+          id: opp.id,
+          agreedPrice: Number.isFinite(price) && price > 0 ? price : null,
+        });
+      }
+    }
+
     return {
-      customers,
+      customers: customers.map((c) => ({
+        ...c,
+        openCycleOpportunity: openCycleByCustomer.get(c.id) || null,
+      })),
       customerTotal,
       page,
       pageSize,
@@ -1411,6 +1548,13 @@ export const projectService = {
             input.whatsapp,
           );
 
+          // Independent projects for an existing customer always get a fresh
+          // opportunity/price unless an explicit open cycle (opportunityId) is passed.
+          // Contract child videos also force a fresh shell (price lives on parent).
+          const alwaysCreateFresh =
+            Boolean(parentProject) ||
+            (priorProjects > 0 && !input.opportunityId);
+
           const { opportunity } = await resolveOpportunityForProjectCreate(
             tx,
             customerWithWhatsapp,
@@ -1418,7 +1562,7 @@ export const projectService = {
               opportunityId: input.opportunityId || null,
               title,
               pipelineStage: priorProjects > 0 ? 'REPEAT_CUSTOMER' : 'ORDER_CONFIRMED',
-              alwaysCreateFresh: Boolean(parentProject),
+              alwaysCreateFresh,
             },
           );
 
@@ -1475,6 +1619,17 @@ export const projectService = {
             kind: parentProject ? 'CHILD' : 'SINGLE',
             parentProjectId: parentProject ? parentProject.id : null,
           });
+
+          // Child videos inherit the contract's project lead so the lead can
+          // open, list, and manage them (narrator/editor/pricing) like a manager.
+          if (parentProject) {
+            await inheritProjectLeadsFromParent(tx, {
+              parentProjectId: parentProject.id,
+              childProjectId: created.project.id,
+              assignedById: auth.userId,
+            });
+          }
+
           return { ...created, replayed: false };
         });
 
@@ -1497,8 +1652,9 @@ export const projectService = {
             req,
           });
 
-          // Creator with PROJECT_MANAGER role becomes the project lead automatically
-          if (auth.roleCode === 'PROJECT_MANAGER') {
+          // Standalone create: PROJECT_MANAGER creator becomes lead.
+          // Children already inherited leads from the parent contract above.
+          if (!parentProject && auth.roleCode === 'PROJECT_MANAGER') {
             const creatorProfile = await prisma.teamProfile.findFirst({
               where: {
                 userId: auth.userId,
@@ -2061,7 +2217,7 @@ export const projectService = {
     const termsChanged =
       input.agreedTerms !== undefined &&
       trimText(input.agreedTerms) !== trimText(opportunity?.agreedTerms);
-    if ((priceChanged || termsChanged) && FINANCE_HIDDEN_ROLES.includes(auth.roleCode)) {
+    if ((priceChanged || termsChanged) && shouldHideProjectFinance(auth)) {
       throw new AppError('اجازه تغییر قیمت و شرایط قرارداد را ندارید', 403, 'FORBIDDEN');
     }
     if (opportunity?.contractLocked && (priceChanged || termsChanged)) {
@@ -2141,6 +2297,187 @@ export const projectService = {
         ...(input.posterCount !== undefined ? { posterCount: input.posterCount } : {}),
         ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
         ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
+      },
+      req,
+    });
+
+    return this.get(project.id, auth);
+  },
+
+  async updateBrief(id, body, auth, req) {
+    const project = await assertProjectAccess(id, auth);
+    if (project.kind === 'CONTRACT') {
+      throw new AppError(
+        'برای ویرایش قرارداد چندویدیویی از صفحه قرارداد استفاده کنید',
+        400,
+        'VALIDATION',
+      );
+    }
+
+    const parsed = updateProjectBriefSchema.safeParse(body || {});
+    if (!parsed.success) {
+      throw new AppError(
+        parsed.error.issues?.[0]?.message || 'اطلاعات بریف نامعتبر است',
+        400,
+        'VALIDATION',
+      );
+    }
+    const input = parsed.data;
+    if (!Object.keys(input).length) {
+      throw new AppError('هیچ فیلدی برای به‌روزرسانی ارسال نشده است', 400, 'VALIDATION');
+    }
+
+    if (input.serviceId) {
+      const service = await prisma.service.findFirst({
+        where: { id: input.serviceId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!service) throw new AppError('خدمت یافت نشد', 404, 'NOT_FOUND');
+    }
+    if (input.formatId) {
+      const format = await prisma.format.findUnique({
+        where: { id: input.formatId },
+        select: { id: true },
+      });
+      if (!format) throw new AppError('فرمت / نسبت تصویر یافت نشد', 404, 'NOT_FOUND');
+    }
+
+    const brief = {
+      ...(project.brief && typeof project.brief === 'object' ? project.brief : {}),
+    };
+
+    applyBriefPatch(brief, input, [
+      'personName',
+      'jobTitle',
+      'companyName',
+      'phone',
+      'whatsapp',
+      'address',
+      'email',
+      'website',
+      'city',
+      'productName',
+      'productDescription',
+      'audience',
+      'goal',
+      'mainMessage',
+      'cta',
+      'allowedClaims',
+      'mandatoryTexts',
+      'brandLimits',
+      'tone',
+      'language',
+    ]);
+
+    if (input.features !== undefined) {
+      brief.features = input.features
+        .map((f) => String(f).trim())
+        .filter(Boolean)
+        .slice(0, 20);
+    }
+
+    // Customer-facing notes live in brief.notes (portal); internal notes stay in managerNotes.
+    if (input.notes !== undefined) {
+      const notes = trimText(input.notes);
+      if (!notes) delete brief.notes;
+      else brief.notes = notes;
+    }
+
+    if (input.customAspectRatio !== undefined) {
+      const ratio = trimText(input.customAspectRatio);
+      if (!ratio) delete brief.customAspectRatio;
+      else brief.customAspectRatio = ratio;
+    }
+
+    for (const key of Object.keys(brief)) {
+      if (brief[key] === undefined) delete brief[key];
+    }
+
+    const data = { brief };
+    if (input.title !== undefined) data.title = input.title.trim();
+    if (input.serviceId !== undefined) data.serviceId = input.serviceId || null;
+    if (input.formatId !== undefined) {
+      data.formatId = input.formatId || null;
+      if (input.formatId) delete brief.customAspectRatio;
+    }
+    if (input.durationSec !== undefined) data.durationSec = input.durationSec;
+    if (input.language !== undefined) {
+      data.language = trimText(input.language) || null;
+    }
+    if (input.tone !== undefined) {
+      data.tone = trimText(input.tone) || null;
+    }
+    if (input.platforms !== undefined) {
+      data.platforms = input.platforms.map((p) => String(p).trim()).filter(Boolean);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      if (input.whatsapp) {
+        const customer = await tx.crmCustomer.findFirst({
+          where: { id: project.crmCustomerId, deletedAt: null },
+        });
+        if (customer) {
+          await syncCustomerWhatsappFromBrief(tx, customer, input.whatsapp);
+        }
+      }
+
+      // Keep CRM contact in sync when contact snapshot fields are edited.
+      const crmPatch = {};
+      if (input.personName !== undefined && trimText(input.personName)) {
+        crmPatch.personName = trimText(input.personName);
+      }
+      if (input.companyName !== undefined) {
+        crmPatch.companyName = trimText(input.companyName) || null;
+      }
+      if (input.jobTitle !== undefined) {
+        crmPatch.jobTitle = trimText(input.jobTitle) || null;
+      }
+      if (input.phone !== undefined) {
+        crmPatch.phone = trimText(input.phone) || null;
+      }
+      if (input.address !== undefined) {
+        crmPatch.address = trimText(input.address) || null;
+      }
+      if (input.email !== undefined) {
+        crmPatch.email = trimText(input.email) || null;
+      }
+      if (input.city !== undefined) {
+        crmPatch.city = trimText(input.city) || null;
+      }
+      if (Object.keys(crmPatch).length) {
+        await tx.crmCustomer.update({
+          where: { id: project.crmCustomerId },
+          data: crmPatch,
+        });
+      }
+
+      await tx.project.update({
+        where: { id: project.id },
+        data: { ...data, brief },
+      });
+
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId: project.id,
+          type: 'UPDATED',
+          title: 'اطلاعات مشتری / بریف به‌روزرسانی شد',
+          actorId: auth.userId,
+        },
+      });
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_UPDATE',
+      entityType: 'Project',
+      entityId: project.id,
+      after: {
+        briefUpdated: true,
+        ...(input.title !== undefined ? { title: data.title } : {}),
+        ...(input.durationSec !== undefined
+          ? { durationSec: input.durationSec }
+          : {}),
+        ...(input.language !== undefined ? { language: data.language } : {}),
       },
       req,
     });
@@ -2335,21 +2672,40 @@ export const projectService = {
         : null;
 
     await prisma.$transaction(async (tx) => {
+      const targetIds = [project.id];
+      if (project.kind === 'CONTRACT') {
+        const children = await tx.project.findMany({
+          where: { parentProjectId: project.id, deletedAt: null },
+          select: { id: true },
+        });
+        for (const child of children) targetIds.push(child.id);
+      }
+
       await tx.projectAssignment.updateMany({
-        where: { projectId: project.id, role: 'PROJECT_LEAD', isActive: true },
-        data: { isActive: false },
-      });
-      await tx.projectAssignment.create({
-        data: {
-          projectId: project.id,
+        where: {
+          projectId: { in: targetIds },
           role: 'PROJECT_LEAD',
-          userId: employee.id,
-          teamProfileId,
-          assignedById: auth.userId,
-          notes: notes?.trim() || null,
           isActive: true,
         },
+        data: { isActive: false },
       });
+
+      for (const targetId of targetIds) {
+        await tx.projectAssignment.create({
+          data: {
+            projectId: targetId,
+            role: 'PROJECT_LEAD',
+            userId: employee.id,
+            teamProfileId,
+            assignedById: auth.userId,
+            notes:
+              targetId === project.id
+                ? notes?.trim() || null
+                : notes?.trim() || 'ارث‌بری از قرارداد مادر',
+            isActive: true,
+          },
+        });
+      }
     });
 
     await createNotificationOnce({
@@ -2366,7 +2722,7 @@ export const projectService = {
       action: 'PROJECT_LEAD_ASSIGN',
       entityType: 'Project',
       entityId: project.id,
-      after: { leadUserId: employee.id, teamProfileId },
+      after: { leadUserId: employee.id, teamProfileId, cascadedChildren: project.kind === 'CONTRACT' },
       req,
     });
 
@@ -2386,8 +2742,21 @@ export const projectService = {
       return this.get(project.id, auth);
     }
 
+    const targetIds = [project.id];
+    if (project.kind === 'CONTRACT') {
+      const children = await prisma.project.findMany({
+        where: { parentProjectId: project.id, deletedAt: null },
+        select: { id: true },
+      });
+      for (const child of children) targetIds.push(child.id);
+    }
+
     await prisma.projectAssignment.updateMany({
-      where: { projectId: project.id, role: 'PROJECT_LEAD', isActive: true },
+      where: {
+        projectId: { in: targetIds },
+        role: 'PROJECT_LEAD',
+        isActive: true,
+      },
       data: { isActive: false },
     });
 
@@ -2396,7 +2765,7 @@ export const projectService = {
       action: 'PROJECT_LEAD_UNASSIGN',
       entityType: 'Project',
       entityId: project.id,
-      before: { leadUserId: active.userId },
+      before: { leadUserId: active.userId, cascadedChildren: project.kind === 'CONTRACT' },
       req,
     });
 

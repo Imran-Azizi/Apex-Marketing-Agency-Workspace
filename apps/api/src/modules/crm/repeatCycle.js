@@ -6,6 +6,19 @@
 
 import { getCustomerPersonName } from '../../utils/crmCustomerName.js';
 
+/** Commercial fields for a blank project cycle (never copy prior deal price). */
+export function blankOpportunityCommercials() {
+  return {
+    proposedPrice: null,
+    agreedPrice: null,
+    advancePayment: null,
+    agreedTerms: null,
+    contractLocked: false,
+    contractLockedAt: null,
+    contractLockedById: null,
+  };
+}
+
 export function buildFreshOpportunityData(customer, { title, pipelineStage } = {}) {
   const name = getCustomerPersonName(customer);
   return {
@@ -14,15 +27,28 @@ export function buildFreshOpportunityData(customer, { title, pipelineStage } = {
     pipelineStage: pipelineStage || "REPEAT_CUSTOMER",
     serviceId: null,
     lostReason: null,
-    proposedPrice: null,
-    agreedPrice: null,
-    advancePayment: null,
-    agreedTerms: null,
-    contractLocked: false,
-    contractLockedAt: null,
-    contractLockedById: null,
+    ...blankOpportunityCommercials(),
     projectId: null,
   };
+}
+
+/**
+ * After a project is removed, detach its opportunity and clear commercials
+ * so the next project for the same customer cannot inherit the old price.
+ */
+export async function detachOpportunityFromDeletedProject(
+  tx,
+  opportunityId,
+  { pipelineStage = "DEPOSIT_CONFIRMED" } = {},
+) {
+  return tx.opportunity.update({
+    where: { id: opportunityId },
+    data: {
+      projectId: null,
+      pipelineStage,
+      ...blankOpportunityCommercials(),
+    },
+  });
 }
 
 /** Customer-level fields available for a new order cycle (never project finance). */

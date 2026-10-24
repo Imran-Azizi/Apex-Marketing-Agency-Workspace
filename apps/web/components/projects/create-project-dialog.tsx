@@ -63,6 +63,11 @@ type CreateCustomerOption = {
   email?: string | null;
   city?: string | null;
   address?: string | null;
+  /** CRM-prepared open cycle for this customer (independent of prior projects). */
+  openCycleOpportunity?: {
+    id: string;
+    agreedPrice: number | null;
+  } | null;
 };
 
 type CreateOptionsResponse = {
@@ -278,6 +283,12 @@ export function CreateProjectDialog({
     setPickerOpen(false);
     setCustomerQuery(customerLabel(customer));
     setStepError(null);
+    // Price is per project cycle: only prefill from a CRM-prepared open cycle,
+    // never from a prior linked project of this customer.
+    const cyclePrice = customer.openCycleOpportunity?.agreedPrice;
+    setAgreedPrice(
+      cyclePrice != null && cyclePrice > 0 ? String(cyclePrice) : "",
+    );
     if (!title.trim()) {
       const companyOrPerson = customer.companyName || customer.personName;
       setTitle(
@@ -291,6 +302,7 @@ export function CreateProjectDialog({
   const clearCustomer = () => {
     setSelectedCustomer(null);
     setCustomerQuery("");
+    setAgreedPrice("");
     setPickerOpen(true);
     searchRef.current?.focus();
   };
@@ -359,6 +371,8 @@ export function CreateProjectDialog({
 
     createMutation.mutate({
       crmCustomerId: selectedCustomer.id,
+      // Attach only an explicit open CRM cycle — never a prior project's opportunity.
+      opportunityId: selectedCustomer.openCycleOpportunity?.id || null,
       title: autoTitle,
       formatId: aspect.formatId || null,
       customAspectRatio: aspect.customRatio?.trim() || null,
@@ -601,7 +615,7 @@ export function CreateProjectDialog({
 
               <div className="space-y-1.5">
                 <FieldLabel htmlFor="create-project-price" required>
-                  مبلغ توافق‌شده (افغانی)
+                  مبلغ توافق‌شده این پروژه (افغانی)
                 </FieldLabel>
                 <Input
                   id="create-project-price"
@@ -610,8 +624,19 @@ export function CreateProjectDialog({
                   value={agreedPrice}
                   onChange={(e) => setAgreedPrice(e.target.value)}
                   className="h-11 rounded-xl"
-                  placeholder="الزامی"
+                  placeholder="برای هر پروژه جداگانه وارد شود"
                 />
+                {selectedCustomer?.openCycleOpportunity?.agreedPrice ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    قیمت از فرصت فروش آماده‌شده در مدیریت مشتریان برای همین
+                    چرخه پر شده است؛ پروژه‌های قبلی این مشتری تأثیر ندارند.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    قیمت هر پروژه مستقل است و از پروژه‌های قبلی همین مشتری
+                    کپی نمی‌شود.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5">

@@ -303,9 +303,14 @@ export function ProjectProductionPanel({
   }
 
   if (dataQ.error || !payload) {
+    const detail =
+      dataQ.error instanceof Error ? dataQ.error.message : null;
     return (
       <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-        بارگذاری گردش‌کار تولید ناموفق بود.
+        <p className="font-semibold">بارگذاری گردش‌کار تولید ناموفق بود.</p>
+        {detail ? (
+          <p className="mt-1.5 text-xs opacity-90">{detail}</p>
+        ) : null}
       </div>
     );
   }

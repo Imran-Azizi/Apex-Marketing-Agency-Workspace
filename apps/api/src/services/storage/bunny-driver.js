@@ -269,18 +269,34 @@ function requestOnce(
     const agent = parsed.protocol === "http:" ? httpAgent : httpsAgent;
     let settled = false;
     let idleTimer = null;
+    let detachSocketActivity = null;
+
+    const clearIdleTimer = () => {
+      if (!idleTimer) return;
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    };
+
+    const detachSocket = () => {
+      if (typeof detachSocketActivity !== "function") return;
+      const detach = detachSocketActivity;
+      detachSocketActivity = null;
+      detach();
+    };
 
     const fail = (err) => {
       if (settled) return;
       settled = true;
-      if (idleTimer) clearTimeout(idleTimer);
+      clearIdleTimer();
+      detachSocket();
       reject(err instanceof Error ? err : new Error(String(err || "Request failed")));
     };
 
     const succeed = (value) => {
       if (settled) return;
       settled = true;
-      if (idleTimer) clearTimeout(idleTimer);
+      clearIdleTimer();
+      detachSocket();
       resolve(value);
     };
 
@@ -299,13 +315,13 @@ function requestOnce(
       },
       (res) => {
         // Activity received — clear idle timer; caller reads the body.
-        if (idleTimer) clearTimeout(idleTimer);
         succeed({ req, res });
       },
     );
 
     const armIdleTimeout = () => {
-      if (idleTimer) clearTimeout(idleTimer);
+      if (settled) return;
+      clearIdleTimer();
       idleTimer = setTimeout(() => {
         const err = new Error("Request Timeout");
         err.code = "ETIMEDOUT";
@@ -316,10 +332,27 @@ function requestOnce(
     };
 
     armIdleTimeout();
+    // Keep-alive reuses TLSSocket instances. Always detach per-request listeners
+    // or they accumulate and trigger MaxListenersExceededWarning.
     req.on("socket", (socket) => {
-      socket.setKeepAlive(true, 15_000);
-      socket.on("connect", armIdleTimeout);
-      socket.on("data", armIdleTimeout);
+      if (!socket || settled) return;
+      if (typeof socket.setKeepAlive === "function") {
+        socket.setKeepAlive(true, 15_000);
+      }
+
+      const onActivity = () => {
+        if (!settled) armIdleTimeout();
+      };
+
+      if (socket.connecting) {
+        socket.once("connect", onActivity);
+      }
+      socket.on("data", onActivity);
+
+      detachSocketActivity = () => {
+        socket.removeListener("data", onActivity);
+        socket.removeListener("connect", onActivity);
+      };
     });
     req.on("error", fail);
 

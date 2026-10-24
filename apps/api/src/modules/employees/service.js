@@ -8,6 +8,7 @@ import { decryptCredential } from "../../utils/credentialVault.js";
 import { strongPasswordSchema } from "../../utils/passwords.js";
 import { storage } from "../../services/storage.js";
 import { profileImageUrlFor } from "../../utils/profileImageUrl.js";
+import { purgeEmployeeOperationalSideEffects } from "../projects/purgeSideEffects.js";
 
 /** Roles managers can assign when creating/editing employees. */
 export const EMPLOYEE_ROLES = ["SALES", "EDITOR", "NARRATOR", "FINANCE", "PROJECT_MANAGER"];
@@ -631,6 +632,12 @@ export const employeesService = {
           data: { deletedAt: new Date() },
         });
       }
+
+      await purgeEmployeeOperationalSideEffects(tx, {
+        userId: id,
+        teamProfileIds,
+      });
+
       await tx.user.update({
         where: { id },
         data: {

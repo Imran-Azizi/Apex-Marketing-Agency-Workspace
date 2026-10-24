@@ -23,6 +23,10 @@ import { cn } from "@/lib/utils";
 
 const SWIPE_THRESHOLD_PX = 48;
 const TRANSITION_MS = 520;
+/** Reveal first slide even if CDN image is still loading (weak networks). */
+const HERO_BOOTSTRAP_BUDGET_MS = 2_500;
+/** Cap wait when advancing slides so autoplay cannot stall forever. */
+const HERO_TRANSITION_BUDGET_MS = 8_000;
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -69,7 +73,12 @@ export function heroSlideDisplayUrl(
 
 const preloadCache = new Map<string, Promise<boolean>>();
 
-function preloadImageUrl(url: string): Promise<boolean> {
+/**
+ * Prefetch a hero URL. Optional budgetMs resolves optimistically so the UI can
+ * mount the <img> and paint progressively instead of staying on a skeleton.
+ * Cache is keyed by URL only so parallel callers share one download.
+ */
+function preloadImageUrl(url: string, budgetMs?: number): Promise<boolean> {
   const existing = preloadCache.get(url);
   if (existing) return existing;
 
@@ -82,13 +91,18 @@ function preloadImageUrl(url: string): Promise<boolean> {
     // Don't await decode() — onload is enough to paint from HTTP cache.
     img.decoding = "async";
     let settled = false;
+    let budgetTimer: number | null = null;
     const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
+      if (budgetTimer != null) window.clearTimeout(budgetTimer);
       resolve(ok);
     };
     img.onload = () => finish(true);
     img.onerror = () => finish(false);
+    if (budgetMs != null && budgetMs > 0) {
+      budgetTimer = window.setTimeout(() => finish(true), budgetMs);
+    }
     img.src = url;
     // Instant hit when server <link rel=preload> already warmed the cache.
     if (img.complete && img.naturalWidth > 0) {
@@ -176,7 +190,10 @@ export function HeroSlideshow({
   }, []);
 
   const ensureSlideReady = useCallback(
-    async (index: number): Promise<string | null> => {
+    async (
+      index: number,
+      budgetMs: number = HERO_TRANSITION_BUDGET_MS,
+    ): Promise<string | null> => {
       if (!total) return null;
       const i = ((index % total) + total) % total;
       const slide = slides[i];
@@ -194,7 +211,7 @@ export function HeroSlideshow({
         return "";
       }
 
-      const ok = await preloadImageUrl(url);
+      const ok = await preloadImageUrl(url, budgetMs);
       if (!ok) return null;
       markUrlReady(key, url);
       return url;
@@ -259,14 +276,15 @@ export function HeroSlideshow({
     [requestGoTo],
   );
 
-  // Bootstrap first slide ASAP; prefetch slide 2 in parallel (does not block reveal).
+  // Bootstrap first slide ASAP; budget caps skeleton time on slow CDN/networks.
+  // Prefetch slide 2 in parallel (does not block reveal).
   useEffect(() => {
     let cancelled = false;
     setBootstrapped(false);
     (async () => {
-      const first = ensureSlideReady(0);
+      const first = ensureSlideReady(0, HERO_BOOTSTRAP_BUDGET_MS);
       if (total > 1) {
-        void ensureSlideReady(1);
+        void ensureSlideReady(1, HERO_TRANSITION_BUDGET_MS);
       }
       const url = await first;
       if (cancelled || url == null) return;

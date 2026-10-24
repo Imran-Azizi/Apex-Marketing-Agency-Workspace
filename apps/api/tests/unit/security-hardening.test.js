@@ -85,6 +85,57 @@ test("project access is assignment-scoped for editors", () => {
   assert.equal(canAccessProject(project, null), false);
 });
 
+test("project lead can access child video via parent contract lead", () => {
+  const child = {
+    kind: "CHILD",
+    assignments: [],
+    parentProject: {
+      kind: "CONTRACT",
+      assignments: [
+        {
+          isActive: true,
+          role: "PROJECT_LEAD",
+          userId: "lead-1",
+          teamProfile: null,
+        },
+      ],
+    },
+  };
+  assert.equal(
+    canAccessProject(child, {
+      roleCode: "SALES",
+      userId: "lead-1",
+      projectLeadElevated: true,
+    }),
+    true,
+  );
+  assert.equal(
+    canAccessProject(child, {
+      roleCode: "SALES",
+      userId: "other",
+      projectLeadElevated: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canAccessProject(
+      {
+        kind: "CHILD",
+        assignments: [
+          {
+            isActive: true,
+            role: "PROJECT_LEAD",
+            userId: "lead-1",
+            teamProfile: null,
+          },
+        ],
+      },
+      { roleCode: "EDITOR", userId: "lead-1", projectLeadElevated: true },
+    ),
+    true,
+  );
+});
+
 test("login guard locks after repeated failures", () => {
   _resetLoginGuardForTests();
   const key = loginAttemptKey({ identity: "user@example.com", ip: "1.2.3.4" });

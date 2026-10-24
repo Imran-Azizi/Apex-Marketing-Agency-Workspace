@@ -248,13 +248,12 @@ export function resolvePaymentProjectId(payment, indexes) {
     }
     return null;
   }
-  if (
-    invoice?.opportunityId &&
-    indexes.byOpportunityId.has(invoice.opportunityId)
-  ) {
-    return indexes.byOpportunityId.get(invoice.opportunityId);
+  const opportunityId = payment.opportunityId || invoice?.opportunityId || null;
+  if (opportunityId && indexes.byOpportunityId.has(opportunityId)) {
+    return indexes.byOpportunityId.get(opportunityId);
   }
-  if (!payment.invoiceId && payment.crmCustomerId) {
+  // Legacy orphan direct payment (no opportunity): only if customer has one project
+  if (!payment.invoiceId && !payment.opportunityId && payment.crmCustomerId) {
     const candidates = indexes.byCustomerId.get(payment.crmCustomerId) || [];
     if (candidates.length === 1) return candidates[0];
   }
@@ -268,14 +267,11 @@ export async function loadPaymentsGroupedByProject(projects) {
   const indexes = buildPaymentProjectIndexes(projects);
   const projectIds = projects.map((p) => p.id);
   const oppIds = [...indexes.byOpportunityId.keys()];
-  const customerIds = [...new Set(projects.map((p) => p.crmCustomerId))];
 
   const orClauses = [{ invoice: { projectId: { in: projectIds } } }];
   if (oppIds.length) {
+    orClauses.push({ opportunityId: { in: oppIds } });
     orClauses.push({ invoice: { opportunityId: { in: oppIds } } });
-  }
-  if (customerIds.length) {
-    orClauses.push({ invoiceId: null, crmCustomerId: { in: customerIds } });
   }
 
   const payments = await prisma.payment.findMany({
@@ -289,6 +285,7 @@ export async function loadPaymentsGroupedByProject(projects) {
       reference: true,
       notes: true,
       invoiceId: true,
+      opportunityId: true,
       crmCustomerId: true,
       verifiedAt: true,
       rejectionReason: true,

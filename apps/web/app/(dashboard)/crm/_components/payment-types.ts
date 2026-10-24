@@ -11,6 +11,8 @@ export type CustomerPayment = {
   amount: string;
   verification: string;
   invoiceId: string | null;
+  /** Project/contract cycle this payment belongs to. */
+  opportunityId?: string | null;
   createdAt: string;
   paidAt?: string;
   reference?: string | null;
@@ -21,7 +23,12 @@ export type CustomerPayment = {
   rejectedAt?: string | null;
   verifiedAt?: string | null;
   recordedBy?: { id: string; fullName: string } | null;
-  invoice?: { id: string; invoiceNumber: string } | null;
+  invoice?: {
+    id: string;
+    invoiceNumber: string;
+    opportunityId?: string | null;
+    projectId?: string | null;
+  } | null;
 };
 
 export type PaymentMethodMetaRow = {

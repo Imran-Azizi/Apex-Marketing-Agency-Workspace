@@ -159,7 +159,7 @@ export function PaymentHistoryPanel({
       <CrmSectionHeader
         icon={History}
         title="سوابق پرداخت"
-        description="پرداخت‌ها پس از تأیید مدیر در محاسبات مالی پروژه لحاظ می‌شوند"
+        description="فقط پرداخت‌های همین پروژه/قرارداد — پس از تأیید مدیر در محاسبات لحاظ می‌شوند"
         descriptionClassName="hidden sm:block"
         className="mb-5"
         action={
@@ -191,11 +191,12 @@ export function PaymentHistoryPanel({
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-muted/70">
               <History className="h-8 w-8 text-muted-foreground/45" />
             </div>
-            <p className="text-sm font-bold">هنوز پرداختی ثبت نشده است</p>
+            <p className="text-sm font-bold">
+              برای این پروژه هنوز پرداختی ثبت نشده است
+            </p>
             <p className="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-muted-foreground">
-              پس از دریافت وجه از مشتری، پرداخت را از بخش «جزئیات قرارداد» با دکمه
-              «پرداخت جدید» ثبت کنید. تا قبل از تأیید مدیر، مبلغ در مانده پروژه
-              لحاظ نمی‌شود.
+              پروژه دیگری را از تب‌های بالا انتخاب کنید، یا از «جزئیات قرارداد»
+              با دکمه «پرداخت جدید» برای همین پروژه پرداخت ثبت کنید.
             </p>
           </div>
         ) : (

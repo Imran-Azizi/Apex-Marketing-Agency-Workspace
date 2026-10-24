@@ -18,9 +18,14 @@ test('CRM sales invoices without contract/project are samples', () => {
 test('financial payment where excludes sample invoice payments', () => {
   const where = financialPaymentWhere();
   assert.ok(Array.isArray(where.OR));
-  assert.deepEqual(where.OR[0], { invoiceId: null });
+  // Opportunity-scoped only — bare invoiceId:null would pull CRM sample orphans.
+  assert.deepEqual(where.OR[0], { opportunityId: { not: null } });
   assert.ok(where.OR.some((c) => c.invoice?.opportunityId?.not === null));
   assert.ok(where.OR.some((c) => c.invoice?.projectId?.not === null));
+  assert.equal(
+    where.OR.some((c) => Object.prototype.hasOwnProperty.call(c, 'invoiceId')),
+    false,
+  );
 });
 
 test('financial invoice where requires a contract or project', () => {
@@ -50,9 +55,10 @@ test('opportunity payment matching never includes unlinked sample invoices', () 
     crmCustomerId: 'cust-1',
     opportunityId: null,
   });
-  assert.ok(where.OR.some((c) => c.invoiceId === null));
+  assert.ok(where.OR.some((c) => c.opportunityId?.not === null));
+  assert.ok(where.OR.some((c) => c.invoice?.opportunityId?.not === null));
   assert.equal(
-    where.OR.some((c) => c.invoiceId && c.invoiceId.not === null),
+    where.OR.some((c) => Object.prototype.hasOwnProperty.call(c, 'invoiceId')),
     false,
   );
 });

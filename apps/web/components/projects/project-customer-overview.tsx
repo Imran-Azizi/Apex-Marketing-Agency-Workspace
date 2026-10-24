@@ -5,7 +5,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   Clapperboard,
-  ShieldCheck,
   UploadCloud,
   UserRound,
   type LucideIcon,
@@ -14,6 +13,11 @@ import { toast } from "sonner";
 import { ApiError, apiDelete } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ProjectAssetUploadDialog } from "@/components/projects/project-asset-upload-dialog";
+import {
+  EditBriefDialog,
+  EditCustomerBriefButton,
+  EditCustomerDialog,
+} from "@/components/projects/project-brief-edit-dialogs";
 import {
   Card,
   CardContent,
@@ -213,28 +217,33 @@ function SectionCard({
   icon: Icon,
   children,
   contentClassName,
+  action,
 }: {
   title: string;
   description?: string;
   icon: LucideIcon;
   children: ReactNode;
   contentClassName?: string;
+  action?: ReactNode;
 }) {
   return (
     <Card className="overflow-hidden border-border/70 shadow-sm">
       <CardHeader className="border-b border-border/60 bg-gradient-to-l from-muted/40 to-transparent px-3 py-2.5 sm:px-6 sm:pb-3 sm:pt-6">
-        <div className="flex items-start gap-2.5 sm:gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand sm:h-9 sm:w-9">
-            <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+        <div className="flex items-start justify-between gap-2.5 sm:gap-3">
+          <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand sm:h-9 sm:w-9">
+              <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </div>
+            <div className="min-w-0 space-y-0.5">
+              <CardTitle className="text-sm sm:text-base">{title}</CardTitle>
+              {description && (
+                <CardDescription className="hidden text-xs sm:block sm:text-sm">
+                  {description}
+                </CardDescription>
+              )}
+            </div>
           </div>
-          <div className="min-w-0 space-y-0.5">
-            <CardTitle className="text-sm sm:text-base">{title}</CardTitle>
-            {description && (
-              <CardDescription className="hidden text-xs sm:block sm:text-sm">
-                {description}
-              </CardDescription>
-            )}
-          </div>
+          {action ? <div className="shrink-0">{action}</div> : null}
         </div>
       </CardHeader>
       <CardContent
@@ -247,13 +256,6 @@ function SectionCard({
       </CardContent>
     </Card>
   );
-}
-
-/** Customer project note only. Profile notes and manager notes are separate fields. */
-function customerBriefNote(brief: Record<string, unknown>): string {
-  const raw = brief.notes;
-  if (typeof raw !== "string") return "";
-  return raw.trim();
 }
 
 function dropProjectAsset(
@@ -276,6 +278,7 @@ export function ProjectInfoTabContent({
   tab,
   project,
   assetManagement,
+  canEdit = false,
 }: {
   tab: ProjectInfoTabId;
   project: ProjectCustomerOverviewData;
@@ -283,8 +286,11 @@ export function ProjectInfoTabContent({
     projectId: string;
     canManage: boolean;
   };
+  canEdit?: boolean;
 }) {
   const brief = project.brief || {};
+  const [customerEditOpen, setCustomerEditOpen] = useState(false);
+  const [briefEditOpen, setBriefEditOpen] = useState(false);
 
   const platforms = useMemo(() => {
     if (tab !== "brief") return [] as string[];
@@ -318,6 +324,7 @@ export function ProjectInfoTabContent({
         ? formatPhoneDisplay(project.crmCustomer.phone)
         : "";
     const whatsappRaw =
+      asString(brief.whatsapp) ||
       project.crmCustomer.normalizedWhatsapp ||
       project.crmCustomer.whatsappRaw ||
       "";
@@ -329,21 +336,37 @@ export function ProjectInfoTabContent({
     const city = asString(brief.city) || project.crmCustomer.city || "";
 
     return (
-      <SectionCard
-        icon={UserRound}
-        title="اطلاعات مشتری"
-        description="نام، سازمان و راه‌های تماس"
-      >
-        <FieldTile label="نام" value={personName} />
-        <FieldTile label="سمت" value={jobTitle} />
-        <FieldTile label="شرکت / سازمان" value={company} wide />
-        <FieldTile label="تلفن" value={phoneDisplay} ltr />
-        <FieldTile label="واتساپ" value={whatsapp} ltr />
-        <FieldTile label="ایمیل" value={email} ltr wide />
-        <FieldTile label="وب‌سایت" value={website} ltr wide />
-        <FieldTile label="آدرس" value={address} wide />
-        <FieldTile label="شهر" value={city} />
-      </SectionCard>
+      <>
+        <SectionCard
+          icon={UserRound}
+          title="اطلاعات مشتری"
+          description="نام، سازمان و راه‌های تماس"
+          action={
+            canEdit ? (
+              <EditCustomerBriefButton
+                onClick={() => setCustomerEditOpen(true)}
+              />
+            ) : null
+          }
+        >
+          <FieldTile label="نام" value={personName} />
+          <FieldTile label="سمت" value={jobTitle} />
+          <FieldTile label="شرکت / سازمان" value={company} wide />
+          <FieldTile label="تلفن" value={phoneDisplay} ltr />
+          <FieldTile label="واتساپ" value={whatsapp} ltr />
+          <FieldTile label="ایمیل" value={email} ltr wide />
+          <FieldTile label="وب‌سایت" value={website} ltr wide />
+          <FieldTile label="آدرس" value={address} wide />
+          <FieldTile label="شهر" value={city} />
+        </SectionCard>
+        {canEdit ? (
+          <EditCustomerDialog
+            open={customerEditOpen}
+            onOpenChange={setCustomerEditOpen}
+            project={project}
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -359,13 +382,6 @@ export function ProjectInfoTabContent({
       : asString(brief.durationSec)
         ? `${asString(brief.durationSec)} ثانیه`
         : "";
-    const brandClaims = asString(brief.allowedClaims);
-    const mandatoryTexts = asString(brief.mandatoryTexts);
-    const brandLimits = asString(brief.brandLimits);
-    const briefNotes = customerBriefNote(brief);
-    const hasBrandSection = Boolean(
-      brandClaims || mandatoryTexts || brandLimits,
-    );
 
     return (
       <div className="space-y-4">
@@ -373,6 +389,14 @@ export function ProjectInfoTabContent({
           icon={Building2}
           title="اطلاعات پایه و اهداف پروژه"
           description="محتوای تبلیغ، مخاطب و پیام‌های کلیدی"
+          action={
+            canEdit ? (
+              <EditCustomerBriefButton
+                label="ویرایش بریف"
+                onClick={() => setBriefEditOpen(true)}
+              />
+            ) : null
+          }
         >
           <FieldTile
             label="نام محصول / خدمت"
@@ -431,26 +455,12 @@ export function ProjectInfoTabContent({
           <TagList label="پلتفرم‌ها" items={platforms} />
         </SectionCard>
 
-        {hasBrandSection ? (
-          <SectionCard
-            icon={ShieldCheck}
-            title="الزامات برند"
-            description="محدودیت‌ها، ادعاها و متون اجباری اعلام‌شده توسط مشتری"
-          >
-            <FieldTile label="ادعاهای مجاز" value={brandClaims} wide />
-            <FieldTile label="متون اجباری" value={mandatoryTexts} wide />
-            <FieldTile label="محدودیت‌های برند" value={brandLimits} wide />
-          </SectionCard>
-        ) : null}
-
-        {briefNotes ? (
-          <SectionCard
-            icon={Building2}
-            title="یادداشت‌های مشتری"
-            description="توضیحات تکمیلی ثبت‌شده هنگام ایجاد پروژه"
-          >
-            <FieldTile label="یادداشت" value={briefNotes} wide multiline />
-          </SectionCard>
+        {canEdit ? (
+          <EditBriefDialog
+            open={briefEditOpen}
+            onOpenChange={setBriefEditOpen}
+            project={project}
+          />
         ) : null}
       </div>
     );

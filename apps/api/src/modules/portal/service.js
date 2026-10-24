@@ -928,7 +928,11 @@ export const portalService = {
 
   async approveContent(versionId, auth, req) {
     const version = await prisma.contentVersion.findFirst({
-      where: { id: versionId, publishedToClient: true },
+      where: {
+        id: versionId,
+        publishedToClient: true,
+        project: { deletedAt: null, crmCustomerId: auth.customerId },
+      },
       include: {
         project: {
           select: {
@@ -936,11 +940,12 @@ export const portalService = {
             title: true,
             code: true,
             crmCustomerId: true,
+            deletedAt: true,
           },
         },
       },
     });
-    if (!version || version.project.crmCustomerId !== auth.customerId) {
+    if (!version || version.project?.deletedAt) {
       throw new AppError("نسخه یافت نشد", 404, "NOT_FOUND");
     }
     if (version.status === "APPROVED" && version.isLocked) {

@@ -12,6 +12,8 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
             staleTime: 60_000,
             gcTime: 10 * 60_000,
             retry: 1,
+            // Back off before the single retry — avoids stampedes on flaky links.
+            retryDelay: 1_500,
             refetchOnWindowFocus: false,
           },
         },
