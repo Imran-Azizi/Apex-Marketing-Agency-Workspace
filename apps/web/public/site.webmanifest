@@ -1,4 +1,5 @@
 {
+  "id": "/",
   "name": "اپیکس ورک‌اسپیس",
   "short_name": "اپیکس",
   "description": "فضای کاری اپیکس — پروژه‌ها، مالی، CRM و اعلان‌ها",
@@ -18,10 +19,17 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/brand/favicon/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "theme_color": "#0a0a0a",
   "background_color": "#0a0a0a",
   "display": "standalone",
-  "orientation": "any"
+  "orientation": "any",
+  "categories": ["business", "productivity"]
 }

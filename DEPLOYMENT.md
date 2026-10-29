@@ -484,7 +484,36 @@ certbot renew --dry-run
 
 Certbot updates the Nginx SSL paths automatically.
 
-### B15) End-to-end verification checklist
+### B15) Web Push (out-of-app / mobile notifications)
+
+In-app notifications work without this. Browser/OS push needs **VAPID keys** in
+`apps/api/.env` on the VPS. If the notification panel shows that mobile push is
+not configured, the API is running but these three variables are missing.
+
+```bash
+cd /var/www/apex
+
+# 1) Generate keys once (prints ready-to-paste env lines)
+npm run vapid:generate -w @apex/api
+
+# 2) Append the three VAPID_* lines to the API env (edit carefully — do not commit)
+nano apps/api/.env
+# Ensure WEB_URL=https://smartapex.tech (used for push deep-links)
+
+# 3) Restart API only (dotenv reloads .env; no web rebuild required)
+pm2 restart apex-api
+
+# 4) Smoke-check (while logged in as staff, from browser DevTools Network):
+#    GET /api/v1/notifications/push/status  →  { "configured": true, ... }
+```
+
+Then in the app: open **اعلان‌ها** → enable **اعلان خارج از برنامه** and allow
+the browser permission. HTTPS is required (already true behind Nginx/Certbot).
+
+**Do not regenerate VAPID keys** after users have subscribed — new keys invalidate
+existing device subscriptions.
+
+### B16) End-to-end verification checklist
 
 From a browser:
 
@@ -504,7 +533,7 @@ journalctl -u nginx -n 50 --no-pager
 tail -n 100 /var/log/apex/api-error.log
 ```
 
-### B16) Database backups (cron)
+### B17) Database backups (cron)
 
 ```bash
 cp /var/www/apex/apps/api/deploy/scripts/backup-postgres.sh \
@@ -540,7 +569,7 @@ ls -lh /var/backups/apex
 
 App-level Backup & Restore (in-product) can still email archives if SMTP is configured.
 
-### B17) Monitoring basics
+### B18) Monitoring basics
 
 ```bash
 pm2 monit
@@ -642,6 +671,7 @@ sudo -u apex -H bash -lc '
 | Socket.IO fails | Ensure Nginx `/socket.io/` has `Upgrade` headers (see sample conf) |
 | SSL fails | DNS not pointing yet; wait for propagation; retry certbot |
 | Uploads fail | Bunny credentials; never switch to local disk accidentally |
+| «اعلان موبایل روی سرور پیکربندی نشده» | Add `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` to `apps/api/.env`, then `pm2 restart apex-api`. Generate with `npm run vapid:generate -w @apex/api` |
 
 ---
 
@@ -656,6 +686,7 @@ sudo -u apex -H bash -lc '
 - [ ] Login + RBAC + CRUD OK  
 - [ ] Bunny upload/download OK  
 - [ ] Chat realtime OK  
+- [ ] Web Push: `VAPID_*` in `apps/api/.env` + enable in notification panel  
 - [ ] Daily `pg_dump` cron OK  
 - [ ] Railway DB retained until verified, then decommissioned  
 - [ ] No Vercel/Railway deploy configs left in repo  

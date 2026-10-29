@@ -55,6 +55,36 @@ test('payment API requires a supported method on create', () => {
   }
 });
 
+test('payment API accepts optional paidAt civil date', () => {
+  assert.equal(
+    recordPaymentSchema.safeParse({
+      opportunityId: 'opportunity-id',
+      amount: 100,
+      method: 'CASH',
+      paidAt: '2025-09-22',
+    }).success,
+    true,
+  );
+  assert.equal(
+    recordPaymentSchema.safeParse({
+      opportunityId: 'opportunity-id',
+      amount: 100,
+      method: 'CASH',
+      paidAt: null,
+    }).success,
+    true,
+  );
+  assert.equal(
+    recordPaymentSchema.safeParse({
+      opportunityId: 'opportunity-id',
+      amount: 100,
+      method: 'CASH',
+      paidAt: 'not-a-date',
+    }).success,
+    false,
+  );
+});
+
 test('payment API permits editing to supported methods only', () => {
   assert.equal(updatePaymentSchema.safeParse({ method: 'HESAB_PAY' }).success, true);
   assert.equal(updatePaymentSchema.safeParse({ method: 'BANK_TRANSFER' }).success, true);

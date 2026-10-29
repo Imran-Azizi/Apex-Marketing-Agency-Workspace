@@ -37,7 +37,10 @@ export function WebPushControls({
             configured: false,
             subscribed: false,
             deviceCount: 0,
-            permission: isWebPushSupported() ? Notification.permission : "unsupported",
+            permission: isWebPushSupported()
+              ? Notification.permission
+              : "unsupported",
+            unsupportedReason: "browser",
           });
         }
       });
@@ -49,15 +52,48 @@ export function WebPushControls({
   if (!status) return null;
 
   if (status.permission === "unsupported") {
+    const needsIosHomeScreen =
+      status.unsupportedReason === "ios-home-screen-required";
+
     return (
-      <p
+      <div
         className={cn(
-          "rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-2 text-[11px] leading-5 text-muted-foreground",
+          "rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-2.5 text-[11px] leading-5 text-muted-foreground",
           className,
         )}
+        dir="rtl"
       >
-        مرورگر فعلی از اعلان خارج از برنامه پشتیبانی نمی‌کند.
-      </p>
+        {needsIosHomeScreen ? (
+          <div className="space-y-2">
+            <p className="font-medium text-foreground">
+              روی آیفون، اعلان خارج از برنامه فقط از «اپ صفحه اصلی» فعال می‌شود
+            </p>
+            <ol className="list-decimal space-y-1 pe-4 text-muted-foreground">
+              <li>
+                سایت را در <span className="font-medium text-foreground">Safari</span>{" "}
+                باز کنید (نه فقط تب Chrome)
+              </li>
+              <li>
+                دکمه Share (مربع با فلش) →{" "}
+                <span className="font-medium text-foreground">
+                  Add to Home Screen
+                </span>{" "}
+                / افزودن به صفحه اصلی
+              </li>
+              <li>
+                اپ را از آیکون صفحه اصلی باز کنید، وارد شوید، سپس اینجا اعلان را
+                فعال کنید
+              </li>
+            </ol>
+            <p className="text-[10px] leading-4 text-muted-foreground/90">
+              نیاز به iOS ۱۶.۴ یا جدیدتر. Chrome روی آیفون از موتور Safari
+              استفاده می‌کند و داخل تب مرورگر Push ندارد.
+            </p>
+          </div>
+        ) : (
+          <p>مرورگر فعلی از اعلان خارج از برنامه پشتیبانی نمی‌کند.</p>
+        )}
+      </div>
     );
   }
 
@@ -69,7 +105,8 @@ export function WebPushControls({
           className,
         )}
       >
-        اعلان موبایل روی سرور هنوز پیکربندی نشده است.
+        اعلان خارج از برنامه روی سرور هنوز فعال نشده است. با مدیر سیستم هماهنگ
+        کنید تا پیکربندی سرور تکمیل شود.
       </p>
     );
   }
@@ -122,8 +159,12 @@ export function WebPushControls({
           </p>
           {!compact ? (
             <p className="text-[11px] leading-5 text-muted-foreground">
-              حتی وقتی سیستم باز نیست، اعلان‌ها روی موبایل یا دسکتاپ نمایش داده
-              می‌شوند. در آیفون، سایت را به صفحه اصلی اضافه کنید.
+              حتی وقتی سیستم باز نیست، اعلان‌ها نمایش داده می‌شوند. در{" "}
+              <span className="font-medium text-foreground">
+                اندروید / Chrome
+              </span>{" "}
+              همین‌جا فعال کنید (نیازی به صفحه اصلی نیست). در آیفون فقط از آیکون
+              صفحه اصلی.
             </p>
           ) : null}
           <p className="text-[11px] text-muted-foreground">
@@ -138,6 +179,12 @@ export function WebPushControls({
                   : "غیرفعال"}
             </span>
           </p>
+          {status.permission === "denied" && !compact ? (
+            <p className="text-[10px] leading-4 text-amber-700 dark:text-amber-400/90">
+              در Chrome: قفل کنار آدرس → Permissions / Site settings →
+              Notifications → Allow، بعد صفحه را رفرش کنید.
+            </p>
+          ) : null}
         </div>
       </div>
 

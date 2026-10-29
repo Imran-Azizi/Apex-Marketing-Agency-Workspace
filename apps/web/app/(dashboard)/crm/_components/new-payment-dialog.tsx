@@ -10,6 +10,7 @@ import {
   CUSTOMER_PAYMENT_METHODS,
   type CustomerPaymentMethod,
 } from "@/lib/payment-methods";
+import { localTodayGregorian } from "@/lib/afghan-calendar";
 import { cn, formatCurrency } from "@/lib/utils";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AfghanDateField } from "@/components/shared/afghan-date-field";
 import { CrmCurrencyField } from "./crm-ui";
+
+function todayGregorianInput(): string {
+  const today = localTodayGregorian();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${today.gy}-${pad(today.gm)}-${pad(today.gd)}`;
+}
 
 export type OpportunityFinance = {
   projectTotal: number;
@@ -92,6 +100,8 @@ export function NewPaymentDialog({
   const [paymentMethodError, setPaymentMethodError] = useState("");
   const [paymentMetaError, setPaymentMetaError] = useState("");
   const [paymentError, setPaymentError] = useState("");
+  const [paidAt, setPaidAt] = useState(todayGregorianInput);
+  const [paidAtError, setPaidAtError] = useState("");
 
   const resetForm = () => {
     setPaymentAmount("");
@@ -104,6 +114,8 @@ export function NewPaymentDialog({
     setPaymentMethodError("");
     setPaymentMetaError("");
     setPaymentError("");
+    setPaidAt(todayGregorianInput());
+    setPaidAtError("");
   };
 
   const paymentMut = useMutation({
@@ -112,6 +124,7 @@ export function NewPaymentDialog({
         opportunityId,
         amount: Number(paymentAmount),
         method: paymentMethod,
+        paidAt,
         paymentMethodMeta: {
           hesabPayAccount: hesabPayAccount.trim() || undefined,
           officeAddress: officeAddress.trim() || undefined,
@@ -196,7 +209,12 @@ export function NewPaymentDialog({
       );
       return;
     }
+    if (!paidAt.trim()) {
+      setPaidAtError("لطفاً تاریخ پرداخت را انتخاب کنید.");
+      return;
+    }
     setPaymentError("");
+    setPaidAtError("");
     paymentMut.mutate();
   };
 
@@ -417,6 +435,28 @@ export function NewPaymentDialog({
           {paymentError && (
             <p className="text-xs text-destructive">{paymentError}</p>
           )}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="new-payment-paid-at" className="text-xs">
+            تاریخ پرداخت <span className="text-destructive">*</span>
+          </Label>
+          <AfghanDateField
+            id="new-payment-paid-at"
+            aria-label="تاریخ پرداخت"
+            disabled={paymentMut.isPending}
+            value={paidAt}
+            onChange={(next) => {
+              setPaidAt(next);
+              if (paidAtError) setPaidAtError("");
+            }}
+            inputClassName="h-11 rounded-xl"
+          />
+          {paidAtError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {paidAtError}
+            </p>
+          ) : null}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">

@@ -115,6 +115,26 @@ import {
   resolveReceiptVideoCount,
   toPositiveInt,
 } from "./receiptDisplay.js";
+import { parseDateBound } from "../finance/metrics.js";
+
+/**
+ * Resolve payment paidAt from optional client value.
+ * YYYY-MM-DD stays a local civil day (no UTC day-shift); omitted → now.
+ */
+function resolveRecordedPaidAt(value) {
+  if (value == null || value === "") return new Date();
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new AppError("تاریخ پرداخت معتبر نیست", 400, "VALIDATION");
+    }
+    return value;
+  }
+  const parsed = parseDateBound(String(value).trim(), false);
+  if (!parsed) {
+    throw new AppError("تاریخ پرداخت معتبر نیست", 400, "VALIDATION");
+  }
+  return parsed;
+}
 
 const optionalId = z
   .string()
@@ -265,6 +285,29 @@ export const recordPaymentSchema = z.object({
     invalid_type_error: "روش پرداخت معتبر نیست",
   }),
   paymentMethodMeta: paymentMethodMetaSchema,
+  /** Optional civil date (`YYYY-MM-DD`) or ISO datetime — defaults to now. */
+  paidAt: z
+    .union([z.string().trim().min(1), z.date()])
+    .optional()
+    .nullable()
+    .superRefine((value, ctx) => {
+      if (value == null || value === "") return;
+      if (value instanceof Date) {
+        if (Number.isNaN(value.getTime())) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "تاریخ پرداخت معتبر نیست",
+          });
+        }
+        return;
+      }
+      if (!parseDateBound(String(value).trim(), false)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "تاریخ پرداخت معتبر نیست",
+        });
+      }
+    }),
   reference: z.string().optional(),
   attachmentKey: z.string().optional(),
   allowOverpayment: z.boolean().optional(),
@@ -1616,6 +1659,7 @@ export const crmService = {
       amount,
       method,
       paymentMethodMeta,
+      paidAt: paidAtRaw,
       reference,
       attachmentKey,
       allowOverpayment,
@@ -1690,7 +1734,7 @@ export const crmService = {
     const seq = priorPaymentCount + 1;
     const paymentNumber =
       reference?.trim() || `PAY-${year}-${String(seq).padStart(5, "0")}`;
-    const paidAt = new Date();
+    const paidAt = resolveRecordedPaidAt(paidAtRaw);
     const autoApprove = shouldAutoApprovePayment(auth);
     const initialVerification = autoApprove ? "VERIFIED" : "PENDING";
 

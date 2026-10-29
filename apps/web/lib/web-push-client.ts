@@ -8,7 +8,36 @@ export type WebPushStatus = {
   subscribed: boolean;
   deviceCount: number;
   permission: NotificationPermission | "unsupported";
+  /**
+   * Extra hint when push APIs are missing.
+   * iOS Safari/Chrome in a normal tab never expose PushManager — only a
+   * Home Screen (standalone) install does, on iOS 16.4+.
+   */
+  unsupportedReason?: "ios-home-screen-required" | "browser";
 };
+
+/** iPhone / iPad (including iPadOS desktop UA). */
+export function isIosDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/iPad|iPhone|iPod/i.test(ua)) return true;
+  // iPadOS 13+ may report as Mac with touch
+  return (
+    navigator.platform === "MacIntel" &&
+    typeof navigator.maxTouchPoints === "number" &&
+    navigator.maxTouchPoints > 1
+  );
+}
+
+/** True when launched from Home Screen / installed PWA. */
+export function isStandaloneDisplayMode(): boolean {
+  if (typeof window === "undefined") return false;
+  const mq = window.matchMedia?.("(display-mode: standalone)");
+  if (mq?.matches) return true;
+  // Legacy iOS Safari
+  const nav = navigator as Navigator & { standalone?: boolean };
+  return nav.standalone === true;
+}
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -66,11 +95,15 @@ export async function fetchPushServerStatus(): Promise<{
 
 export async function getLocalWebPushStatus(): Promise<WebPushStatus> {
   if (!isWebPushSupported()) {
+    const iosNeedsHomeScreen = isIosDevice() && !isStandaloneDisplayMode();
     return {
       configured: false,
       subscribed: false,
       deviceCount: 0,
       permission: "unsupported",
+      unsupportedReason: iosNeedsHomeScreen
+        ? "ios-home-screen-required"
+        : "browser",
     };
   }
 
@@ -117,6 +150,11 @@ function serializeSubscription(sub: PushSubscription) {
  */
 export async function enableWebPush(): Promise<WebPushStatus> {
   if (!isWebPushSupported()) {
+    if (isIosDevice() && !isStandaloneDisplayMode()) {
+      throw new Error(
+        "در آیفون ابتدا سایت را با Safari به صفحه اصلی اضافه کنید، سپس از همان آیکون باز کنید و اعلان را فعال کنید",
+      );
+    }
     throw new Error("این مرورگر از اعلان خارج از برنامه پشتیبانی نمی‌کند");
   }
 

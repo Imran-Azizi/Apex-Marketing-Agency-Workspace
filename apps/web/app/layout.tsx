@@ -25,6 +25,16 @@ export const metadata: Metadata = {
     shortcut: ["/favicon.ico"],
   },
   manifest: "/site.webmanifest",
+  // Required so iOS “Add to Home Screen” launches as a standalone web app
+  // (Web Push on iPhone only works in that mode, iOS 16.4+).
+  appleWebApp: {
+    capable: true,
+    title: "اپیکس",
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: {
+    telephone: false,
+  },
 };
 
 export default function RootLayout({
