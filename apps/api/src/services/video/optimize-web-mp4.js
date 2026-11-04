@@ -12,7 +12,12 @@ import {
 import { AppError } from '../../utils/response.js';
 import { env } from '../../config/env.js';
 
+/** Skip optimize above this — download + encode would stress the VPS. */
 const MAX_OPTIMIZE_BYTES = 512 * 1024 * 1024;
+/** Public portfolio target: keep files small enough for weak mobile links. */
+const WEB_SOFT_MAX_BYTES = 12 * 1024 * 1024;
+const WEB_MAX_LONG_EDGE = 1080;
+const WEB_MAX_BITRATE = 3_000_000;
 
 function resolveBinary(kind) {
   if (kind === 'ffmpeg') return env.ffmpegPath || 'ffmpeg';
@@ -105,6 +110,51 @@ function parseFrameRate(rate) {
   return a / b;
 }
 
+/**
+ * Walk top-level ISO-BMFF boxes to see whether `moov` appears before `mdat`.
+ * Without faststart, browsers must download nearly the whole file before play.
+ */
+async function inspectMp4Faststart(filePath) {
+  const fh = await fs.open(filePath, 'r');
+  try {
+    const stat = await fh.stat();
+    let offset = 0;
+    let moovAt = null;
+    let mdatAt = null;
+    const buf = Buffer.alloc(16);
+
+    while (offset + 8 <= stat.size) {
+      await fh.read(buf, 0, 8, offset);
+      let size = buf.readUInt32BE(0);
+      const type = buf.toString('ascii', 4, 8);
+      let header = 8;
+      if (size === 1) {
+        if (offset + 16 > stat.size) break;
+        await fh.read(buf, 0, 8, offset + 8);
+        size = Number(buf.readBigUInt64BE(0));
+        header = 16;
+      } else if (size === 0) {
+        size = stat.size - offset;
+      }
+      if (!Number.isFinite(size) || size < header) break;
+
+      if (type === 'moov' && moovAt == null) moovAt = offset;
+      if (type === 'mdat' && mdatAt == null) mdatAt = offset;
+      if (moovAt != null && mdatAt != null) break;
+
+      offset += size;
+    }
+
+    return {
+      faststart: moovAt != null && (mdatAt == null || moovAt < mdatAt),
+      moovAt,
+      mdatAt,
+    };
+  } finally {
+    await fh.close();
+  }
+}
+
 function needsReencode(probe) {
   const streams = probe?.streams || [];
   const video = streams.find((s) => s.codec_type === 'video');
@@ -123,6 +173,21 @@ function needsReencode(probe) {
   const vfrLikely = avg != null && r != null && Math.abs(avg - r) > 0.5;
   const oddFps = fps != null && (fps < 20 || fps > 60);
   return !videoOk || !audioOk || vfrLikely || oddFps;
+}
+
+function needsWebCompress(probe, sizeBytes) {
+  if (sizeBytes > WEB_SOFT_MAX_BYTES) return true;
+  const video = (probe?.streams || []).find((s) => s.codec_type === 'video');
+  if (!video) return true;
+  const w = Number(video.width || 0);
+  const h = Number(video.height || 0);
+  if (Math.max(w, h) > WEB_MAX_LONG_EDGE) return true;
+  const br =
+    Number(video.bit_rate || 0) ||
+    Number(probe?.format?.bit_rate || 0) ||
+    0;
+  if (br > WEB_MAX_BITRATE) return true;
+  return false;
 }
 
 async function downloadToTemp(storageKey, suffix = '.bin') {
@@ -145,12 +210,19 @@ async function optimizeLocalFile(inputPath, outputPath, { reencode }) {
         '0:v:0',
         '-map',
         '0:a:0?',
+        // Fit inside 1080 on the long edge (spawn has no shell — escape for ffmpeg filtergraph).
+        '-vf',
+        `scale=w=if(gte(iw\\,ih)\\,min(${WEB_MAX_LONG_EDGE}\\,iw)\\,-2):h=if(gte(ih\\,iw)\\,min(${WEB_MAX_LONG_EDGE}\\,ih)\\,-2)`,
         '-c:v',
         'libx264',
         '-preset',
         'veryfast',
         '-crf',
-        '23',
+        '26',
+        '-maxrate',
+        '2500k',
+        '-bufsize',
+        '5000k',
         '-pix_fmt',
         'yuv420p',
         '-profile:v',
@@ -166,7 +238,7 @@ async function optimizeLocalFile(inputPath, outputPath, { reencode }) {
         '-c:a',
         'aac',
         '-b:a',
-        '128k',
+        '96k',
         '-ac',
         '2',
         '-ar',
@@ -202,9 +274,11 @@ async function uploadPortfolioMp4(localPath, destKey, sizeBytes) {
 
 function publicDestKey(sourceKey) {
   const base =
-    path.basename(sourceKey, path.extname(sourceKey)).replace(/[^\w.-]+/g, '_') ||
-    'portfolio';
-  return generateStorageKey('videos/portfolio', `${base}.mp4`);
+    path
+      .basename(sourceKey, path.extname(sourceKey))
+      .replace(/\.web$/i, '')
+      .replace(/[^\w.-]+/g, '_') || 'portfolio';
+  return generateStorageKey('videos/portfolio', `${base}.web.mp4`);
 }
 
 /**
@@ -241,12 +315,15 @@ export async function assertStoredVideoReady(storageKey) {
 /**
  * Prepare a portfolio video for public web playback:
  * - verify object exists on Bunny
- * - optionally remux/re-encode to H.264/AAC + faststart when ffmpeg is available
+ * - remux/re-encode to H.264/AAC + faststart (+ size cap) when ffmpeg is available
  * - copy into `videos/portfolio/` when the source is not already a public key
+ *
+ * @param {string} sourceKey
+ * @param {{ preferOptimize?: boolean, force?: boolean }} [options]
  */
 export async function preparePortfolioVideoForWeb(
   sourceKey,
-  { preferOptimize = true } = {},
+  { preferOptimize = true, force = false } = {},
 ) {
   const source = String(sourceKey || '').trim();
   const head = await assertStoredVideoReady(source);
@@ -256,12 +333,13 @@ export async function preparePortfolioVideoForWeb(
     (await isFfmpegAvailable()) &&
     head.size <= MAX_OPTIMIZE_BYTES;
 
-  if (alreadyPublic && !canOptimize) {
+  if (alreadyPublic && !canOptimize && !force) {
     return {
       storageKey: source,
       optimized: false,
       copied: false,
       skippedReason: 'ffmpeg_unavailable_or_too_large',
+      bytes: head.size,
     };
   }
 
@@ -276,6 +354,15 @@ export async function preparePortfolioVideoForWeb(
 
   try {
     if (!canOptimize) {
+      if (alreadyPublic) {
+        return {
+          storageKey: source,
+          optimized: false,
+          copied: false,
+          skippedReason: 'ffmpeg_unavailable_or_too_large',
+          bytes: head.size,
+        };
+      }
       const destKey = publicDestKey(source);
       const saved = await uploadPortfolioMp4(inputPath, destKey, head.size);
       return {
@@ -283,26 +370,57 @@ export async function preparePortfolioVideoForWeb(
         optimized: false,
         copied: true,
         skippedReason: 'ffmpeg_unavailable_or_too_large',
+        bytes: head.size,
       };
     }
 
     let reencode = true;
+    let faststart = false;
     try {
-      const probe = await probeVideo(inputPath);
-      reencode = needsReencode(probe);
+      const [probe, layout] = await Promise.all([
+        probeVideo(inputPath),
+        inspectMp4Faststart(inputPath),
+      ]);
+      faststart = Boolean(layout.faststart);
+      reencode =
+        needsReencode(probe) || needsWebCompress(probe, head.size);
+      // `--force` re-compresses even when the file already looks web-ready.
+      if (force && !reencode && faststart) reencode = true;
     } catch (err) {
       console.warn(
         '[video-optimize] probe failed, re-encoding:',
         err?.message || err,
       );
       reencode = true;
+      faststart = false;
+    }
+
+    const needsRemux = !faststart;
+    if (!reencode && !needsRemux) {
+      if (alreadyPublic) {
+        return {
+          storageKey: source,
+          optimized: false,
+          copied: false,
+          skippedReason: 'already_web_ready',
+          bytes: head.size,
+          faststart: true,
+        };
+      }
+      const destKey = publicDestKey(source);
+      const saved = await uploadPortfolioMp4(inputPath, destKey, head.size);
+      return {
+        storageKey: saved.key,
+        optimized: false,
+        copied: true,
+        bytes: head.size,
+        faststart: true,
+      };
     }
 
     await optimizeLocalFile(inputPath, outputPath, { reencode });
     const stat = await fs.stat(outputPath);
-    const destKey = alreadyPublic
-      ? source.replace(/\.[^.]+$/, '') + '.web.mp4'
-      : publicDestKey(source);
+    const destKey = publicDestKey(source);
     const saved = await uploadPortfolioMp4(outputPath, destKey, stat.size);
 
     if (alreadyPublic && saved.key !== source) {
@@ -316,6 +434,9 @@ export async function preparePortfolioVideoForWeb(
       optimized: true,
       copied: !alreadyPublic || saved.key !== source,
       reencoded: reencode,
+      bytes: stat.size,
+      bytesBefore: head.size,
+      faststart: true,
     };
   } finally {
     await fs.unlink(inputPath).catch(() => {});

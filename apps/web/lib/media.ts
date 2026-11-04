@@ -29,41 +29,69 @@ export function portfolioPublicPlaybackUrl(item: {
   return portfolioPublicStreamUrl(item.id);
 }
 
+const playbackTicketCache = new Map<string, { url: string; expiresAt: number }>();
+const playbackTicketInflight = new Map<string, Promise<string>>();
+const PLAYBACK_TICKET_TTL_MS = 45_000;
+
 /**
  * Resolve a direct Bunny CDN URL at Play time so bytes never traverse the API.
  * Falls back to the opaque ranged stream endpoint when CDN is unavailable.
+ * Results are cached briefly so hover/prefetch makes click-to-play instant.
  */
 export async function resolvePortfolioPublicPlayback(portfolioId: string): Promise<string> {
   const id = String(portfolioId || "").trim();
   if (!id) throw new Error("آدرس پخش ویدیو در دسترس نیست.");
 
-  const res = await fetch(portfolioPublicPlaybackTicketUrl(id), {
-    method: "GET",
-    credentials: "omit",
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    throw new Error("آماده‌سازی پخش ویدیو ناموفق بود");
-  }
-  const json = (await res.json()) as {
-    success?: boolean;
-    data?: { url?: string | null };
-  };
-  const raw = String(json?.data?.url || "").trim();
-  if (!json?.success || !raw) {
-    throw new Error("آدرس پخش ویدیو در دسترس نیست.");
-  }
-  if (/^https?:\/\//i.test(raw)) return raw;
-  if (raw.startsWith("/")) {
-    // Relative stream path from API — join against API origin.
-    try {
-      return new URL(raw, API_BASE.replace(/\/api\/v1\/?$/, "/")).toString();
-    } catch {
-      return portfolioPublicStreamUrl(id);
+  const cached = playbackTicketCache.get(id);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+
+  const inflight = playbackTicketInflight.get(id);
+  if (inflight) return inflight;
+
+  const request = (async () => {
+    const res = await fetch(portfolioPublicPlaybackTicketUrl(id), {
+      method: "GET",
+      credentials: "omit",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error("آماده‌سازی پخش ویدیو ناموفق بود");
     }
-  }
-  return portfolioPublicStreamUrl(id);
+    const json = (await res.json()) as {
+      success?: boolean;
+      data?: { url?: string | null };
+    };
+    const raw = String(json?.data?.url || "").trim();
+    if (!json?.success || !raw) {
+      throw new Error("آدرس پخش ویدیو در دسترس نیست.");
+    }
+    let url = portfolioPublicStreamUrl(id);
+    if (/^https?:\/\//i.test(raw)) {
+      url = raw;
+    } else if (raw.startsWith("/")) {
+      try {
+        url = new URL(raw, API_BASE.replace(/\/api\/v1\/?$/, "/")).toString();
+      } catch {
+        url = portfolioPublicStreamUrl(id);
+      }
+    }
+    playbackTicketCache.set(id, {
+      url,
+      expiresAt: Date.now() + PLAYBACK_TICKET_TTL_MS,
+    });
+    return url;
+  })().finally(() => {
+    playbackTicketInflight.delete(id);
+  });
+
+  playbackTicketInflight.set(id, request);
+  return request;
+}
+
+/** Warm CDN playback URL while the user is still on the poster (before Play). */
+export function prefetchPortfolioPublicPlayback(portfolioId: string): void {
+  void resolvePortfolioPublicPlayback(portfolioId).catch(() => {});
 }
 
 /** Authenticated stream URL for manager preview of any portfolio item. */

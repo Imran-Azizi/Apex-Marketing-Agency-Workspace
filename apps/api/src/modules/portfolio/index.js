@@ -205,6 +205,27 @@ router.get('/:id', requirePermission('portfolio.view'), async (req, res, next) =
   }
 });
 
+/** Remux/re-encode one item for fast public CDN playback (needs ffmpeg on server). */
+router.post(
+  '/:id/optimize-web',
+  requireCsrf,
+  requirePermission('portfolio.edit'),
+  async (req, res, next) => {
+    try {
+      req.setTimeout(20 * 60 * 1000);
+      res.setTimeout(20 * 60 * 1000);
+      ok(
+        res,
+        await portfolioService.optimizeItemForWeb(req.params.id, req.auth, req, {
+          force: Boolean(req.body?.force),
+        }),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
 router.patch(
   '/:id',
   requireCsrf,

@@ -931,6 +931,141 @@ export const portfolioService = {
   async getPublishedStreamTarget(id) {
     return this.getStreamTarget(id, { publishedOnly: true });
   },
+
+  /**
+   * Re-encode / remux one portfolio item for fast public web playback
+   * (H.264/AAC + moov faststart + ~1080p / bitrate cap).
+   */
+  async optimizeItemForWeb(id, actor, req, { force = false } = {}) {
+    const existing = await prisma.portfolioItem.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        videoFile: {
+          select: { storageKey: true, deletedAt: true },
+        },
+      },
+    });
+    if (!existing) throw new AppError('نمونه‌کار یافت نشد', 404, 'NOT_FOUND');
+
+    const sourceKey =
+      existing.storageKey ||
+      (!existing.videoFile?.deletedAt ? existing.videoFile?.storageKey : null);
+    if (!sourceKey) {
+      throw new AppError('ویدیوی نمونه‌کار در دسترس نیست', 404, 'NOT_FOUND');
+    }
+
+    const prepared = await preparePortfolioVideoForWeb(sourceKey, {
+      preferOptimize: true,
+      force,
+    });
+
+    if (prepared.storageKey && prepared.storageKey !== existing.storageKey) {
+      await prisma.portfolioItem.update({
+        where: { id },
+        data: { storageKey: prepared.storageKey },
+      });
+    }
+
+    await writeAudit({
+      userId: actor?.userId,
+      action: 'PORTFOLIO_OPTIMIZE_WEB',
+      entityType: 'PortfolioItem',
+      entityId: id,
+      before: { storageKey: existing.storageKey },
+      after: {
+        storageKey: prepared.storageKey || existing.storageKey,
+        optimized: prepared.optimized,
+        reencoded: prepared.reencoded,
+        bytes: prepared.bytes,
+        bytesBefore: prepared.bytesBefore,
+        skippedReason: prepared.skippedReason || null,
+      },
+      req,
+    });
+
+    await afterPublicPortfolioMutation({ slug: existing.slug });
+    return {
+      id,
+      slug: existing.slug,
+      ...prepared,
+      storageKey: prepared.storageKey || existing.storageKey,
+    };
+  },
+
+  async optimizePublishedForWeb({ limit = 50, force = false } = {}) {
+    const items = await prisma.portfolioItem.findMany({
+      where: {
+        deletedAt: null,
+        status: 'PUBLISHED',
+        OR: [{ storageKey: { not: null } }, { videoFileId: { not: null } }],
+      },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+      take: Math.min(Math.max(Number(limit) || 50, 1), 200),
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        storageKey: true,
+        videoFile: { select: { storageKey: true, deletedAt: true } },
+      },
+    });
+
+    const results = [];
+    for (const item of items) {
+      const sourceKey =
+        item.storageKey ||
+        (!item.videoFile?.deletedAt ? item.videoFile?.storageKey : null);
+      if (!sourceKey) {
+        results.push({
+          id: item.id,
+          slug: item.slug,
+          optimized: false,
+          skippedReason: 'no_video',
+        });
+        continue;
+      }
+      try {
+        const prepared = await preparePortfolioVideoForWeb(sourceKey, {
+          preferOptimize: true,
+          force,
+        });
+        if (prepared.storageKey && prepared.storageKey !== item.storageKey) {
+          await prisma.portfolioItem.update({
+            where: { id: item.id },
+            data: { storageKey: prepared.storageKey },
+          });
+        }
+        results.push({
+          id: item.id,
+          slug: item.slug,
+          title: item.title,
+          ...prepared,
+          storageKey: prepared.storageKey || item.storageKey,
+        });
+        await afterPublicPortfolioMutation({ slug: item.slug });
+      } catch (err) {
+        console.error(
+          '[portfolio-optimize]',
+          item.id,
+          err?.message || err,
+        );
+        results.push({
+          id: item.id,
+          slug: item.slug,
+          optimized: false,
+          error: err?.message || String(err),
+        });
+      }
+    }
+
+    return {
+      total: results.length,
+      optimized: results.filter((r) => r.optimized).length,
+      skipped: results.filter((r) => r.skippedReason).length,
+      failed: results.filter((r) => r.error).length,
+      results,
+    };
+  },
 };
 
 /**

@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CalendarDays, Check, ChevronLeft, Share2, Tag } from "lucide-react";
 import {
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   portfolioPublicPlaybackUrl,
+  prefetchPortfolioPublicPlayback,
   resolvePortfolioPublicPlayback,
 } from "@/lib/media";
 import type { PublicPortfolioDetail } from "@/lib/portfolio";
@@ -49,6 +50,10 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
     () => resolvePortfolioPublicPlayback(item.id),
     [item.id],
   );
+
+  useEffect(() => {
+    prefetchPortfolioPublicPlayback(item.id);
+  }, [item.id]);
 
   async function share() {
     const url = window.location.href;
