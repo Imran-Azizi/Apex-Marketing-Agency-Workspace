@@ -12,8 +12,16 @@ export const globalLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => {
     const url = String(req.originalUrl || req.url || "");
+    // HTML5 video/audio issue many Range GETs; counting them toward the
+    // global cap makes portfolio playback fail on weak / mobile networks.
     return (
-      url.startsWith("/files/") || url.includes("/webhooks/whatsapp")
+      url.startsWith("/files/") ||
+      url.includes("/webhooks/whatsapp") ||
+      /\/(?:public\/)?portfolio\/[^/?#]+\/(?:stream|playback)(?:\?|#|$)/.test(
+        url,
+      ) ||
+      /\/video-storage\/[^/?#]+\/stream(?:\?|#|$)/.test(url) ||
+      /\/files\/(?:media|raw)\//.test(url)
     );
   },
 });

@@ -13,16 +13,57 @@ export function portfolioPublicStreamUrl(portfolioId: string): string {
   return `${API_BASE}/public/portfolio/${encodeURIComponent(portfolioId)}/stream`;
 }
 
+/** JSON ticket that resolves a direct CDN (or stream fallback) playback URL. */
+export function portfolioPublicPlaybackTicketUrl(portfolioId: string): string {
+  return `${API_BASE}/public/portfolio/${encodeURIComponent(portfolioId)}/playback`;
+}
+
 /**
- * Best playback URL for the public portfolio player.
- * Always uses the opaque ranged stream endpoint — never embeds durable CDN
- * file URLs in the page (download deterrence for نمونه های کاری).
+ * Opaque fallback stream URL kept in page markup for structured data /
+ * no-JS fallback. Real playback prefers {@link resolvePortfolioPublicPlayback}.
  */
 export function portfolioPublicPlaybackUrl(item: {
   id: string;
   video?: { playbackUrl?: string | null; streamPath?: string | null } | null;
 }): string {
   return portfolioPublicStreamUrl(item.id);
+}
+
+/**
+ * Resolve a direct Bunny CDN URL at Play time so bytes never traverse the API.
+ * Falls back to the opaque ranged stream endpoint when CDN is unavailable.
+ */
+export async function resolvePortfolioPublicPlayback(portfolioId: string): Promise<string> {
+  const id = String(portfolioId || "").trim();
+  if (!id) throw new Error("آدرس پخش ویدیو در دسترس نیست.");
+
+  const res = await fetch(portfolioPublicPlaybackTicketUrl(id), {
+    method: "GET",
+    credentials: "omit",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error("آماده‌سازی پخش ویدیو ناموفق بود");
+  }
+  const json = (await res.json()) as {
+    success?: boolean;
+    data?: { url?: string | null };
+  };
+  const raw = String(json?.data?.url || "").trim();
+  if (!json?.success || !raw) {
+    throw new Error("آدرس پخش ویدیو در دسترس نیست.");
+  }
+  if (/^https?:\/\//i.test(raw)) return raw;
+  if (raw.startsWith("/")) {
+    // Relative stream path from API — join against API origin.
+    try {
+      return new URL(raw, API_BASE.replace(/\/api\/v1\/?$/, "/")).toString();
+    } catch {
+      return portfolioPublicStreamUrl(id);
+    }
+  }
+  return portfolioPublicStreamUrl(id);
 }
 
 /** Authenticated stream URL for manager preview of any portfolio item. */

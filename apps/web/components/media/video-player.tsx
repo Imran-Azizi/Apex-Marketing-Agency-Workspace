@@ -179,14 +179,50 @@ export function VideoPlayer({
 
   useEffect(() => () => clearWaiting(), [clearWaiting]);
 
-  const tryPlay = useCallback(async (el: HTMLVideoElement) => {
-    try {
-      await el.play();
-      return true;
-    } catch {
-      return false;
+  const waitForPlayable = useCallback((el: HTMLVideoElement) => {
+    if (el.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+      return Promise.resolve();
     }
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        el.removeEventListener("loadeddata", onReady);
+        el.removeEventListener("canplay", onReady);
+        el.removeEventListener("error", onError);
+        if (ok) resolve();
+        else reject(new Error("media error"));
+      };
+      const onReady = () => finish(true);
+      const onError = () => finish(false);
+      // Don't block forever on weak networks — attempt play with whatever
+      // is buffered; the waiting overlay covers further stalls.
+      const timer = window.setTimeout(() => finish(true), 12_000);
+      el.addEventListener("loadeddata", onReady);
+      el.addEventListener("canplay", onReady);
+      el.addEventListener("error", onError);
+      try {
+        el.load();
+      } catch {
+        /* ignore */
+      }
+    });
   }, []);
+
+  const tryPlay = useCallback(
+    async (el: HTMLVideoElement) => {
+      try {
+        await waitForPlayable(el);
+        await el.play();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [waitForPlayable],
+  );
 
   const startPlayback = useCallback(
     async (fromUserGesture: boolean) => {
@@ -328,7 +364,8 @@ export function VideoPlayer({
             disablePictureInPicture={protect}
             disableRemotePlayback={protect}
             playsInline
-            preload="auto"
+            // metadata: start fast on weak links; Range requests buffer the rest.
+            preload="metadata"
             muted={muted ?? shouldAutoStart}
             loop={loop}
             draggable={false}

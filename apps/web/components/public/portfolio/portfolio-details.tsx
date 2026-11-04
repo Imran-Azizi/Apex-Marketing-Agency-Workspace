@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 import { CalendarDays, Check, ChevronLeft, Share2, Tag } from "lucide-react";
 import {
@@ -11,7 +11,10 @@ import {
 } from "@/components/media/video-player";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { portfolioPublicPlaybackUrl } from "@/lib/media";
+import {
+  portfolioPublicPlaybackUrl,
+  resolvePortfolioPublicPlayback,
+} from "@/lib/media";
 import type { PublicPortfolioDetail } from "@/lib/portfolio";
 import { cn, formatDate } from "@/lib/utils";
 import { PortfolioSuccessStory } from "./portfolio-success-story";
@@ -42,6 +45,10 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
     (category) => category.id !== item.category?.id,
   );
   const playbackSrc = portfolioPublicPlaybackUrl(item);
+  const getPlaybackSrc = useCallback(
+    () => resolvePortfolioPublicPlayback(item.id),
+    [item.id],
+  );
 
   async function share() {
     const url = window.location.href;
@@ -95,6 +102,7 @@ export function PortfolioDetails({ item }: { item: PublicPortfolioDetail }) {
         <div className="overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm">
           <VideoPlayer
             src={playbackSrc}
+            getSrc={getPlaybackSrc}
             poster={item.thumbnailUrl || undefined}
             title={item.title}
             type={item.video?.mimeType || "video/mp4"}

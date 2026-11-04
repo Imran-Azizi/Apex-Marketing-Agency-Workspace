@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { ok, created } from '../../utils/response.js';
 import { prisma } from '../../db/prisma.js';
+import { env } from '../../config/env.js';
 import { buildWhatsappCta } from '../../services/whatsapp.js';
 import { requireCsrf } from '../../middleware/csrf.js';
 import { contactLimiter } from '../../middleware/rateLimit.js';
@@ -12,6 +13,7 @@ import {
 } from '../contact/service.js';
 import {
   portfolioService,
+  resolvePortfolioCdnPlaybackUrl,
   streamPortfolioVideo,
 } from '../portfolio/service.js';
 import {
@@ -116,6 +118,35 @@ router.get('/portfolio', cachePublic(60), async (req, res, next) => {
         portfolioService.listPublic(req.query || {}),
       ),
     );
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Lightweight CDN playback ticket for the public player.
+ * Returns a direct Bunny URL so the browser never pumps video bytes through
+ * this API (critical on weak mobile networks). Page HTML still uses opaque ids.
+ */
+router.get('/portfolio/:id/playback', cachePublic(30), async (req, res, next) => {
+  try {
+    const file = await portfolioService.getPublishedStreamTarget(req.params.id);
+    const url = await resolvePortfolioCdnPlaybackUrl(file.storageKey);
+    if (!url) {
+      // Fallback: opaque ranged stream (still ACL'd / published-only).
+      const apiBase = String(env.apiUrl || '').replace(/\/$/, '');
+      ok(res, {
+        url: `${apiBase}/api/v1/public/portfolio/${encodeURIComponent(req.params.id)}/stream`,
+        mimeType: file.mimeType || 'video/mp4',
+        delivery: 'stream',
+      });
+      return;
+    }
+    ok(res, {
+      url,
+      mimeType: file.mimeType || 'video/mp4',
+      delivery: 'cdn',
+    });
   } catch (e) {
     next(e);
   }

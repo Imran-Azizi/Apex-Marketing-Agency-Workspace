@@ -933,35 +933,84 @@ export const portfolioService = {
   },
 };
 
+/**
+ * Resolve a Bunny CDN URL for portfolio playback.
+ * Prefers short-lived signed URLs when pull-zone token auth is configured;
+ * falls back to the public CDN URL for marketing keys under videos/portfolio/.
+ */
+export async function resolvePortfolioCdnPlaybackUrl(storageKey) {
+  const key = String(storageKey || '').trim();
+  if (!key) return null;
+
+  if (storage.prefersDirectCdnRedirect({ signed: true })) {
+    try {
+      const signed = await storage.createPresignedGetUrl(key);
+      if (signed) return signed;
+    } catch (err) {
+      console.warn(
+        '[portfolio-stream] signed CDN URL failed:',
+        err?.message || err,
+      );
+    }
+  }
+
+  if (
+    isPublicStorageKey(key) &&
+    storage.prefersDirectCdnRedirect({ signed: false })
+  ) {
+    try {
+      return (
+        (await storage.createPresignedGetUrl(key).catch(() => null)) ||
+        storage.publicUrl(key)
+      );
+    } catch (err) {
+      console.warn(
+        '[portfolio-stream] public CDN URL failed:',
+        err?.message || err,
+      );
+    }
+  }
+
+  return null;
+}
+
+function sendPortfolioCdnRedirect(res, url, { protect = false } = {}) {
+  res.setHeader(
+    'Cache-Control',
+    protect
+      ? 'private, max-age=60, must-revalidate'
+      : 'public, max-age=300, stale-while-revalidate=600',
+  );
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.redirect(302, url);
+}
+
 export async function streamPortfolioVideo(req, res, file, options = {}) {
   const storageKey = file.storageKey;
   const contentTypeHint = file.mimeType || 'video/mp4';
   /**
-   * Public website playback: always proxy through this API so the browser
-   * never receives a durable CDN/file URL in the video element or Network
-   * redirect chain. Manager/admin streams may still CDN-redirect for speed.
+   * Page HTML / JSON keep an opaque `/public/portfolio/:id/stream` URL.
+   * After ACL, hand Range-capable bytes to Bunny CDN — proxying through this
+   * API saturates the VPS and stalls playback on weak client networks.
    */
   const protect = Boolean(options.protect);
 
-  // Public portfolio objects: redirect straight to Bunny CDN (supports Range).
-  // Skip Storage API HEAD to reduce time-to-first-byte.
-  if (
-    !protect &&
-    isPublicStorageKey(storageKey) &&
-    storage.prefersDirectCdnRedirect({ signed: false })
-  ) {
+  // Skip Storage API HEAD: redirect straight to CDN for TTFB.
+  const cdnUrl = await resolvePortfolioCdnPlaybackUrl(storageKey);
+  if (cdnUrl) {
+    sendPortfolioCdnRedirect(res, cdnUrl, { protect });
+    return;
+  }
+
+  // Non-public keys without token auth (or CDN misconfig): proxy as fallback.
+  if (!protect && storage.prefersDirectCdnRedirect({ signed: false })) {
     try {
       const url =
         (await storage.createPresignedGetUrl(storageKey).catch(() => null)) ||
         storage.publicUrl(storageKey);
       if (url) {
-        res.setHeader(
-          'Cache-Control',
-          'public, max-age=300, stale-while-revalidate=600',
-        );
-        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.redirect(302, url);
+        sendPortfolioCdnRedirect(res, url, { protect: false });
         return;
       }
     } catch (err) {
@@ -981,37 +1030,13 @@ export async function streamPortfolioVideo(req, res, file, options = {}) {
       : null) ||
     'video/mp4';
 
-  // Prefer CDN redirect when the driver can issue a public/signed URL.
-  if (!protect && storage.prefersDirectCdnRedirect({ signed: false })) {
-    try {
-      const url =
-        (await storage.createPresignedGetUrl(storageKey).catch(() => null)) ||
-        storage.publicUrl(storageKey);
-      if (url) {
-        res.setHeader(
-          'Cache-Control',
-          'public, max-age=300, stale-while-revalidate=600',
-        );
-        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.redirect(302, url);
-        return;
-      }
-    } catch (err) {
-      console.warn(
-        '[portfolio-stream] CDN redirect failed, proxying:',
-        err?.message || err,
-      );
-    }
-  }
-
   const range = req.headers.range;
 
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader(
     'Cache-Control',
     protect
-      ? 'private, max-age=0, must-revalidate'
+      ? 'private, max-age=60, must-revalidate'
       : 'public, max-age=300, stale-while-revalidate=600',
   );
   res.setHeader('Content-Type', contentType);
@@ -1019,12 +1044,11 @@ export async function streamPortfolioVideo(req, res, file, options = {}) {
   res.setHeader(
     'Content-Disposition',
     protect
-      ? "inline; filename=\"apex-portfolio.mp4\""
+      ? 'inline; filename="apex-portfolio.mp4"'
       : `inline; filename*=UTF-8''${encodeURIComponent(file.name || path.basename(storageKey) || 'portfolio.mp4')}`,
   );
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   if (protect) {
-    // Discourage intermediate caches from treating this as a downloadable asset.
     res.setHeader('X-Content-Type-Options', 'nosniff');
   }
 

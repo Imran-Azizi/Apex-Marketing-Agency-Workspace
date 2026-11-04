@@ -139,14 +139,6 @@ export function PublicHeader() {
           <div className="flex items-center gap-1 sm:gap-1.5">
             <ThemeToggle className="h-9 w-9 rounded-full" />
             <Button
-              variant="outline"
-              size="sm"
-              className="hidden h-9 rounded-full border-border/80 px-4 public-lift lg:inline-flex"
-              asChild
-            >
-              <Link href="/login">ورود تیم</Link>
-            </Button>
-            <Button
               size="sm"
               variant="brand"
               className="public-lift h-9 rounded-full px-3 text-xs shadow-sm shadow-brand/20 sm:px-4 sm:text-sm"
@@ -182,7 +174,7 @@ export function PublicHeader() {
               >
                 <SheetTitle className="sr-only">منوی وب‌سایت</SheetTitle>
                 <SheetDescription className="sr-only">
-                  پیوندهای صفحه اصلی و ورود
+                  پیوندهای صفحه اصلی و پورتال مشتری
                 </SheetDescription>
 
                 <div className="relative flex h-[3.75rem] shrink-0 items-center justify-between gap-3 px-5">
@@ -257,18 +249,6 @@ export function PublicHeader() {
                   <div className="my-5 h-px bg-gradient-to-l from-transparent via-border/70 to-transparent" />
 
                   <div className="space-y-2">
-                    <Link
-                      href="/login"
-                      prefetch={false}
-                      onClick={() => setOpen(false)}
-                      className={cn(
-                        "flex min-h-12 items-center rounded-2xl border border-border/70 bg-card/60 px-3.5 py-3 text-sm font-medium text-foreground/90 outline-none",
-                        "transition-colors hover:border-border hover:bg-card hover:text-foreground",
-                        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                      )}
-                    >
-                      ورود تیم
-                    </Link>
                     <Link
                       href="/portal/login"
                       prefetch={false}
