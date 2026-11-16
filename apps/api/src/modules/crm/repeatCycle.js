@@ -67,6 +67,56 @@ export function snapshotCustomerProfile(customer) {
   };
 }
 
+/** Unused open sales cycles: no project, commercials, invoices, or payments. */
+function blankOpenOpportunityWhere(customerId) {
+  return {
+    crmCustomerId: customerId,
+    deletedAt: null,
+    projectId: null,
+    contractLocked: false,
+    pipelineStage: { not: "LOST_CANCELED" },
+    agreedPrice: null,
+    advancePayment: null,
+    proposedPrice: null,
+    agreedTerms: null,
+    invoices: { none: {} },
+    payments: { none: {} },
+  };
+}
+
+/**
+ * Keep at most one blank open opportunity per customer; soft-delete the rest.
+ * One empty cycle is useful for the next order — duplicates only clutter CRM.
+ */
+export async function pruneBlankOpenOpportunities(
+  tx,
+  customerId,
+  { keepId = null } = {},
+) {
+  const blanks = await tx.opportunity.findMany({
+    where: blankOpenOpportunityWhere(customerId),
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (blanks.length <= 1) {
+    return { removed: 0, keptId: blanks[0]?.id || null };
+  }
+
+  const keep =
+    keepId && blanks.some((row) => row.id === keepId) ? keepId : blanks[0].id;
+  const toRemove = blanks.filter((row) => row.id !== keep).map((row) => row.id);
+
+  await tx.opportunity.updateMany({
+    where: { id: { in: toRemove } },
+    data: {
+      deletedAt: new Date(),
+      pipelineStage: "LOST_CANCELED",
+      lostReason: "فرصت فروش خالی تکراری",
+    },
+  });
+  return { removed: toRemove.length, keptId: keep };
+}
+
 /**
  * Open (or reuse) a blank opportunity for a new project cycle.
  * Reuses only an unused open opportunity with no project and no contract data.
@@ -77,23 +127,12 @@ export async function openFreshCycleOpportunity(tx, customer, extras = {}) {
 
   if (!alwaysCreate) {
     const open = await tx.opportunity.findFirst({
-      where: {
-        crmCustomerId: customer.id,
-        deletedAt: null,
-        projectId: null,
-        contractLocked: false,
-        pipelineStage: { not: "LOST_CANCELED" },
-        agreedPrice: null,
-        advancePayment: null,
-        proposedPrice: null,
-        agreedTerms: null,
-        // Payments are on Invoice (and customer), not Opportunity.
-        invoices: { none: {} },
-      },
+      where: blankOpenOpportunityWhere(customer.id),
       orderBy: { createdAt: "desc" },
     });
 
     if (open) {
+      await pruneBlankOpenOpportunities(tx, customer.id, { keepId: open.id });
       return { opportunity: open, created: false };
     }
   }
@@ -101,5 +140,7 @@ export async function openFreshCycleOpportunity(tx, customer, extras = {}) {
   const opportunity = await tx.opportunity.create({
     data: buildFreshOpportunityData(customer, { title, pipelineStage, ...rest }),
   });
+  // The new cycle may be linked to a project next; still clear older blank duplicates.
+  await pruneBlankOpenOpportunities(tx, customer.id, { keepId: opportunity.id });
   return { opportunity, created: true };
 }

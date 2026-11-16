@@ -162,6 +162,8 @@ export default function PortalContractPage({ params }: { params: Promise<{ id: s
               return share?.pdf ? (
                 <CalendarPdfCard
                   key={calendar.id}
+                  contractId={data.id}
+                  calendarId={calendar.id}
                   title={calendar.title}
                   rowCount={calendar.rows.length}
                   sharedAt={share.sharedAt}

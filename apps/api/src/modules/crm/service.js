@@ -40,6 +40,7 @@ import {
 import {
   detachOpportunityFromDeletedProject,
   openFreshCycleOpportunity,
+  pruneBlankOpenOpportunities,
   snapshotCustomerProfile,
 } from "./repeatCycle.js";
 import { listCrmActivities, recordCrmActivity } from "./activity.js";
@@ -559,7 +560,7 @@ export const crmService = {
       where: { id, deletedAt: null },
       include: {
         opportunities: {
-          where: { deletedAt: null },
+          where: { deletedAt: null, pipelineStage: { not: "LOST_CANCELED" } },
           orderBy: { createdAt: "desc" },
           include: {
             project: {
@@ -635,6 +636,31 @@ export const crmService = {
     });
     if (!customer) throw new AppError("مشتری یافت نشد", 404, "NOT_FOUND");
     assertSalesCustomerAccess(customer, extras.auth);
+
+    // Only after ACL: drop duplicate empty sales cycles, then refresh the list.
+    const pruned = await pruneBlankOpenOpportunities(prisma, id);
+    if (pruned.removed > 0) {
+      customer.opportunities = await prisma.opportunity.findMany({
+        where: {
+          crmCustomerId: id,
+          deletedAt: null,
+          pipelineStage: { not: "LOST_CANCELED" },
+        },
+        orderBy: { createdAt: "desc" },
+        include: {
+          project: {
+            select: {
+              id: true,
+              code: true,
+              title: true,
+              status: true,
+              kind: true,
+              deletedAt: true,
+            },
+          },
+        },
+      });
+    }
 
     const recorderIds = [
       ...new Set(customer.payments.map((p) => p.recordedById).filter(Boolean)),

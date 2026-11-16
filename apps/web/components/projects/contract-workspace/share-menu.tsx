@@ -131,7 +131,12 @@ export function CalendarShareMenu({
       },
     });
     await queryClient.invalidateQueries({ queryKey: ["contract-workspace", projectId] });
-    if (!result.pdf?.url) throw new Error("لینک فایل PDF ساخته نشد");
+    if (!result.pdf?.storageKey && !result.pdf?.url) {
+      throw new Error("لینک فایل PDF ساخته نشد");
+    }
+    if (channel === "WHATSAPP" && !result.pdf?.url) {
+      throw new Error("لینک عمومی فایل PDF ساخته نشد");
+    }
     return result;
   };
 
@@ -167,7 +172,7 @@ export function CalendarShareMenu({
         calendar,
         contractTitle: context.contractTitle,
         customerName: context.customerName,
-        pdfUrl: result.pdf!.url,
+        pdfUrl: result.pdf!.url!,
         portalUrl: hasPortalAccount ? portalContractUrl(projectId, "calendar") : null,
       });
       const url = buildWhatsAppChatUrl(customerWhatsapp, message)!;

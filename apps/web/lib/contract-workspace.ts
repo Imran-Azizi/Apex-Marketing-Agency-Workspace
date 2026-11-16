@@ -47,7 +47,14 @@ export type ContractAsset = ClientAssetItem & {
   updatedAt: string;
 };
 
-export type SharedPdf = { url: string; name: string; sizeBytes: number | null };
+export type SharedPdf = {
+  /** Public CDN URL (WhatsApp / open-in-tab). May be null if CDN base is unset. */
+  url: string | null;
+  /** Storage key for authenticated same-origin streaming in the portal. */
+  storageKey?: string | null;
+  name: string;
+  sizeBytes: number | null;
+};
 
 export type ShareInfo = {
   sharedAt: string;

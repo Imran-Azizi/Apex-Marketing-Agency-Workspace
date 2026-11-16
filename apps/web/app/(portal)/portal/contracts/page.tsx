@@ -46,7 +46,7 @@ export default function PortalContractsPage() {
       ) : !data?.length ? (
         <EmptyState
           title="هنوز قراردادی ثبت نشده"
-          description="قراردادهای چندویدیویی شما و محتوایی که تیم اپکس ارسال کند، اینجا نمایش داده می‌شود."
+          description="وقتی تیم اپکس یا خودتان قرارداد چندویدیویی ثبت کنید، اینجا نمایش داده می‌شود."
         />
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -76,6 +76,11 @@ export default function PortalContractsPage() {
                   {contract.requestedByCustomer && !sections.length ? (
                     <Badge variant="outline" className="font-normal">
                       ثبت‌شده توسط شما
+                    </Badge>
+                  ) : null}
+                  {!sections.length && !contract.requestedByCustomer ? (
+                    <Badge variant="outline" className="font-normal">
+                      در انتظار ارسال محتوا
                     </Badge>
                   ) : null}
                   {contract.videoCount != null ? (

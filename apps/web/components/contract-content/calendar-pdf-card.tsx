@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import type { SharedPdf } from "@/lib/contract-workspace";
 import { downloadFile } from "@/lib/content-calendar-pdf";
 import { formatCount } from "@/lib/contract-project";
+import { api, ApiError } from "@/lib/api";
+import { resolveClientAuthPanel } from "@/lib/auth-panel";
 import { formatFileSize } from "@/lib/upload";
 import { formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,19 +19,52 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-async function fetchPdf(url: string): Promise<Blob> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error("دریافت فایل PDF ناموفق بود");
-  const blob = await response.blob();
-  return blob.type === "application/pdf" ? blob : new Blob([blob], { type: "application/pdf" });
+async function fetchPortalCalendarPdf(
+  contractId: string,
+  calendarId: string,
+): Promise<Blob> {
+  const panel = resolveClientAuthPanel();
+  const response = await api.get<Blob>(
+    `/portal/contracts/${encodeURIComponent(contractId)}/calendars/${encodeURIComponent(calendarId)}/pdf`,
+    {
+      responseType: "blob",
+      params: panel ? { panel } : undefined,
+    },
+  );
+  const blob = response.data;
+  const contentType = String(response.headers?.["content-type"] || "");
+  if (
+    contentType.includes("application/json") ||
+    (blob.type && blob.type.includes("application/json"))
+  ) {
+    const text = await blob.text();
+    try {
+      const parsed = JSON.parse(text) as { error?: { message?: string; code?: string } };
+      throw new ApiError(
+        parsed.error?.message || "دریافت فایل PDF ناموفق بود",
+        400,
+        parsed.error?.code || "FILE_FETCH_FAILED",
+      );
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError("دریافت فایل PDF ناموفق بود", 400, "FILE_FETCH_FAILED");
+    }
+  }
+  return blob.type === "application/pdf"
+    ? blob
+    : new Blob([blob], { type: "application/pdf" });
 }
 
 export function CalendarPdfCard({
+  contractId,
+  calendarId,
   title,
   rowCount,
   sharedAt,
   pdf,
 }: {
+  contractId: string;
+  calendarId: string;
   title: string;
   rowCount: number;
   sharedAt?: string | null;
@@ -50,7 +85,7 @@ export function CalendarPdfCard({
     if (previewUrl) return;
     setLoading("preview");
     try {
-      const blob = await fetchPdf(pdf.url);
+      const blob = await fetchPortalCalendarPdf(contractId, calendarId);
       setPreviewUrl(URL.createObjectURL(blob));
     } catch (error) {
       setPreviewOpen(false);
@@ -63,9 +98,13 @@ export function CalendarPdfCard({
   const download = async () => {
     setLoading("download");
     try {
-      downloadFile(await fetchPdf(pdf.url), pdf.name);
+      downloadFile(await fetchPortalCalendarPdf(contractId, calendarId), pdf.name);
     } catch {
-      window.open(pdf.url, "_blank", "noopener");
+      if (pdf.url) {
+        window.open(pdf.url, "_blank", "noopener");
+      } else {
+        toast.error("دانلود PDF ناموفق بود");
+      }
     } finally {
       setLoading(null);
     }

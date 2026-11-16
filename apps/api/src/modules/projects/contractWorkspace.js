@@ -188,9 +188,11 @@ function sharePdfInfo(meta) {
   } catch {
     url = null;
   }
-  if (!url) return null;
+  // Keep returning url for WhatsApp / deep links; portal preview must use the
+  // authenticated stream (CDN fetch is blocked by CORS in the browser).
   return {
     url,
+    storageKey: pdf.storageKey,
     name: typeof pdf.name === 'string' ? pdf.name : 'calendar.pdf',
     sizeBytes: typeof pdf.sizeBytes === 'number' ? pdf.sizeBytes : null,
   };
@@ -640,8 +642,6 @@ export const contractWorkspaceService = {
   },
 };
 
-const PORTAL_REQUESTED_CONTRACT = { brief: { path: ['createdBy'], equals: 'PORTAL' } };
-
 function isPortalRequested(brief) {
   return plainMeta(brief).createdBy === 'PORTAL';
 }
@@ -688,8 +688,9 @@ function portalContractCommercials(finance, opportunity) {
 }
 
 /**
- * Read-only contract view for the customer portal: contracts with shared content,
- * plus contracts the customer requested from the portal.
+ * Read-only contract view for the customer portal.
+ * Every CONTRACT linked to the customer is visible (staff-created or portal-requested).
+ * Shared company/assets/calendar content still appears only after the team sends it.
  */
 export const portalContractService = {
   async list(auth) {
@@ -698,7 +699,6 @@ export const portalContractService = {
         crmCustomerId: auth.customerId,
         kind: 'CONTRACT',
         deletedAt: null,
-        OR: [{ contractShares: { some: {} } }, PORTAL_REQUESTED_CONTRACT],
       },
       select: {
         id: true,
@@ -763,7 +763,7 @@ export const portalContractService = {
         },
       },
     });
-    if (!project || (!project.contractShares.length && !isPortalRequested(project.brief))) {
+    if (!project) {
       throw new AppError('قرارداد یافت نشد', 404, 'NOT_FOUND');
     }
     const shares = serializeShares(project.contractShares);
@@ -799,5 +799,36 @@ export const portalContractService = {
       calendars: calendars.map(serializeCalendar),
       shares,
     };
+  },
+
+  /**
+   * Resolve a shared calendar PDF for the logged-in portal customer.
+   * Used by the authenticated stream route so the browser never needs a
+   * cross-origin CDN fetch (CORS).
+   */
+  async resolveSharedCalendarPdf(projectId, calendarId, auth) {
+    const project = await prisma.project.findFirst({
+      where: {
+        id: String(projectId),
+        crmCustomerId: auth.customerId,
+        kind: 'CONTRACT',
+        deletedAt: null,
+      },
+      select: {
+        id: true,
+        contractShares: {
+          where: { section: 'CALENDAR', refId: String(calendarId) },
+          take: 1,
+        },
+      },
+    });
+    if (!project?.contractShares?.length) {
+      throw new AppError('فایل تقویم یافت نشد', 404, 'NOT_FOUND');
+    }
+    const pdf = sharePdfInfo(project.contractShares[0].meta);
+    if (!pdf?.storageKey) {
+      throw new AppError('فایل تقویم یافت نشد', 404, 'NOT_FOUND');
+    }
+    return pdf;
   },
 };

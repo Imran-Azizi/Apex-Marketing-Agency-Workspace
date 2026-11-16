@@ -8,6 +8,7 @@ import { ok, created } from '../../utils/response.js';
 import { portalService, registerSchema, briefSchema } from './service.js';
 import { portalContractService } from '../projects/contractWorkspace.js';
 import { projectService } from '../projects/service.js';
+import { streamPortalCalendarPdf } from './stream-calendar-pdf.js';
 
 const router = Router();
 
@@ -110,6 +111,20 @@ router.post('/contracts', requireCsrf, async (req, res, next) => {
 
 router.get('/contracts/:id', async (req, res, next) => {
   try { ok(res, await portalContractService.get(req.params.id, req.auth)); } catch (e) { next(e); }
+});
+
+/** Authenticated PDF stream — avoids cross-origin CDN fetch CORS failures in the portal. */
+router.get('/contracts/:id/calendars/:calendarId/pdf', async (req, res, next) => {
+  try {
+    const pdf = await portalContractService.resolveSharedCalendarPdf(
+      req.params.id,
+      req.params.calendarId,
+      req.auth,
+    );
+    await streamPortalCalendarPdf(req, res, pdf);
+  } catch (e) {
+    next(e);
+  }
 });
 
 router.get('/profile', async (req, res, next) => {
