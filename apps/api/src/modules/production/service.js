@@ -300,8 +300,108 @@ const taskInclude = {
 
 function canAccessAsEditor(task, auth) {
   if (auth.roleCode === "MANAGER" || auth.roleCode === "ADMIN") return true;
-  if (auth.roleCode !== "EDITOR") return false;
-  return task.editorUserId === auth.userId;
+  // Owner of the editing task may upload (editor, or project-lead acting as editor).
+  if (task?.editorUserId && task.editorUserId === auth.userId) return true;
+  return false;
+}
+
+const EDITING_TASK_PROJECT_SELECT = {
+  id: true,
+  title: true,
+  code: true,
+  status: true,
+};
+
+/**
+ * Resolve an active EditingTask for final-video upload, or create one when:
+ * - an EDITOR assignment exists (legacy path), or
+ * - the caller is an elevated project lead / manager on this project
+ *   (common for editor-as-PM creating CHILD videos under a multi-video contract).
+ */
+async function resolveEditingTaskForFinalUpload(projectId, auth) {
+  let task = await prisma.editingTask.findFirst({
+    where: { projectId, status: { in: ACTIVE_EDITING } },
+    orderBy: { createdAt: "desc" },
+    include: { project: { select: EDITING_TASK_PROJECT_SELECT } },
+  });
+
+  if (task) {
+    if (!canAccessAsEditor(task, auth)) {
+      throw new AppError("Forbidden", 403, "FORBIDDEN");
+    }
+    return task;
+  }
+
+  const assignment = await prisma.projectAssignment.findFirst({
+    where: { projectId, role: "EDITOR", isActive: true },
+    include: { teamProfile: true },
+  });
+
+  const assigneeId =
+    assignment?.userId || assignment?.teamProfile?.userId || null;
+  const isAssignee = Boolean(assigneeId && assigneeId === auth.userId);
+  const isManager = auth.roleCode === "MANAGER" || auth.roleCode === "ADMIN";
+  const isElevatedLead = Boolean(auth.projectLeadElevated);
+
+  if (assignment && (isAssignee || (!isElevatedLead && !isManager))) {
+    // Formal EDITOR assignment: assignee may upload; plain editors cannot
+    // hijack another editor's assignment.
+    if (
+      auth.roleCode === "EDITOR" &&
+      !isElevatedLead &&
+      !isAssignee
+    ) {
+      throw new AppError("Forbidden", 403, "FORBIDDEN");
+    }
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, deletedAt: null },
+      select: EDITING_TASK_PROJECT_SELECT,
+    });
+    if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
+
+    return prisma.editingTask.create({
+      data: {
+        projectId,
+        editorUserId: assigneeId,
+        editorTeamProfileId: assignment.teamProfileId,
+        assignedById: assignment.assignedById || auth.userId,
+        status: "IN_PROGRESS",
+        deadline: assignment.deadlineAt,
+        instructions: assignment.notes,
+      },
+      include: { project: { select: EDITING_TASK_PROJECT_SELECT } },
+    });
+  }
+
+  // No usable EDITOR assignment for this caller — project lead / manager
+  // self-serve upload (editor-as-PM on CHILD videos under a contract).
+  const project = await assertProjectAccess(projectId, auth);
+  if (!isManager && !isElevatedLead) {
+    throw new AppError("تکلیف ادیت یافت نشد", 404, "NOT_FOUND");
+  }
+
+  const editorProfile = await prisma.teamProfile.findFirst({
+    where: {
+      userId: auth.userId,
+      deletedAt: null,
+      status: { not: "INACTIVE" },
+      ...(auth.roleCode === "EDITOR" ? { kind: "EDITOR" } : {}),
+    },
+    select: { id: true },
+  });
+
+  return prisma.editingTask.create({
+    data: {
+      projectId: project.id,
+      editorUserId: auth.userId,
+      editorTeamProfileId: editorProfile?.id || null,
+      assignedById: auth.userId,
+      status: "IN_PROGRESS",
+      instructions:
+        "ایجاد خودکار برای مسئول پروژه هنگام آپلود نسخه نهایی",
+    },
+    include: { project: { select: EDITING_TASK_PROJECT_SELECT } },
+  });
 }
 
 async function nextFinalVersion(projectId, tx = prisma) {
@@ -1135,44 +1235,7 @@ export const productionService = {
       );
     }
 
-    let task = await prisma.editingTask.findFirst({
-      where: { projectId, status: { in: ACTIVE_EDITING } },
-      orderBy: { createdAt: "desc" },
-      include: {
-        project: { select: { id: true, title: true, code: true, status: true } },
-      },
-    });
-
-    if (!task) {
-      // Allow submit via legacy path if assignment exists
-      const assignment = await prisma.projectAssignment.findFirst({
-        where: { projectId, role: "EDITOR", isActive: true },
-        include: { teamProfile: true },
-      });
-      if (!assignment)
-        throw new AppError("تکلیف ادیت یافت نشد", 404, "NOT_FOUND");
-      if (
-        auth.roleCode === "EDITOR" &&
-        assignment.userId !== auth.userId &&
-        assignment.teamProfile?.userId !== auth.userId
-      ) {
-        throw new AppError("Forbidden", 403, "FORBIDDEN");
-      }
-      task = await prisma.editingTask.create({
-        data: {
-          projectId,
-          editorUserId: assignment.userId || assignment.teamProfile?.userId,
-          editorTeamProfileId: assignment.teamProfileId,
-          assignedById: assignment.assignedById,
-          status: "IN_PROGRESS",
-          deadline: assignment.deadlineAt,
-          instructions: assignment.notes,
-        },
-        include: { project: { select: { id: true, title: true, code: true } } },
-      });
-    } else if (!canAccessAsEditor(task, auth)) {
-      throw new AppError("Forbidden", 403, "FORBIDDEN");
-    }
+    const task = await resolveEditingTaskForFinalUpload(projectId, auth);
 
     const version = await nextFinalVersion(projectId);
     const submittedAt = new Date();
@@ -1812,52 +1875,7 @@ export const productionService = {
       throw new AppError("فرمت ویدیو پشتیبانی نمی‌شود", 400, "INVALID_MIME");
     }
 
-    let task = await prisma.editingTask.findFirst({
-      where: { projectId, status: { in: ACTIVE_EDITING } },
-      orderBy: { createdAt: "desc" },
-      include: {
-        project: { select: { id: true, title: true, code: true, status: true } },
-      },
-    });
-
-    if (!task) {
-      const assignment = await prisma.projectAssignment.findFirst({
-        where: { projectId, role: "EDITOR", isActive: true },
-        include: { teamProfile: true },
-      });
-      if (!assignment)
-        throw new AppError("تکلیف ادیت یافت نشد", 404, "NOT_FOUND");
-      if (
-        auth.roleCode === "EDITOR" &&
-        assignment.userId !== auth.userId &&
-        assignment.teamProfile?.userId !== auth.userId
-      ) {
-        throw new AppError("Forbidden", 403, "FORBIDDEN");
-      }
-      const project = await prisma.project.findFirst({
-        where: { id: projectId, deletedAt: null },
-        select: { id: true, title: true, code: true, status: true },
-      });
-      if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
-      task = await prisma.editingTask.create({
-        data: {
-          projectId,
-          editorUserId: assignment.userId || assignment.teamProfile?.userId,
-          editorTeamProfileId: assignment.teamProfileId,
-          assignedById: assignment.assignedById,
-          status: "IN_PROGRESS",
-          deadline: assignment.deadlineAt,
-          instructions: assignment.notes,
-        },
-        include: {
-          project: {
-            select: { id: true, title: true, code: true, status: true },
-          },
-        },
-      });
-    } else if (!canAccessAsEditor(task, auth)) {
-      throw new AppError("Forbidden", 403, "FORBIDDEN");
-    }
+    const task = await resolveEditingTaskForFinalUpload(projectId, auth);
 
     const kind = type === "CLEAN" ? "CLEAN_FINAL" : "WATERMARKED_FINAL";
     // Versions are independent per video type. Every upload is immutable and

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, Eye, FileText, Loader2 } from "lucide-react";
+import { Download, Eye, FileText, Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import type { SharedPdf } from "@/lib/contract-workspace";
 import { downloadFile } from "@/lib/content-calendar-pdf";
@@ -62,6 +62,7 @@ export function CalendarPdfCard({
   rowCount,
   sharedAt,
   pdf,
+  onEdit,
 }: {
   contractId: string;
   calendarId: string;
@@ -69,6 +70,7 @@ export function CalendarPdfCard({
   rowCount: number;
   sharedAt?: string | null;
   pdf: SharedPdf;
+  onEdit?: () => void;
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -125,7 +127,13 @@ export function CalendarPdfCard({
           </p>
         </div>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="flex shrink-0 flex-wrap gap-2">
+        {onEdit ? (
+          <Button variant="outline" className="flex-1 rounded-xl sm:flex-none" onClick={onEdit}>
+            <Pencil className="h-4 w-4" />
+            ویرایش
+          </Button>
+        ) : null}
         <Button variant="outline" className="flex-1 rounded-xl sm:flex-none" onClick={() => void openPreview()}>
           {loading === "preview" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
           مشاهده

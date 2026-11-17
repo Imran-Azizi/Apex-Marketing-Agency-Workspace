@@ -1,15 +1,17 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Building2, CalendarDays, FolderOpen } from "lucide-react";
+import { ArrowRight, Building2, CalendarDays, FolderOpen, Pencil } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import {
   WORKSPACE_TABS,
   parseWorkspaceTab,
+  type ContentCalendar,
   type PortalContractDetail,
+  type ShareInfo,
   type WorkspaceTab,
 } from "@/lib/contract-workspace";
 import { formatCount } from "@/lib/contract-project";
@@ -18,6 +20,7 @@ import { CompanyProfileView } from "@/components/contract-content/company-profil
 import { ContractAssetsGrid } from "@/components/contract-content/asset-card";
 import { CalendarTable } from "@/components/contract-content/calendar-table";
 import { CalendarPdfCard } from "@/components/contract-content/calendar-pdf-card";
+import { PortalCalendarEditorDialog } from "@/components/contract-content/portal-calendar-editor";
 import { PortalContractOverview } from "@/components/contract-content/portal-contract-overview";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Badge } from "@/components/ui/badge";
@@ -43,11 +46,72 @@ function SharedAt({ value }: { value: string | null | undefined }) {
   return <p className="text-xs text-muted-foreground">ارسال‌شده در {formatDate(value)}</p>;
 }
 
+function PortalCalendarBlock({
+  contractId,
+  calendar,
+  share,
+  onEdit,
+}: {
+  contractId: string;
+  calendar: ContentCalendar;
+  share?: ShareInfo | null;
+  onEdit: () => void;
+}) {
+  const changedAfterShare =
+    Boolean(share?.sharedAt) &&
+    new Date(calendar.updatedAt).getTime() > new Date(share!.sharedAt).getTime() + 1000;
+
+  if (share?.pdf) {
+    return (
+      <div className="space-y-3">
+        <CalendarPdfCard
+          contractId={contractId}
+          calendarId={calendar.id}
+          title={calendar.title}
+          rowCount={calendar.rows.length}
+          sharedAt={share.sharedAt}
+          pdf={share.pdf}
+          onEdit={onEdit}
+        />
+        {changedAfterShare ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            این تقویم پس از ارسال PDF ویرایش شده است. نسخهٔ جدول زیر به‌روز است؛ PDF تا ارسال مجدد تیم اپکس
+            همان نسخهٔ قبلی می‌ماند.
+          </p>
+        ) : null}
+        <CalendarTable rows={calendar.rows} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm font-bold sm:text-base">{calendar.title}</h2>
+            <Badge variant="secondary" className="tabular-nums">
+              {formatCount(calendar.rows.length)} ردیف
+            </Badge>
+          </div>
+          <SharedAt value={share?.sharedAt} />
+        </div>
+        <Button variant="outline" size="sm" className="rounded-xl" onClick={onEdit}>
+          <Pencil className="h-4 w-4" />
+          ویرایش
+        </Button>
+      </div>
+      <CalendarTable rows={calendar.rows} />
+    </div>
+  );
+}
+
 export default function PortalContractPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [editingCalendar, setEditingCalendar] = useState<ContentCalendar | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["portal-contract", id],
@@ -157,31 +221,26 @@ export default function PortalContractPage({ params }: { params: Promise<{ id: s
           </>
         ) : active === "calendar" ? (
           <div className="space-y-4">
-            {data.calendars.map((calendar) => {
-              const share = data.shares.calendars[calendar.id];
-              return share?.pdf ? (
-                <CalendarPdfCard
-                  key={calendar.id}
-                  contractId={data.id}
-                  calendarId={calendar.id}
-                  title={calendar.title}
-                  rowCount={calendar.rows.length}
-                  sharedAt={share.sharedAt}
-                  pdf={share.pdf}
-                />
-              ) : (
-                <div key={calendar.id} className="space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-sm font-bold sm:text-base">{calendar.title}</h2>
-                    <Badge variant="secondary" className="tabular-nums">
-                      {formatCount(calendar.rows.length)} ردیف
-                    </Badge>
-                  </div>
-                  <SharedAt value={share?.sharedAt} />
-                  <CalendarTable rows={calendar.rows} />
-                </div>
-              );
-            })}
+            {data.calendars.map((calendar) => (
+              <PortalCalendarBlock
+                key={calendar.id}
+                contractId={data.id}
+                calendar={calendar}
+                share={data.shares.calendars[calendar.id]}
+                onEdit={() => setEditingCalendar(calendar)}
+              />
+            ))}
+            <PortalCalendarEditorDialog
+              contractId={data.id}
+              calendar={editingCalendar}
+              open={Boolean(editingCalendar)}
+              onOpenChange={(open) => {
+                if (!open) setEditingCalendar(null);
+              }}
+              hasSharedPdf={Boolean(
+                editingCalendar && data.shares.calendars[editingCalendar.id]?.pdf,
+              )}
+            />
           </div>
         ) : data.requestedByCustomer ? (
           <div className="space-y-1 py-8 text-center">

@@ -831,4 +831,94 @@ export const portalContractService = {
     }
     return pdf;
   },
+
+  /**
+   * Customer edits a calendar that was already shared to their portal.
+   * Updates live rows; previously sent PDF remains a snapshot until re-shared.
+   */
+  async updateSharedCalendar(projectId, calendarId, body, auth, req) {
+    const project = await prisma.project.findFirst({
+      where: {
+        id: String(projectId),
+        crmCustomerId: auth.customerId,
+        kind: 'CONTRACT',
+        deletedAt: null,
+      },
+      select: { id: true, title: true, code: true, managerId: true },
+    });
+    if (!project) throw new AppError('قرارداد یافت نشد', 404, 'NOT_FOUND');
+
+    const share = await prisma.contractShare.findFirst({
+      where: {
+        projectId: project.id,
+        section: 'CALENDAR',
+        refId: String(calendarId),
+      },
+      select: { id: true, sharedAt: true },
+    });
+    if (!share) {
+      throw new AppError('این تقویم هنوز برای شما ارسال نشده است', 403, 'FORBIDDEN');
+    }
+
+    const existing = await prisma.contentCalendar.findFirst({
+      where: { id: String(calendarId), projectId: project.id },
+    });
+    if (!existing) throw new AppError('تقویم محتوایی یافت نشد', 404, 'NOT_FOUND');
+
+    const input = parseOrThrow(calendarSchema, body, 'اطلاعات تقویم نامعتبر است');
+    const calendar = await prisma.$transaction(async (tx) => {
+      await tx.contentCalendarItem.deleteMany({ where: { calendarId: existing.id } });
+      await tx.contentCalendarItem.createMany({
+        data: calendarItemsData(existing.id, input.rows),
+      });
+      return tx.contentCalendar.update({
+        where: { id: existing.id },
+        data: { title: input.title },
+        include: { items: true },
+      });
+    });
+
+    await addTimeline(
+      project.id,
+      `مشتری تقویم محتوایی «${calendar.title}» را از پورتال ویرایش کرد`,
+      auth.portalAccountId || null,
+      {
+        calendarId: calendar.id,
+        source: 'PORTAL',
+        rows: input.rows.length,
+      },
+    );
+
+    if (project.managerId) {
+      await createNotificationOnce({
+        userId: project.managerId,
+        audience: 'INTERNAL',
+        title: 'ویرایش تقویم محتوایی توسط مشتری',
+        body: `مشتری تقویم «${calendar.title}» قرارداد «${project.title}» را ویرایش کرد.`,
+        link: `/projects/${project.id}`,
+        meta: {
+          type: 'PORTAL_CALENDAR_EDIT',
+          projectId: project.id,
+          calendarId: calendar.id,
+        },
+        eventKey: `portal.calendar.edit:${calendar.id}:${calendar.updatedAt.toISOString()}`,
+      });
+    }
+
+    await writeAudit({
+      action: 'PORTAL_CONTENT_CALENDAR_UPDATE',
+      entityType: 'ContentCalendar',
+      entityId: calendar.id,
+      before: { title: existing.title },
+      after: {
+        title: calendar.title,
+        rows: input.rows.length,
+        portalAccountId: auth.portalAccountId || null,
+        projectId: project.id,
+      },
+      req,
+    });
+
+    return serializeCalendar(calendar);
+  },
 };

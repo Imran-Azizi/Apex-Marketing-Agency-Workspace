@@ -127,6 +127,23 @@ router.get('/contracts/:id/calendars/:calendarId/pdf', async (req, res, next) =>
   }
 });
 
+router.put('/contracts/:id/calendars/:calendarId', requireCsrf, async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await portalContractService.updateSharedCalendar(
+        req.params.id,
+        req.params.calendarId,
+        req.body,
+        req.auth,
+        req,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get('/profile', async (req, res, next) => {
   try { ok(res, await portalService.profile(req.auth)); } catch (e) { next(e); }
 });
