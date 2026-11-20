@@ -116,6 +116,27 @@ router.patch(
 );
 
 router.patch(
+  "/:id/agreed-price",
+  requireCsrf,
+  requirePermission("projects.edit"),
+  async (req, res, next) => {
+    try {
+      ok(
+        res,
+        await projectService.updateAgreedPrice(
+          req.params.id,
+          req.body,
+          req.auth,
+          req,
+        ),
+      );
+    } catch (e) {
+      next(e);
+    }
+  },
+);
+
+router.patch(
   "/:id/brief",
   requireCsrf,
   requirePermission("projects.edit"),

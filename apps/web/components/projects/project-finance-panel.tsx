@@ -7,6 +7,7 @@ import {
   NewPaymentButton,
   type OpportunityFinance,
 } from "@/app/(dashboard)/crm/_components/new-payment-dialog";
+import { EditableAgreedPrice } from "@/components/projects/editable-agreed-price";
 
 export type ProjectFinanceSummary = {
   agreedPrice?: string | number | null;
@@ -167,15 +168,20 @@ function CostRow({
 export function ProjectFinancePanel({
   finance,
   opportunityId,
+  projectId,
   contractLocked = false,
   paymentFinance,
   paymentCount = 0,
+  canEditPrice = false,
 }: {
   finance: ProjectFinanceSummary | null | undefined;
   opportunityId?: string | null;
+  projectId?: string | null;
   contractLocked?: boolean;
   paymentFinance?: OpportunityFinance | null;
   paymentCount?: number;
+  /** MANAGER/ADMIN — inline edit agreed project price */
+  canEditPrice?: boolean;
 }) {
   if (!finance) {
     return (
@@ -233,12 +239,24 @@ export function ProjectFinancePanel({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <HighlightCard
-          label="قیمت توافقی"
-          value={agreedPrice}
-          icon={Banknote}
-          tone="brand"
-        />
+        {canEditPrice && projectId && opportunityId ? (
+          <EditableAgreedPrice
+            projectId={projectId}
+            amount={agreedPrice}
+            canEdit
+            label="قیمت توافقی"
+            tone="brand"
+            className="rounded-2xl border-brand/25 from-brand/[0.08] to-card bg-gradient-to-b p-4 shadow-sm sm:p-5"
+            valueClassName="text-xl font-bold tracking-tight text-brand sm:text-2xl"
+          />
+        ) : (
+          <HighlightCard
+            label="قیمت توافقی"
+            value={agreedPrice}
+            icon={Banknote}
+            tone="brand"
+          />
+        )}
         <HighlightCard
           label="دریافت‌شده"
           value={received}

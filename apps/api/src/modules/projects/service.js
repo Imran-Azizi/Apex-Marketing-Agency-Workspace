@@ -211,6 +211,19 @@ const updateContractSchema = z
   })
   .refine(contractPeriodIsValid, { message: CONTRACT_PERIOD_MESSAGE, path: ['endDate'] });
 
+/** MANAGER/ADMIN — correct agreed project price (works while contract is locked). */
+const updateAgreedPriceSchema = z.object({
+  agreedPrice: z.coerce
+    .number({ invalid_type_error: 'قیمت پروژه معتبر نیست' })
+    .positive('قیمت پروژه باید بیشتر از صفر باشد')
+    .max(1_000_000_000_000),
+});
+
+function isManagerOrAdmin(auth) {
+  const role = String(auth?.roleCode || '').toUpperCase();
+  return role === 'MANAGER' || role === 'ADMIN';
+}
+
 /** Partial update for project customer snapshot + creative brief (SINGLE/CHILD). */
 const updateProjectBriefSchema = z.object({
   // Customer contact snapshot (stored in project.brief)
@@ -2220,9 +2233,9 @@ export const projectService = {
     if ((priceChanged || termsChanged) && shouldHideProjectFinance(auth)) {
       throw new AppError('اجازه تغییر قیمت و شرایط قرارداد را ندارید', 403, 'FORBIDDEN');
     }
-    if (opportunity?.contractLocked && (priceChanged || termsChanged)) {
+    if (opportunity?.contractLocked && (priceChanged || termsChanged) && !isManagerOrAdmin(auth)) {
       throw new AppError(
-        'قیمت و شرایط این قرارداد قفل است. برای تغییر، از پرونده مشتری در CRM و فروش اقدام کنید.',
+        'قیمت و شرایط این قرارداد قفل است. فقط مدیر می‌تواند آن را اصلاح کند.',
         400,
         'CONTRACT_LOCKED',
       );
@@ -2298,6 +2311,90 @@ export const projectService = {
         ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
         ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
       },
+      req,
+    });
+
+    return this.get(project.id, auth);
+  },
+
+  /**
+   * MANAGER/ADMIN — update agreed project price and resync remaining/profit.
+   * Works for SINGLE and CONTRACT parents (not child videos).
+   */
+  async updateAgreedPrice(id, body, auth, req) {
+    if (!isManagerOrAdmin(auth)) {
+      throw new AppError('فقط مدیر مجاز به ویرایش قیمت پروژه است', 403, 'FORBIDDEN');
+    }
+    const project = await assertProjectAccess(id, auth);
+    if (project.kind === 'CHILD') {
+      throw new AppError(
+        'قیمت روی قرارداد اصلی تنظیم می‌شود، نه روی ویدیوی فرزند',
+        400,
+        'VALIDATION',
+      );
+    }
+    if (shouldHideProjectFinance(auth)) {
+      throw new AppError('اجازه تغییر قیمت پروژه را ندارید', 403, 'FORBIDDEN');
+    }
+
+    const parsed = updateAgreedPriceSchema.safeParse(body || {});
+    if (!parsed.success) {
+      throw new AppError(
+        parsed.error.issues?.[0]?.message || 'قیمت پروژه نامعتبر است',
+        400,
+        'VALIDATION',
+      );
+    }
+    const price = roundMoney(parsed.data.agreedPrice);
+
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { projectId: project.id, deletedAt: null },
+      select: {
+        id: true,
+        agreedPrice: true,
+        agreedTerms: true,
+        contractLocked: true,
+      },
+    });
+    if (!opportunity) {
+      throw new AppError(
+        'قرارداد مالی این پروژه یافت نشد؛ ابتدا پروژه را با قیمت ایجاد کنید',
+        400,
+        'VALIDATION',
+      );
+    }
+
+    const beforePrice = roundMoney(opportunity.agreedPrice);
+    if (beforePrice === price) {
+      return this.get(project.id, auth);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.opportunity.update({
+        where: { id: opportunity.id },
+        data: {
+          agreedPrice: price,
+          proposedPrice: price,
+        },
+      });
+      await syncOpportunityFinance(tx, opportunity.id, { persist: true });
+      await tx.projectTimelineEvent.create({
+        data: {
+          projectId: project.id,
+          type: 'UPDATED',
+          title: 'قیمت توافقی پروژه به‌روزرسانی شد',
+          actorId: auth.userId,
+        },
+      });
+    });
+
+    await writeAudit({
+      userId: auth.userId,
+      action: 'PROJECT_AGREED_PRICE_UPDATE',
+      entityType: 'Project',
+      entityId: project.id,
+      before: { agreedPrice: beforePrice, contractLocked: opportunity.contractLocked },
+      after: { agreedPrice: price, contractLocked: opportunity.contractLocked },
       req,
     });
 

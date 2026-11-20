@@ -9,6 +9,7 @@ import { useMeQuery } from "@/lib/permissions";
 import {
   canManagePortalInvite,
   canViewPortalCredentials,
+  isFullAccessRole,
 } from "@/lib/rbac";
 import {
   openWhatsAppChat,
@@ -418,6 +419,7 @@ export default function CrmDetailPage({
               paymentCount={cyclePayments.length}
               onSaved={invalidate}
               onPaymentCreated={handlePaymentCreated}
+              canEditLocked={isFullAccessRole(me?.role)}
             />
           ) : (
             <EmptyOpportunityState />

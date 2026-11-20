@@ -7,6 +7,7 @@ import {
   CircleDollarSign,
   FileText,
   Lock,
+  Pencil,
   Save,
   ScrollText,
   ShieldCheck,
@@ -195,6 +196,8 @@ interface CustomerDetailsFormProps {
   paymentCount?: number;
   onSaved: () => void | Promise<void>;
   onPaymentCreated?: (payment: RecordedPayment) => void | Promise<void>;
+  /** MANAGER/ADMIN — allow correcting locked price & terms */
+  canEditLocked?: boolean;
 }
 
 export function CustomerDetailsForm({
@@ -202,6 +205,7 @@ export function CustomerDetailsForm({
   paymentCount = 0,
   onSaved,
   onPaymentCreated,
+  canEditLocked = false,
 }: CustomerDetailsFormProps) {
   const locked = !!opportunity.contractLocked;
   const persistedPrice = Math.max(
@@ -214,23 +218,27 @@ export function CustomerDetailsForm({
   const baseline = useMemo(() => toFormState(opportunity), [opportunity]);
   const [form, setForm] = useState<FormState>(baseline);
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [managerEditing, setManagerEditing] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{
     agreedPrice?: string;
     agreedTerms?: string;
   }>({});
 
+  const priceEditable = !locked || (canEditLocked && managerEditing);
+
   useEffect(() => {
     setForm(toFormState(opportunity));
     setFieldErrors({});
+    setManagerEditing(false);
   }, [opportunity]);
 
   const finance = useMemo(
-    () => resolveFinance(opportunity, form.agreedPrice, locked),
-    [opportunity, form.agreedPrice, locked],
+    () => resolveFinance(opportunity, form.agreedPrice, locked && !managerEditing),
+    [opportunity, form.agreedPrice, locked, managerEditing],
   );
 
   const canSave =
-    !locked &&
+    priceEditable &&
     form.agreedPrice.trim() !== "" &&
     parseMoney(form.agreedPrice) > 0 &&
     form.agreedTerms.trim() !== "";
@@ -240,9 +248,15 @@ export function CustomerDetailsForm({
       apiPatch(`/crm/opportunities/${opportunity.id}/details`, {
         agreedPrice: Number(form.agreedPrice),
         agreedTerms: form.agreedTerms.trim(),
+        ...(locked && canEditLocked ? { adminOverride: true } : {}),
       }),
     onSuccess: async () => {
-      toast.success("قرارداد ذخیره و قفل شد");
+      toast.success(
+        locked && canEditLocked
+          ? "قیمت و شرایط قرارداد به‌روزرسانی شد"
+          : "قرارداد ذخیره و قفل شد",
+      );
+      setManagerEditing(false);
       await onSaved();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "خطا"),
@@ -351,11 +365,15 @@ export function CustomerDetailsForm({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {locked ? (
+            {!priceEditable ? (
               <FinanceMetricCard
                 label="قیمت این پروژه"
                 value={formatCurrency(finance.projectTotal)}
-                hint="مبلغ کل همین قرارداد/پروژه — پس از ذخیره قابل تغییر نیست"
+                hint={
+                  canEditLocked
+                    ? "مبلغ کل همین قرارداد/پروژه — مدیر می‌تواند اصلاح کند"
+                    : "مبلغ کل همین قرارداد/پروژه — پس از ذخیره قابل تغییر نیست"
+                }
                 icon={BadgeCheck}
                 tone="default"
               />
@@ -410,10 +428,10 @@ export function CustomerDetailsForm({
             className="flex items-center gap-1.5 text-sm font-bold text-foreground"
           >
             <FileText className="h-4 w-4 text-brand" />
-            شرایط توافق‌شده{!locked && " *"}
+            شرایط توافق‌شده{priceEditable && " *"}
           </Label>
 
-          {locked ? (
+          {!priceEditable ? (
             <div className="overflow-hidden rounded-2xl border border-border/90 bg-muted/40">
               <div className="flex items-start gap-2.5 border-b border-border/80 bg-brand-muted/50 px-4 py-3 text-start">
                 <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-card text-brand shadow-sm ring-1 ring-brand/15">
@@ -458,34 +476,66 @@ export function CustomerDetailsForm({
           )}
         </section>
 
-        {/* Centered save — only while unlocked */}
-        {!locked && (
+        {/* Centered save — unlocked draft, or manager correction of a locked contract */}
+        {priceEditable && (
           <div className="flex flex-col items-center gap-2 pt-1 pb-1">
-            <Button
-              type="button"
-              variant="brand"
-              onClick={handleSave}
-              disabled={!canSave}
-              isLoading={saveMut.isPending}
-              loadingText="در حال ذخیره..."
-              className={cn(
-                "min-w-[180px] rounded-xl px-8 py-5 text-[15px] font-bold shadow-lg shadow-brand/25",
-                "transition-all hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0",
-              )}
-            >
-              <Save className="h-4 w-4" />
-              ذخیره
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {managerEditing ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setForm(toFormState(opportunity));
+                    setFieldErrors({});
+                    setManagerEditing(false);
+                  }}
+                  disabled={saveMut.isPending}
+                  className="rounded-xl"
+                >
+                  انصراف
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="brand"
+                onClick={handleSave}
+                disabled={!canSave}
+                isLoading={saveMut.isPending}
+                loadingText="در حال ذخیره..."
+                className={cn(
+                  "min-w-[180px] rounded-xl px-8 py-5 text-[15px] font-bold shadow-lg shadow-brand/25",
+                  "transition-all hover:-translate-y-0.5 hover:shadow-xl active:translate-y-0",
+                )}
+              >
+                <Save className="h-4 w-4" />
+                ذخیره
+              </Button>
+            </div>
             <p className="text-[11px] text-muted-foreground">
-              پس از ذخیره، قیمت و شرایط قرارداد قفل می‌شوند
+              {managerEditing
+                ? "اصلاح مدیر — پس از ذخیره قرارداد دوباره قفل می‌ماند"
+                : "پس از ذخیره، قیمت و شرایط قرارداد قفل می‌شوند"}
             </p>
           </div>
         )}
 
-        {locked && (
-          <div className="flex items-center justify-center gap-2 rounded-xl border border-brand/20 bg-brand-muted/40 px-4 py-3 text-[12px] text-brand">
-            <Lock className="size-3.5 shrink-0" />
-            قرارداد نهایی شده است — فقط ثبت پرداخت امکان‌پذیر است
+        {locked && !managerEditing && (
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex items-center justify-center gap-2 rounded-xl border border-brand/20 bg-brand-muted/40 px-4 py-3 text-[12px] text-brand">
+              <Lock className="size-3.5 shrink-0" />
+              قرارداد نهایی شده است — فقط ثبت پرداخت امکان‌پذیر است
+            </div>
+            {canEditLocked ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setManagerEditing(true)}
+              >
+                <Pencil className="h-4 w-4" />
+                اصلاح قیمت توسط مدیر
+              </Button>
+            ) : null}
           </div>
         )}
       </div>

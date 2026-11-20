@@ -28,6 +28,7 @@ import {
   type ContractVideoStats,
 } from "@/lib/contract-project";
 import { ContractScopeFields } from "@/components/projects/contract-scope-fields";
+import { EditableAgreedPrice } from "@/components/projects/editable-agreed-price";
 import {
   NewPaymentButton,
   type OpportunityFinance,
@@ -211,9 +212,11 @@ function MoneyStat({
 function ContractDetailsSection({
   project,
   createdVideos,
+  canEditPrice = false,
 }: {
   project: ContractProjectDetail;
   createdVideos: number;
+  canEditPrice?: boolean;
 }) {
   const scope = project.contractScope;
   if (!scope) return null;
@@ -245,7 +248,16 @@ function ContractDetailsSection({
       </div>
       {money ? (
         <div className="grid gap-3 sm:grid-cols-3">
-          <MoneyStat label="قیمت مجموعی پروژه" amount={money.price} />
+          {canEditPrice && project.opportunityId ? (
+            <EditableAgreedPrice
+              projectId={project.id}
+              amount={money.price}
+              canEdit
+              label="قیمت مجموعی پروژه"
+            />
+          ) : (
+            <MoneyStat label="قیمت مجموعی پروژه" amount={money.price} />
+          )}
           <MoneyStat label="دریافت‌شده" amount={money.received} />
           <MoneyStat label="باقی مانده" amount={money.remaining} highlight />
         </div>
@@ -450,11 +462,14 @@ export function ContractProjectDashboard({
   canCreate,
   canEdit,
   canDelete = false,
+  canEditPrice = false,
 }: {
   project: ContractProjectDetail;
   canCreate: boolean;
   canEdit: boolean;
   canDelete?: boolean;
+  /** MANAGER/ADMIN — edit agreed / total project price */
+  canEditPrice?: boolean;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -614,6 +629,7 @@ export function ContractProjectDashboard({
           <ContractDetailsSection
             project={project}
             createdVideos={project.videos?.length || 0}
+            canEditPrice={canEditPrice}
           />
 
           <section className="space-y-4 rounded-2xl border border-border/70 bg-card p-4 shadow-sm sm:p-5">
@@ -684,6 +700,7 @@ export function ContractProjectDashboard({
           open={editOpen}
           onOpenChange={setEditOpen}
           project={project}
+          canEditPrice={canEditPrice}
           defaults={{
             personName,
             jobTitle,
@@ -751,6 +768,7 @@ function EditContractDialog({
   project,
   defaults,
   onSaved,
+  canEditPrice = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -766,11 +784,14 @@ function EditContractDialog({
     website: string;
   };
   onSaved: () => Promise<void>;
+  canEditPrice?: boolean;
 }) {
   const contractScope = project.contractScope;
   const money = contractMoney(project);
   const showCommercials = Boolean(contractScope?.canViewCommercials);
-  const commercialsLocked = Boolean(contractScope?.contractLocked);
+  // Managers may correct price/terms even after CRM lock.
+  const commercialsLocked =
+    Boolean(contractScope?.contractLocked) && !canEditPrice;
   const commercialsEditable = showCommercials && !commercialsLocked;
   const scopeRequired = Boolean(
     contractScope &&

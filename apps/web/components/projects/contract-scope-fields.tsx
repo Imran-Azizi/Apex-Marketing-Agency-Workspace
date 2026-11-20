@@ -205,7 +205,7 @@ export function ContractScopeFields({
       {showCommercials && commercialsLocked ? (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground sm:col-span-2">
           <Lock className="h-3.5 w-3.5 shrink-0" />
-          قیمت و شرایط قفل است و از پرونده مشتری در CRM و فروش تغییر می‌کند.
+          قیمت و شرایط قفل است؛ فقط مدیر می‌تواند آن را اصلاح کند.
         </p>
       ) : null}
     </div>

@@ -49,7 +49,7 @@ import {
   type ContractProjectDetail,
 } from "@/components/projects/contract-project-dashboard";
 import { getMe, type MeResponse } from "@/lib/auth";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, isFullAccessRole } from "@/lib/rbac";
 import {
   ArrowRight,
   Banknote,
@@ -524,6 +524,7 @@ export default function ProjectDetailPage({
 
   const canCreateProject = hasPermission(permissions, "projects.create", role);
   const canEditProject = hasPermission(permissions, "projects.edit", role);
+  const canEditPrice = isFullAccessRole(role);
 
   if (data.kind === "CONTRACT") {
     return (
@@ -532,6 +533,7 @@ export default function ProjectDetailPage({
         canCreate={canCreateProject}
         canEdit={canEditProject}
         canDelete={hasPermission(permissions, "projects.delete", role)}
+        canEditPrice={canEditPrice}
       />
     );
   }
@@ -736,6 +738,7 @@ export default function ProjectDetailPage({
                 <ProjectFinancePanel
                   finance={data.finance}
                   opportunityId={data.opportunityId}
+                  projectId={data.id}
                   contractLocked={Boolean(data.contractLocked)}
                   paymentFinance={data.paymentFinance}
                   paymentCount={
@@ -744,6 +747,7 @@ export default function ProjectDetailPage({
                       ? 1
                       : 0
                   }
+                  canEditPrice={canEditPrice}
                 />
               )}
             </div>
