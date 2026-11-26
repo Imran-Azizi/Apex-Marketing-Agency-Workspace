@@ -54,6 +54,38 @@ router.get('/projects/:id', async (req, res, next) => {
   try { ok(res, await portalService.getProject(req.params.id, req.auth)); } catch (e) { next(e); }
 });
 
+router.post('/projects/:id/assets', requireCsrf, async (req, res, next) => {
+  try {
+    created(
+      res,
+      await portalService.addProjectClientAsset(
+        req.params.id,
+        req.body,
+        req.auth,
+        req,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.delete('/projects/:id/assets/:assetId', requireCsrf, async (req, res, next) => {
+  try {
+    ok(
+      res,
+      await portalService.removeProjectClientAsset(
+        req.params.id,
+        req.params.assetId,
+        req.auth,
+        req,
+      ),
+    );
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/brief', requireCsrf, validate(briefSchema), async (req, res, next) => {
   try { created(res, await portalService.submitBrief(null, req.body, req.auth, req)); } catch (e) { next(e); }
 });

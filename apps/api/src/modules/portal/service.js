@@ -68,6 +68,27 @@ async function getValidInvite(token) {
   return invite;
 }
 
+const PORTAL_PROJECT_ASSET_KINDS = new Set([
+  "LOGO",
+  "PRODUCT_IMAGE",
+  "VIDEO",
+  "BRANDBOOK",
+  "CATALOG",
+  "REFERENCE",
+  "PRONUNCIATION",
+  "AUDIO",
+  "OTHER",
+]);
+
+const portalProjectAssetSchema = z.object({
+  kind: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(300),
+  storageKey: z.string().trim().min(1).max(500),
+  mimeType: z.string().trim().max(200).optional().nullable(),
+  sizeBytes: z.number().int().nonnegative().optional().nullable(),
+  meta: z.record(z.string(), z.unknown()).optional().nullable(),
+});
+
 export const portalService = {
   async getInvite(token) {
     const invite = await getValidInvite(token);
@@ -1953,6 +1974,144 @@ export const portalService = {
       },
     });
     return serializePortalAsset(created);
+  },
+
+  /**
+   * Attach a new client asset directly to a video project (SINGLE / CHILD).
+   * Mirrors staff `projects/:id/assets` so the file appears in admin panels.
+   */
+  async addProjectClientAsset(projectId, body, auth, req) {
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, ...customerProjectWhere(auth) },
+      select: { id: true, kind: true, crmCustomerId: true },
+    });
+    if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
+    if (project.kind === "CONTRACT") {
+      throw new AppError(
+        "این یک قرارداد چندویدیویی است. این عملیات را روی پروژه ویدیو انجام دهید.",
+        400,
+        "CONTRACT_CONTAINER",
+      );
+    }
+
+    const parsed = portalProjectAssetSchema.parse(body);
+    const kind = parsed.kind.toUpperCase();
+    if (!PORTAL_PROJECT_ASSET_KINDS.has(kind)) {
+      throw new AppError("نوع فایل مجاز نیست", 400, "VALIDATION");
+    }
+    if (isClientAssetImageKind(kind)) {
+      assertClientAssetImageFile({
+        name: parsed.name,
+        mimeType: parsed.mimeType,
+        sizeBytes: parsed.sizeBytes,
+        kind,
+      });
+    }
+
+    const asset = await prisma.$transaction(async (tx) => {
+      const created = await tx.clientAsset.create({
+        data: {
+          crmCustomerId: project.crmCustomerId,
+          kind,
+          name: parsed.name,
+          storageKey: parsed.storageKey,
+          mimeType: parsed.mimeType || null,
+          sizeBytes: parsed.sizeBytes != null ? Number(parsed.sizeBytes) : null,
+          meta: parsed.meta || undefined,
+        },
+      });
+      await tx.assetReference.create({
+        data: { projectId: project.id, clientAssetId: created.id },
+      });
+      return created;
+    });
+
+    await rebuildProjectContext(project.id);
+    await writeAudit({
+      action: "PORTAL_PROJECT_ASSET_CREATE",
+      entityType: "ClientAsset",
+      entityId: asset.id,
+      after: {
+        projectId: project.id,
+        kind: asset.kind,
+        name: asset.name,
+        portalAccountId: auth.portalAccountId || null,
+        customerId: auth.customerId || null,
+      },
+      req,
+    });
+
+    return serializePortalAsset(asset);
+  },
+
+  async removeProjectClientAsset(projectId, assetId, auth, req) {
+    const project = await prisma.project.findFirst({
+      where: { id: projectId, ...customerProjectWhere(auth) },
+      select: { id: true, kind: true, crmCustomerId: true },
+    });
+    if (!project) throw new AppError("پروژه یافت نشد", 404, "NOT_FOUND");
+    if (project.kind === "CONTRACT") {
+      throw new AppError(
+        "این یک قرارداد چندویدیویی است. این عملیات را روی پروژه ویدیو انجام دهید.",
+        400,
+        "CONTRACT_CONTAINER",
+      );
+    }
+
+    const ref = await prisma.assetReference.findFirst({
+      where: { projectId: project.id, clientAssetId: assetId },
+      include: { clientAsset: true },
+    });
+    const asset = ref?.clientAsset;
+    if (
+      !ref ||
+      !asset ||
+      asset.deletedAt ||
+      asset.crmCustomerId !== project.crmCustomerId
+    ) {
+      throw new AppError("فایل یافت نشد", 404, "NOT_FOUND");
+    }
+
+    const otherRefs = await prisma.assetReference.count({
+      where: {
+        clientAssetId: asset.id,
+        NOT: { id: ref.id },
+      },
+    });
+
+    if (otherRefs === 0) {
+      await storage.deleteStoredObject(asset.storageKey, {
+        required: true,
+        logTag: "portal-project-client-asset",
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.assetReference.delete({ where: { id: ref.id } });
+      if (otherRefs === 0) {
+        await tx.clientAsset.update({
+          where: { id: asset.id },
+          data: { deletedAt: new Date() },
+        });
+      }
+    });
+
+    await rebuildProjectContext(project.id);
+    await writeAudit({
+      action: "PORTAL_PROJECT_ASSET_DELETE",
+      entityType: "ClientAsset",
+      entityId: asset.id,
+      before: {
+        projectId: project.id,
+        kind: asset.kind,
+        name: asset.name,
+        portalAccountId: auth.portalAccountId || null,
+        customerId: auth.customerId || null,
+      },
+      req,
+    });
+
+    return { deleted: true };
   },
 
   async listClientAssets(auth) {

@@ -5,13 +5,14 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiGet, apiPost } from "@/lib/api";
+import { ApiError, apiDelete, apiGet, apiPost } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortalStatusBadge } from "@/components/portal/portal-status-badge";
 import { PortalProjectBriefView } from "@/components/portal/portal-project-brief-view";
 import type { PortalProjectAsset } from "@/components/portal/portal-project-assets";
+import { ProjectAssetUploadDialog } from "@/components/projects/project-asset-upload-dialog";
 import {
   ProjectSectionShell,
   ProjectSectionSwitcher,
@@ -33,6 +34,7 @@ import {
   ImageIcon,
   PackageCheck,
   Sparkles,
+  UploadCloud,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ProjectProgressBar } from "@/components/projects/project-progress-bar";
@@ -166,6 +168,68 @@ function applyLegacyTab(
   if (q === "apex") {
     setters.setSection("apex");
   }
+}
+
+function PortalProjectAssetsPanel({
+  projectId,
+  assets,
+}: {
+  projectId: string;
+  assets: PortalProjectAsset[];
+}) {
+  const queryClient = useQueryClient();
+  const [uploadOpen, setUploadOpen] = useState(false);
+
+  const refreshAssets = () => {
+    void queryClient.invalidateQueries({ queryKey: ["portal-project", projectId] });
+    void queryClient.invalidateQueries({ queryKey: ["portal-projects"] });
+  };
+
+  const deleteAsset = async (asset: PortalProjectAsset) => {
+    try {
+      await apiDelete(`/portal/projects/${projectId}/assets/${asset.id}`);
+      refreshAssets();
+      toast.success("دارایی حذف شد");
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError ? error.message : "حذف دارایی ناموفق بود",
+      );
+      throw error;
+    }
+  };
+
+  return (
+    <>
+      <PortalProjectAssets
+        assets={assets}
+        title="دارایی‌های شما"
+        description="لوگو، تصاویر، ویدیو و اسنادی که برای این پروژه ارسال می‌کنید"
+        emptyTitle="هنوز دارایی‌ای آپلود نشده است"
+        emptyDescription="با «آپلود دارایی» فایل‌های برند، محصول یا مرجع را اضافه کنید. پس از آپلود، تیم APEX هم آن‌ها را در همین پروژه می‌بیند."
+        headerActions={
+          <Button
+            type="button"
+            variant="brand"
+            className="h-10 w-full gap-2 sm:w-auto"
+            onClick={() => setUploadOpen(true)}
+          >
+            <UploadCloud className="h-4 w-4" />
+            آپلود دارایی
+          </Button>
+        }
+        onDeleteAsset={deleteAsset}
+      />
+      <ProjectAssetUploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        projectId={projectId}
+        createPath={`/portal/projects/${projectId}/assets`}
+        deletePath={(assetId) => `/portal/projects/${projectId}/assets/${assetId}`}
+        description="فایل را برای همین پروژه بارگذاری کنید. پس از آپلود، دارایی در پنل مدیر و تیم پروژه هم نمایش داده می‌شود."
+        onUploaded={refreshAssets}
+      />
+    </>
+  );
 }
 
 export default function PortalProjectPage({
@@ -427,7 +491,7 @@ export default function PortalProjectPage({
           <ProjectSectionShell
             tone="customer"
             title="اطلاعات ارسالی شما"
-            badge="فقط مشاهده"
+            badge={customerSub === "assets" ? "قابل آپلود" : "فقط مشاهده"}
           >
             <SectionTabs
               value={customerSub}
@@ -458,7 +522,10 @@ export default function PortalProjectPage({
               </SectionTabsPanel>
 
               <SectionTabsPanel value="assets">
-                <PortalProjectAssets assets={data.assets || []} />
+                <PortalProjectAssetsPanel
+                  projectId={id}
+                  assets={data.assets || []}
+                />
               </SectionTabsPanel>
             </SectionTabs>
           </ProjectSectionShell>

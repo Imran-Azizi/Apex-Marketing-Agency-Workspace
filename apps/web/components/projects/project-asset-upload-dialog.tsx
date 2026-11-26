@@ -14,12 +14,23 @@ export function ProjectAssetUploadDialog({
   onOpenChange,
   projectId,
   onUploaded,
+  createPath,
+  deletePath,
+  description = "فایل را برای همین پروژه بارگذاری کنید. لوگو، تصویر، ویدیو، سند، صوت و لینک مرجع پشتیبانی می‌شود.",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectId: string;
   onUploaded: () => void;
+  /** Defaults to staff project attach API; portal passes `/portal/projects/:id/assets`. */
+  createPath?: string;
+  deletePath?: (id: string) => string;
+  description?: string;
 }) {
+  const resolvedCreatePath = createPath || `/projects/${projectId}/assets`;
+  const resolvedDeletePath =
+    deletePath || ((id: string) => `/projects/${projectId}/assets/${id}`);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -28,17 +39,15 @@ export function ProjectAssetUploadDialog({
       >
         <DialogHeader className="text-start sm:text-start">
           <DialogTitle>آپلود دارایی</DialogTitle>
-          <DialogDescription>
-            فایل را برای همین پروژه بارگذاری کنید. لوگو، تصویر، ویدیو، سند، صوت و لینک مرجع پشتیبانی می‌شود.
-          </DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <ClientAssetsUploader
           assets={[]}
           selectedIds={[]}
           onSelectedChange={() => {}}
           onRefresh={onUploaded}
-          createPath={`/projects/${projectId}/assets`}
-          deletePath={(id) => `/projects/${projectId}/assets/${id}`}
+          createPath={resolvedCreatePath}
+          deletePath={resolvedDeletePath}
           showExistingAssets={false}
           notice="attach"
         />
